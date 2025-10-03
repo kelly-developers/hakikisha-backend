@@ -1,0 +1,137 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Medical Dashboard Design System - Professional Healthcare UI */
+@layer base {
+  * {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  
+  h1, h2, h3, h4, h5, h6, .font-heading {
+    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  :root {
+    /* Medical color scheme - Professional blues and clinical whites */
+    --background: 210 20% 98%;
+    --foreground: 213 27% 14%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 213 27% 14%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 213 27% 14%;
+
+    /* Medical green primary */
+    --primary: 145 65% 42%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 145 65% 37%;
+
+    /* Clinical secondary colors */
+    --secondary: 210 30% 96%;
+    --secondary-foreground: 213 27% 14%;
+
+    --muted: 210 25% 95%;
+    --muted-foreground: 213 15% 45%;
+
+    --accent: 152 70% 90%;
+    --accent-foreground: 152 65% 20%;
+
+    /* Medical status colors */
+    --success: 145 63% 42%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* UI Elements */
+    --border: 210 25% 88%;
+    --input: 210 25% 93%;
+    --ring: 145 65% 42%;
+    --radius: 0.75rem;
+
+    /* Sidebar - Hospital Blue theme */
+    --sidebar-background: 210 50% 45%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 210 55% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 45% 35%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 210 40% 50%;
+    --sidebar-ring: 210 55% 55%;
+
+    /* Medical gradients */
+    --gradient-medical: linear-gradient(135deg, hsl(145 65% 42%), hsl(145 65% 52%));
+    --gradient-success: linear-gradient(135deg, hsl(145 63% 42%), hsl(145 63% 52%));
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%), hsl(210 20% 99%));
+    
+    /* Shadows for depth */
+    --shadow-medical: 0 4px 12px -2px hsl(145 65% 42% / 0.1);
+    --shadow-card: 0 2px 8px -2px hsl(213 27% 14% / 0.08);
+    --shadow-elevated: 0 8px 24px -4px hsl(213 27% 14% / 0.12);
+
+    /* Animation */
+    --transition-medical: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .dark {
+    --background: 213 27% 8%;
+    --foreground: 210 20% 95%;
+
+    --card: 213 24% 12%;
+    --card-foreground: 210 20% 95%;
+
+    --popover: 213 24% 12%;
+    --popover-foreground: 210 20% 95%;
+
+    --primary: 145 65% 50%;
+    --primary-foreground: 213 27% 8%;
+    --primary-hover: 145 65% 55%;
+
+    --secondary: 213 20% 16%;
+    --secondary-foreground: 210 20% 95%;
+
+    --muted: 213 20% 14%;
+    --muted-foreground: 210 15% 65%;
+
+    --accent: 152 65% 15%;
+    --accent-foreground: 152 70% 85%;
+
+    --success: 145 63% 45%;
+    --warning: 38 92% 55%;
+    --destructive: 0 84% 65%;
+
+    --border: 213 20% 18%;
+    --input: 213 20% 16%;
+    --ring: 145 65% 50%;
+
+    --sidebar-background: 210 50% 35%;
+    --sidebar-foreground: 0 0% 95%;
+    --sidebar-primary: 210 55% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 45% 25%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 210 40% 40%;
+    --sidebar-ring: 210 55% 50%;
+
+    --gradient-medical: linear-gradient(135deg, hsl(145 65% 45%), hsl(145 65% 55%));
+    --gradient-success: linear-gradient(135deg, hsl(145 63% 40%), hsl(145 63% 50%));
+    --gradient-card: linear-gradient(180deg, hsl(213 24% 12%), hsl(213 24% 10%));
+    
+    --shadow-medical: 0 4px 12px -2px hsl(145 65% 50% / 0.2);
+    --shadow-card: 0 2px 8px -2px hsl(0 0% 0% / 0.2);
+    --shadow-elevated: 0 8px 24px -4px hsl(0 0% 0% / 0.3);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
