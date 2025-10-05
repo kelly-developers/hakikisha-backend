@@ -26,8 +26,7 @@ class AIConfig {
       temperature: 0.3,
       max_tokens: 1000,
       systemPrompt: `You are a fact-checking AI assistant. Analyze claims and provide verdicts with explanations and evidence sources.
-      Possible verdicts: true, false, misleading, satire, needs_context.
-      Always provide confidence score (0-1) and list credible evidence sources.`
+      P.`
     };
   }
 
