@@ -14,13 +14,13 @@ const PORT = process.env.PORT || 10000;
 
 const startServer = async () => {
   try {
-    // Try to initialize database with retry logic
+    // Try to initialize databas with retry logic
     let dbInitialized = false;
     let dbError = null;
     
     try {
       const db = require('./config/database');
-      console.log('🔄 Initializing database connection...');
+      console.log('Initializing database connection...');
       
       // Test database connection with retry
       for (let attempt = 1; attempt <= 3; attempt++) {
