@@ -12,8 +12,7 @@
     "seed": "node src/scripts/seedData.js",
     "lint": "eslint src/",
     "docker:build": "docker build -t hakikisha-backend .",
-    "docker:run": "docker-compose up -d",
-    "build:dev": "vite build --mode development"
+    "docker:run": "docker-compose up -d"
   },
   "dependencies": {
     "@types/bcryptjs": "^3.0.0",
@@ -59,5 +58,4 @@
   "engines": {
     "node": ">=18.0.0"
   }
-
 }
