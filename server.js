@@ -1,4 +1,4 @@
-// server.js
+
 require('dotenv').config();
 
 console.log('🚀 Starting Hakikisha Server...');
@@ -7,39 +7,51 @@ console.log('DB_HOST:', process.env.DB_HOST);
 console.log('DB_USER:', process.env.DB_USER);
 console.log('DB_NAME:', process.env.DB_NAME);
 
-const app = require('./app');
-
+const express = require('express');
+const app = require('./app'); // your main routes
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   try {
-    // Try to initialize database
+    // Initialize database if available
     let dbInitialized = false;
-    
     try {
       const db = require('./src/config/database');
-      console.log('🔄 Initializing database connection...');
-      dbInitialized = await db.initializeDatabase();
+      if (db.initializeDatabase) {
+        console.log('🔄 Initializing database connection...');
+        dbInitialized = await db.initializeDatabase();
+      } else {
+        console.warn('⚠️ No initializeDatabase() found, skipping DB init');
+      }
     } catch (dbError) {
       console.error('❌ Database configuration error:', dbError.message);
-      console.log('💡 Make sure config/database.js exists');
-      process.exit(1);
+      console.log('💡 Make sure src/config/database.js exports initializeDatabase()');
+      // do NOT exit — still allow server to start for testing
     }
 
-    if (dbInitialized) {
-      app.listen(PORT, '0.0.0.0', () => {
-        console.log(`🎉 Hakikisha Server running on port ${PORT}`);
-        console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
-        console.log(`📊 Database: Render PostgreSQL ✅`);
-        console.log(`🏥 Health check: http://localhost:${PORT}/health`);
-        console.log(`🔍 DB Debug: http://localhost:${PORT}/api/debug/db`);
-        console.log(`🔧 Env Debug: http://localhost:${PORT}/api/debug/env`);
-      });
-    } else {
-      console.error('💥 Failed to initialize database. Server cannot start.');
-      process.exit(1);
-    }
-    
+    // Add a default root route so Render doesn’t give 404
+    const expressApp = require('express')();
+    expressApp.use('/', (req, res, next) => {
+      if (req.path === '/' || req.path === '/health') {
+        return res.json({
+          status: 'ok',
+          service: 'hakikisha-backend',
+          db: dbInitialized ? 'connected' : 'not connected'
+        });
+      }
+      next();
+    });
+    expressApp.use(app); // plug in your main app
+
+    expressApp.listen(PORT, '0.0.0.0', () => {
+      console.log(`🎉 Hakikisha Server running on port ${PORT}`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`📊 Database: ${dbInitialized ? 'Connected ✅' : 'Not Connected ❌'}`);
+      console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+      console.log(`🔍 DB Debug: http://localhost:${PORT}/api/debug/db`);
+      console.log(`🔧 Env Debug: http://localhost:${PORT}/api/debug/env`);
+    });
+
   } catch (error) {
     console.error('❌ Server startup error:', error);
     process.exit(1);
