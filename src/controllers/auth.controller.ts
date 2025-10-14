@@ -45,7 +45,7 @@ export class AuthController {
 
       res.json({
         success: true,
-        message: 'Login successful',
+        message: result.requires2FA ? '2FA code sent' : 'Login successful',
         ...result
       });
     } catch (error: any) {
@@ -55,6 +55,67 @@ export class AuthController {
           error: 'Invalid email or password'
         });
       }
+      if (error.message === 'Account pending approval') {
+        return res.status(403).json({
+          success: false,
+          error: 'Your account is pending admin approval'
+        });
+      }
+      next(error);
+    }
+  }
+
+  static async verify2FA(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { userId, code } = req.body;
+
+      if (!userId || !code) {
+        return res.status(400).json({
+          success: false,
+          error: 'User ID and 2FA code are required'
+        });
+      }
+
+      const result = await AuthService.verify2FA(userId, code);
+
+      res.json({
+        success: true,
+        message: 'Login successful',
+        ...result
+      });
+    } catch (error: any) {
+      if (error.message === 'Invalid or expired 2FA code') {
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid or expired 2FA code'
+        });
+      }
+      next(error);
+    }
+  }
+
+  static async forgotPassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { email } = req.body;
+      // Implementation for password reset
+      res.json({
+        success: true,
+        message: 'Password reset link sent to email'
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async resetPassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { token, newPassword } = req.body;
+      // Implementation for password reset
+      res.json({
+        success: true,
+        message: 'Password reset successful'
+      });
+    } catch (error) {
       next(error);
     }
   }

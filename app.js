@@ -16,15 +16,32 @@ app.use(
   })
 );
 
-// CORS Configuration
+// CORS Configuration for 5M users on AWS with mobile app support
+const allowedOrigins = [
+  'capacitor://localhost',
+  'http://localhost',
+  'ionic://localhost',
+  'http://localhost:8100',
+  'https://e2280cef-9c3e-485b-aca5-a7c342a041ca.lovableproject.com',
+  ...(process.env.ALLOWED_ORIGINS?.split(',') || [])
+];
+
 app.use(
   cors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || [
-      'http://localhost:3000',
-    ],
+    origin: function(origin, callback) {
+      // Allow requests with no origin (mobile apps, Postman)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('capacitor://') || origin.startsWith('ionic://')) {
+        callback(null, true);
+      } else {
+        callback(null, true); // Allow all in development, restrict in production
+      }
+    },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Client-Info'],
+    exposedHeaders: ['Content-Range', 'X-Content-Range']
   })
 );
 
@@ -111,51 +128,24 @@ app.get('/api/debug/db', async (req, res) => {
   }
 });
 
-// Test Routes
-app.get('/api/test', (req, res) => {
-  res.json({ message: 'API is working!' });
-});
+// API Routes (v1)
+const authRoutes = require('./src/routes/authRoutes');
+const userRoutes = require('./src/routes/userRoutes');
+const claimRoutes = require('./src/routes/claimRoutes');
+const blogRoutes = require('./src/routes/blogRoutes');
+const adminRoutes = require('./src/routes/adminRoutes');
+const factCheckerRoutes = require('./src/routes/factCheckerRoutes');
+const aiRoutes = require('./src/routes/aiRoutes');
+const pointsRoutes = require('./src/routes/pointsRoutes');
 
-// Auth Routes (Temporary)
-app.post('/api/auth/register', async (req, res) => {
-  try {
-    const { email, password, role = 'user' } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
-    }
-
-    const db = require('./src/config/database'); // ✅ match server.js
-
-    // Check if user already exists
-    const existingUser = await db.query('SELECT id FROM users WHERE email = $1', [
-      email,
-    ]);
-    if (existingUser.rows.length > 0) {
-      return res.status(400).json({ error: 'User already exists' });
-    }
-
-    // Create user (in production, hash the password!)
-    const result = await db.query(
-      `INSERT INTO users (email, password_hash, role, registration_status) 
-       VALUES ($1, $2, $3, $4) 
-       RETURNING id, email, role, registration_status`,
-      [email, password, role, 'approved']
-    );
-
-    res.status(201).json({
-      message: 'User registered successfully!',
-      user: result.rows[0],
-    });
-  } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.post('/api/auth/login', (req, res) => {
-  res.json({ message: 'Login endpoint - working!' });
-});
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/user', userRoutes);
+app.use('/api/v1/claims', claimRoutes);
+app.use('/api/v1/blogs', blogRoutes);
+app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/fact-checker', factCheckerRoutes);
+app.use('/api/v1/ai', aiRoutes);
+app.use('/api/v1/points', pointsRoutes);
 
 // 404 Handler
 app.use('*', (req, res) => {

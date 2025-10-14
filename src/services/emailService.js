@@ -128,6 +128,34 @@ class EmailService {
     }
   }
 
+  async send2FACode(email, code) {
+    const mailOptions = {
+      from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+      to: email,
+      subject: 'Your Hakikisha 2FA Code',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2563eb;">Two-Factor Authentication</h2>
+          <p>Your verification code is:</p>
+          <div style="background-color: #f3f4f6; padding: 24px; border-radius: 8px; margin: 16px 0; text-align: center;">
+            <h1 style="margin: 0; color: #2563eb; font-size: 32px; letter-spacing: 8px;">${code}</h1>
+          </div>
+          <p>This code will expire in 10 minutes.</p>
+          <p>If you didn't request this code, please ignore this email.</p>
+        </div>
+      `
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+      logger.info(`2FA code sent to: ${email}`);
+      return true;
+    } catch (error) {
+      logger.error('Error sending 2FA code:', error);
+      throw error;
+    }
+  }
+
   getVerdictColor(verdict) {
     const colors = {
       'true': '#10b981',

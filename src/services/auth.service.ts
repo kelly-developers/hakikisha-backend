@@ -51,13 +51,37 @@ export class AuthService {
       throw new Error('Invalid credentials');
     }
 
-    // Update login stats
+    // Check registration status
+    if (user.registration_status !== 'approved') {
+      throw new Error('Account pending approval');
+    }
+
+    // Send 2FA for admin and fact_checker
+    if (user.role === 'admin' || user.role === 'fact_checker') {
+      const twoFactorCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+      await db.query(
+        'INSERT INTO two_factor_codes (user_id, code, expires_at) VALUES ($1, $2, $3)',
+        [user.id, twoFactorCode, expiresAt]
+      );
+
+      const emailService = require('./emailService');
+      await emailService.send2FACode(user.email, twoFactorCode);
+
+      return {
+        requires2FA: true,
+        userId: user.id,
+        message: '2FA code sent to your email'
+      };
+    }
+
+    // Regular user login (no 2FA)
     await db.query(
       'UPDATE users SET last_login = NOW(), login_count = COALESCE(login_count, 0) + 1 WHERE id = $1',
       [user.id]
     );
 
-    // Generate tokens
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
       JWT_SECRET,
@@ -70,7 +94,65 @@ export class AuthService {
       { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
     );
 
-    // Store session
+    const sessionId = uuidv4();
+    await db.query(
+      `INSERT INTO user_sessions (id, user_id, token, refresh_token, expires_at, created_at, last_accessed)
+       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '24 hours', NOW(), NOW())`,
+      [sessionId, user.id, token, refreshToken]
+    );
+
+    return {
+      token,
+      refreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        is_verified: user.is_verified,
+        registration_status: user.registration_status
+      }
+    };
+  }
+
+  static async verify2FA(userId: string, code: string) {
+    const result = await db.query(
+      'SELECT * FROM two_factor_codes WHERE user_id = $1 AND code = $2 AND expires_at > NOW() AND used = false',
+      [userId, code]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error('Invalid or expired 2FA code');
+    }
+
+    await db.query(
+      'UPDATE two_factor_codes SET used = true WHERE id = $1',
+      [result.rows[0].id]
+    );
+
+    const userResult = await db.query(
+      'SELECT id, email, role, is_verified, registration_status FROM users WHERE id = $1',
+      [userId]
+    );
+
+    const user = userResult.rows[0];
+
+    await db.query(
+      'UPDATE users SET last_login = NOW(), login_count = COALESCE(login_count, 0) + 1 WHERE id = $1',
+      [user.id]
+    );
+
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+
+    const refreshToken = jwt.sign(
+      { userId: user.id, email: user.email, type: 'refresh' },
+      JWT_SECRET,
+      { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
+    );
+
     const sessionId = uuidv4();
     await db.query(
       `INSERT INTO user_sessions (id, user_id, token, refresh_token, expires_at, created_at, last_accessed)
