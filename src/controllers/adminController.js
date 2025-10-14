@@ -280,7 +280,7 @@ exports.rejectRegistration = async (req, res, next) => {
 
     await RegistrationRequest.reject(requestId, req.user.userId, reason);
 
-    // Log admin activity
+    // Login for the admin activity
     await AdminActivity.create({
       admin_id: req.user.userId,
       activity_type: 'registration_rejection',
