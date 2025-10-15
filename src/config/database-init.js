@@ -1,4 +1,4 @@
-// config/database-init.js
+// src/config/database-init.js
 const db = require('./database');
 const bcrypt = require('bcryptjs');
 
@@ -374,39 +374,164 @@ class DatabaseInitializer {
     }
   }
 
-  // Create default admin user
+  // Create default admin user - COMPLETE VERSION
   static async createDefaultAdmin() {
     try {
       const adminEmail = 'kellynyachiro@gmail.com';
       const adminPassword = 'Kelly@40125507';
       
-      // Check if admin already exists
+      console.log(`👤 Setting up admin user: ${adminEmail}`);
+      
+      // Check if admin already exists and has password_hash
       const existingAdmin = await db.query(
-        'SELECT id FROM hakikisha.users WHERE email = $1',
+        'SELECT id, email, password_hash, role FROM hakikisha.users WHERE email = $1',
         [adminEmail]
       );
 
       if (existingAdmin.rows.length > 0) {
-        console.log('✅ Default admin user already exists');
+        const admin = existingAdmin.rows[0];
+        console.log(`📊 Found existing admin: ${admin.email}, role: ${admin.role}`);
+        
+        // Check if admin has password_hash set
+        if (!admin.password_hash) {
+          console.log('🔧 Admin user exists but missing password_hash. Setting it now...');
+          
+          // Hash password and update the existing admin
+          const saltRounds = 12;
+          const passwordHash = await bcrypt.hash(adminPassword, saltRounds);
+          
+          await db.query(
+            `UPDATE hakikisha.users 
+             SET password_hash = $1, role = 'admin', is_verified = true, updated_at = NOW()
+             WHERE email = $2`,
+            [passwordHash, adminEmail]
+          );
+          
+          console.log(`✅ Admin password set successfully for: ${adminEmail}`);
+          console.log(`🔑 Password: ${adminPassword}`);
+        } else {
+          console.log('✅ Default admin user already exists with password');
+          
+          // Ensure the role is set to admin
+          if (admin.role !== 'admin') {
+            console.log('🔄 Updating user role to admin...');
+            await db.query(
+              `UPDATE hakikisha.users 
+               SET role = 'admin', is_verified = true, updated_at = NOW()
+               WHERE email = $1`,
+              [adminEmail]
+            );
+            console.log('✅ User role updated to admin');
+          }
+        }
+        
         return existingAdmin.rows[0];
+      } else {
+        // Create new admin user
+        console.log('👤 Creating new admin user...');
+        
+        // Hash password
+        const saltRounds = 12;
+        const passwordHash = await bcrypt.hash(adminPassword, saltRounds);
+
+        // Create admin user
+        const result = await db.query(
+          `INSERT INTO hakikisha.users (email, password_hash, role, is_verified) 
+           VALUES ($1, $2, $3, $4) 
+           RETURNING id, email, role`,
+          [adminEmail, passwordHash, 'admin', true]
+        );
+
+        const newAdmin = result.rows[0];
+        console.log(`✅ Default admin user created: ${newAdmin.email}`);
+        console.log(`🔑 Password: ${adminPassword}`);
+        console.log(`👑 Role: ${newAdmin.role}`);
+        
+        return newAdmin;
       }
-
-      // Hash password
-      const saltRounds = 12;
-      const passwordHash = await bcrypt.hash(adminPassword, saltRounds);
-
-      // Create admin user
-      const result = await db.query(
-        `INSERT INTO hakikisha.users (email, password_hash, role, is_verified) 
-         VALUES ($1, $2, $3, $4) 
-         RETURNING id, email, role`,
-        [adminEmail, passwordHash, 'admin', true]
-      );
-
-      console.log(`✅ Default admin user created: ${adminEmail}`);
-      return result.rows[0];
     } catch (error) {
-      console.error('❌ Error creating default admin user:', error);
+      console.error('❌ Error creating/updating default admin user:', error);
+      throw error;
+    }
+  }
+
+  // Additional utility method to verify database state
+  static async verifyDatabaseState() {
+    try {
+      console.log('🔍 Verifying database state...');
+      
+      // Check if all tables exist
+      const tables = await db.query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'hakikisha' 
+        ORDER BY table_name
+      `);
+      
+      console.log(`📊 Found ${tables.rows.length} tables in hakikisha schema`);
+      
+      // Check if admin user exists and has password
+      const adminCheck = await db.query(
+        'SELECT email, role, password_hash IS NOT NULL as has_password FROM hakikisha.users WHERE email = $1',
+        ['kellynyachiro@gmail.com']
+      );
+      
+      if (adminCheck.rows.length > 0) {
+        const admin = adminCheck.rows[0];
+        console.log(`👤 Admin status: ${admin.email}, role: ${admin.role}, has_password: ${admin.has_password}`);
+      } else {
+        console.log('❌ Admin user not found');
+      }
+      
+      return {
+        tableCount: tables.rows.length,
+        adminExists: adminCheck.rows.length > 0,
+        adminHasPassword: adminCheck.rows.length > 0 ? adminCheck.rows[0].has_password : false
+      };
+    } catch (error) {
+      console.error('❌ Error verifying database state:', error);
+      throw error;
+    }
+  }
+
+  // Method to reset and reinitialize database (use with caution)
+  static async resetDatabase() {
+    try {
+      console.log('🔄 Resetting database...');
+      
+      // Drop all tables in correct order to avoid foreign key constraints
+      const tables = [
+        'fact_checker_activities',
+        'admin_activities',
+        'user_analytics',
+        'search_logs',
+        'user_sessions',
+        'registration_requests',
+        'notifications',
+        'verdicts',
+        'fact_checkers',
+        'ai_verdicts',
+        'blog_articles',
+        'trending_topics',
+        'claims',
+        'users'
+      ];
+      
+      for (const table of tables) {
+        try {
+          await db.query(`DROP TABLE IF EXISTS hakikisha.${table} CASCADE`);
+          console.log(`✅ Dropped table: ${table}`);
+        } catch (error) {
+          console.log(`⚠️ Could not drop table ${table}:`, error.message);
+        }
+      }
+      
+      // Reinitialize
+      await this.initializeCompleteDatabase();
+      console.log('🎉 Database reset and reinitialized successfully!');
+      
+    } catch (error) {
+      console.error('❌ Error resetting database:', error);
       throw error;
     }
   }
