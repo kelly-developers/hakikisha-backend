@@ -1,4 +1,3 @@
-// src/config/database-init.js
 const db = require('./database');
 const bcrypt = require('bcryptjs');
 
@@ -13,6 +12,9 @@ class DatabaseInitializer {
         throw new Error('Cannot connect to database');
       }
 
+      // Ensure schema exists
+      await this.createSchema();
+      
       // Initialize all tables
       await this.initializeTables();
       
@@ -22,6 +24,9 @@ class DatabaseInitializer {
       // Create default admin user
       await this.createDefaultAdmin();
       
+      // Verify everything is working
+      await this.verifyDatabaseState();
+      
       console.log('🎉 Database initialization completed successfully!');
       return true;
     } catch (error) {
@@ -30,11 +35,20 @@ class DatabaseInitializer {
     }
   }
 
+  static async createSchema() {
+    try {
+      await db.query('CREATE SCHEMA IF NOT EXISTS hakikisha');
+      console.log('✅ Schema created/verified');
+    } catch (error) {
+      console.log('⚠️ Schema might already exist:', error.message);
+    }
+  }
+
   static async initializeTables() {
     try {
-      console.log('📋 Creating database tables...');
+      console.log('📋 Creating/Updating database tables...');
 
-      // Create tables in correct order (respecting foreign key dependencies)
+      // Create tables in correct order
       await this.createUsersTable();
       await this.createClaimsTable();
       await this.createAIVerdictsTable();
@@ -50,7 +64,7 @@ class DatabaseInitializer {
       await this.createUserSessionsTable();
       await this.createRegistrationRequestsTable();
 
-      console.log('✅ All tables created successfully!');
+      console.log('✅ All tables created/verified successfully!');
     } catch (error) {
       console.error('❌ Error creating tables:', error);
       throw error;
@@ -67,6 +81,9 @@ class DatabaseInitializer {
         role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('user', 'fact_checker', 'admin')),
         profile_picture TEXT,
         is_verified BOOLEAN DEFAULT FALSE,
+        registration_status VARCHAR(50) DEFAULT 'pending' CHECK (registration_status IN ('pending', 'approved', 'rejected')),
+        two_factor_enabled BOOLEAN DEFAULT FALSE,
+        two_factor_secret VARCHAR(255),
         login_count INTEGER DEFAULT 0,
         last_login TIMESTAMP,
         created_at TIMESTAMP DEFAULT NOW(),
@@ -74,6 +91,12 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
+    
+    // Add any missing columns
+    await this.addColumnIfNotExists('hakikisha.users', 'registration_status', 'VARCHAR(50) DEFAULT \'pending\'');
+    await this.addColumnIfNotExists('hakikisha.users', 'two_factor_enabled', 'BOOLEAN DEFAULT FALSE');
+    await this.addColumnIfNotExists('hakikisha.users', 'two_factor_secret', 'VARCHAR(255)');
+    
     console.log('✅ Users table created/verified');
   }
 
@@ -329,7 +352,6 @@ class DatabaseInitializer {
     console.log('✅ Registration Requests table created/verified');
   }
 
-  // Add indexes for better performance
   static async createIndexes() {
     const indexes = [
       'CREATE INDEX IF NOT EXISTS idx_claims_user_id ON hakikisha.claims(user_id)',
@@ -363,6 +385,29 @@ class DatabaseInitializer {
     console.log('✅ All indexes created/verified');
   }
 
+  static async addColumnIfNotExists(table, column, definition) {
+    try {
+      const tableName = table.replace('hakikisha.', '');
+      const checkQuery = `
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' 
+        AND table_name = $1 
+        AND column_name = $2
+      `;
+      
+      const result = await db.query(checkQuery, [tableName, column]);
+      
+      if (result.rows.length === 0) {
+        const alterQuery = `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`;
+        await db.query(alterQuery);
+        console.log(`✅ Added missing column: ${table}.${column}`);
+      }
+    } catch (error) {
+      console.log(`⚠️ Could not add column ${column} to ${table}:`, error.message);
+    }
+  }
+
   static async checkDatabaseConnection() {
     try {
       await db.query('SELECT 1');
@@ -374,7 +419,6 @@ class DatabaseInitializer {
     }
   }
 
-  // Create default admin user - COMPLETE VERSION
   static async createDefaultAdmin() {
     try {
       const adminEmail = 'kellynyachiro@gmail.com';
@@ -382,7 +426,7 @@ class DatabaseInitializer {
       
       console.log(`👤 Setting up admin user: ${adminEmail}`);
       
-      // Check if admin already exists and has password_hash
+      // Check if admin already exists
       const existingAdmin = await db.query(
         'SELECT id, email, password_hash, role FROM hakikisha.users WHERE email = $1',
         [adminEmail]
@@ -396,33 +440,19 @@ class DatabaseInitializer {
         if (!admin.password_hash) {
           console.log('🔧 Admin user exists but missing password_hash. Setting it now...');
           
-          // Hash password and update the existing admin
           const saltRounds = 12;
           const passwordHash = await bcrypt.hash(adminPassword, saltRounds);
           
           await db.query(
             `UPDATE hakikisha.users 
-             SET password_hash = $1, role = 'admin', is_verified = true, updated_at = NOW()
+             SET password_hash = $1, role = 'admin', is_verified = true, registration_status = 'approved', updated_at = NOW()
              WHERE email = $2`,
             [passwordHash, adminEmail]
           );
           
           console.log(`✅ Admin password set successfully for: ${adminEmail}`);
-          console.log(`🔑 Password: ${adminPassword}`);
         } else {
           console.log('✅ Default admin user already exists with password');
-          
-          // Ensure the role is set to admin
-          if (admin.role !== 'admin') {
-            console.log('🔄 Updating user role to admin...');
-            await db.query(
-              `UPDATE hakikisha.users 
-               SET role = 'admin', is_verified = true, updated_at = NOW()
-               WHERE email = $1`,
-              [adminEmail]
-            );
-            console.log('✅ User role updated to admin');
-          }
         }
         
         return existingAdmin.rows[0];
@@ -430,16 +460,14 @@ class DatabaseInitializer {
         // Create new admin user
         console.log('👤 Creating new admin user...');
         
-        // Hash password
         const saltRounds = 12;
         const passwordHash = await bcrypt.hash(adminPassword, saltRounds);
 
-        // Create admin user
         const result = await db.query(
-          `INSERT INTO hakikisha.users (email, password_hash, role, is_verified) 
-           VALUES ($1, $2, $3, $4) 
+          `INSERT INTO hakikisha.users (email, password_hash, role, is_verified, registration_status) 
+           VALUES ($1, $2, $3, $4, $5) 
            RETURNING id, email, role`,
-          [adminEmail, passwordHash, 'admin', true]
+          [adminEmail, passwordHash, 'admin', true, 'approved']
         );
 
         const newAdmin = result.rows[0];
@@ -455,12 +483,10 @@ class DatabaseInitializer {
     }
   }
 
-  // Additional utility method to verify database state
   static async verifyDatabaseState() {
     try {
       console.log('🔍 Verifying database state...');
       
-      // Check if all tables exist
       const tables = await db.query(`
         SELECT table_name 
         FROM information_schema.tables 
@@ -470,7 +496,6 @@ class DatabaseInitializer {
       
       console.log(`📊 Found ${tables.rows.length} tables in hakikisha schema`);
       
-      // Check if admin user exists and has password
       const adminCheck = await db.query(
         'SELECT email, role, password_hash IS NOT NULL as has_password FROM hakikisha.users WHERE email = $1',
         ['kellynyachiro@gmail.com']
@@ -483,10 +508,22 @@ class DatabaseInitializer {
         console.log('❌ Admin user not found');
       }
       
+      // Verify critical columns exist
+      const criticalColumns = await db.query(`
+        SELECT table_name, column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' 
+        AND table_name = 'users' 
+        AND column_name IN ('password_hash', 'email', 'role')
+      `);
+      
+      console.log(`🔑 Found ${criticalColumns.rows.length} critical columns in users table`);
+      
       return {
         tableCount: tables.rows.length,
         adminExists: adminCheck.rows.length > 0,
-        adminHasPassword: adminCheck.rows.length > 0 ? adminCheck.rows[0].has_password : false
+        adminHasPassword: adminCheck.rows.length > 0 ? adminCheck.rows[0].has_password : false,
+        criticalColumns: criticalColumns.rows.length
       };
     } catch (error) {
       console.error('❌ Error verifying database state:', error);
@@ -494,12 +531,10 @@ class DatabaseInitializer {
     }
   }
 
-  // Method to reset and reinitialize database (use with caution)
   static async resetDatabase() {
     try {
       console.log('🔄 Resetting database...');
       
-      // Drop all tables in correct order to avoid foreign key constraints
       const tables = [
         'fact_checker_activities',
         'admin_activities',
@@ -526,7 +561,6 @@ class DatabaseInitializer {
         }
       }
       
-      // Reinitialize
       await this.initializeCompleteDatabase();
       console.log('🎉 Database reset and reinitialized successfully!');
       

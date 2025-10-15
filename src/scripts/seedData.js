@@ -1,6 +1,4 @@
-// scripts/seeddata.js
-const DatabaseInitializer = require('../config/database-init');
-const logger = require('../utils/logger');
+const DatabaseInitializer = require('../src/config/database-init');
 
 async function seedDatabase() {
   try {
