@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import app from './app';
 import { initializeDatabase } from './src/config/database';
+import DatabaseInitializer from './src/config/database-init';
 
 const PORT = process.env.PORT || 5000;
 
@@ -10,7 +11,7 @@ console.log('🔍 Database Host:', process.env.DB_HOST);
 
 const startServer = async () => {
   try {
-    // Initialize database
+    // Initialize database connection
     console.log('🔄 Initializing database connection...');
     const dbInitialized = await initializeDatabase();
 
@@ -18,6 +19,10 @@ const startServer = async () => {
       console.error('💥 Failed to initialize database. Server cannot start.');
       process.exit(1);
     }
+
+    // Initialize database tables and create admin user
+    console.log('🗃️ Initializing database tables and admin user...');
+    await DatabaseInitializer.initializeCompleteDatabase();
 
     // Start server
     app.listen(PORT, () => {
@@ -28,6 +33,7 @@ const startServer = async () => {
       console.log(`🌍 Port: ${PORT}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`📊 Database: PostgreSQL ✅`);
+      console.log(`👤 Default Admin: kellynyachiro@gmail.com`);
       console.log('');
       console.log('📍 Endpoints:');
       console.log(`   Health: http://localhost:${PORT}/health`);

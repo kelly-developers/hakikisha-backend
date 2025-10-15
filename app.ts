@@ -81,7 +81,45 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     memory: process.memoryUsage(),
-    environment: process.env.NODE_ENV
+    environment: process.env.NODE_ENV,
+    service: 'hakikisha-backend'
+  });
+});
+
+// Database Status Endpoint
+app.get('/api/debug/db', async (req, res) => {
+  try {
+    const db = require('./src/config/database');
+    const result = await db.query('SELECT version(), current_database(), current_schema()');
+    
+    res.json({
+      database: {
+        version: result.rows[0].version,
+        name: result.rows[0].current_database,
+        schema: result.rows[0].current_schema,
+        status: 'connected'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      database: {
+        status: 'disconnected',
+        error: error.message
+      }
+    });
+  }
+});
+
+// Environment Debug Endpoint
+app.get('/api/debug/env', (req, res) => {
+  res.json({
+    environment: {
+      node_env: process.env.NODE_ENV,
+      port: process.env.PORT,
+      db_host: process.env.DB_HOST ? 'set' : 'not set',
+      db_user: process.env.DB_USER ? 'set' : 'not set',
+      db_name: process.env.DB_NAME ? 'set' : 'not set'
+    }
   });
 });
 
@@ -97,7 +135,11 @@ app.get('/api/test', (req, res) => {
     success: true,
     message: 'HAKIKISHA API is running!',
     version: '1.0.0',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    admin: {
+      email: 'kellynyachiro@gmail.com',
+      note: 'Default admin user is automatically created on server start'
+    }
   });
 });
 
