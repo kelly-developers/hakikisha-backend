@@ -14,16 +14,25 @@ import verdictRoutes from './src/routes/verdict.routes';
 
 const app = express();
 
+// Fix for rate limiting on Render - trust proxy
+app.set('trust proxy', 1);
+
 // Security Middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
 // CORS Configuration - Allow mobile app (Capacitor) and web requests
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'capacitor://localhost,http://localhost,ionic://localhost,http://localhost:3000,http://localhost:8080')
-  .split(',')
-  .map(origin => origin.trim())
-  .filter(Boolean);
+const allowedOrigins = [
+  'capacitor://localhost',
+  'http://localhost',
+  'ionic://localhost',
+  'http://localhost:3000',
+  'http://localhost:8080',
+  'https://e2280cef-9c3e-485b-aca5-a7c342a041ca.lovableproject.com',
+  'https://hakikisha-backend.onrender.com',
+  ...(process.env.ALLOWED_ORIGINS?.split(',') || [])
+].map(origin => origin.trim()).filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -44,7 +53,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Client-Info'],
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
   maxAge: 86400, // 24 hours
 }));
@@ -74,8 +83,19 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Logging
 app.use(morgan('combined'));
 
+// Default Root Route
+app.get('/', (req: Request, res: Response) => {
+  res.status(200).json({
+    status: 'OK',
+    service: 'hakikisha-backend',
+    message: 'Welcome to Hakikisha Backend!',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0'
+  });
+});
+
 // Health Check
-app.get('/health', (req, res) => {
+app.get('/health', (req: Request, res: Response) => {
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
@@ -87,10 +107,24 @@ app.get('/health', (req, res) => {
 });
 
 // Database Status Endpoint
-app.get('/api/debug/db', async (req, res) => {
+app.get('/api/debug/db', async (req: Request, res: Response) => {
   try {
-    const db = require('./src/config/database');
+    const db = require('../config/database'); // ✅ Fixed path for TypeScript
     const result = await db.query('SELECT version(), current_database(), current_schema()');
+    
+    // Check if tables exist
+    const tables = await db.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'hakikisha' 
+      ORDER BY table_name
+    `);
+
+    // Check if admin user exists
+    const adminCheck = await db.query(
+      'SELECT email, role FROM hakikisha.users WHERE email = $1', 
+      ['kellynyachiro@gmail.com']
+    );
     
     res.json({
       database: {
@@ -98,9 +132,17 @@ app.get('/api/debug/db', async (req, res) => {
         name: result.rows[0].current_database,
         schema: result.rows[0].current_schema,
         status: 'connected'
+      },
+      tables: {
+        count: tables.rows.length,
+        list: tables.rows.map((t: any) => t.table_name)
+      },
+      admin: {
+        exists: adminCheck.rows.length > 0,
+        user: adminCheck.rows[0] || null
       }
     });
-  } catch (error) {
+  } catch (error: any) {
     res.status(500).json({
       database: {
         status: 'disconnected',
@@ -111,15 +153,18 @@ app.get('/api/debug/db', async (req, res) => {
 });
 
 // Environment Debug Endpoint
-app.get('/api/debug/env', (req, res) => {
+app.get('/api/debug/env', (req: Request, res: Response) => {
   res.json({
     environment: {
       node_env: process.env.NODE_ENV,
       port: process.env.PORT,
       db_host: process.env.DB_HOST ? 'set' : 'not set',
       db_user: process.env.DB_USER ? 'set' : 'not set',
-      db_name: process.env.DB_NAME ? 'set' : 'not set'
-    }
+      db_name: process.env.DB_NAME ? 'set' : 'not set',
+      db_schema: process.env.DB_SCHEMA || 'hakikisha'
+    },
+    service: 'hakikisha-backend',
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -130,7 +175,7 @@ app.use('/api/search', searchRoutes);
 app.use('/api/verdicts', verdictRoutes);
 
 // Test Route
-app.get('/api/test', (req, res) => {
+app.get('/api/test', (req: Request, res: Response) => {
   res.json({ 
     success: true,
     message: 'HAKIKISHA API is running!',
@@ -144,7 +189,7 @@ app.get('/api/test', (req, res) => {
 });
 
 // 404 Handler
-app.use('*', (req, res) => {
+app.use('*', (req: Request, res: Response) => {
   res.status(404).json({
     success: false,
     error: 'Route not found',

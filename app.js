@@ -1,4 +1,3 @@
-
 require('dotenv').config();
 const express = require('express');
 const helmet = require('helmet');
@@ -8,6 +7,9 @@ const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 
 const app = express();
+
+// Fix for rate limiting on Render - trust proxy
+app.set('trust proxy', 1);
 
 // Security Middleware
 app.use(
@@ -23,8 +25,9 @@ const allowedOrigins = [
   'ionic://localhost',
   'http://localhost:8100',
   'https://e2280cef-9c3e-485b-aca5-a7c342a041ca.lovableproject.com',
+  'https://hakikisha-backend.onrender.com',
   ...(process.env.ALLOWED_ORIGINS?.split(',') || [])
-];
+].filter(Boolean);
 
 app.use(
   cors({
@@ -35,7 +38,12 @@ app.use(
       if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('capacitor://') || origin.startsWith('ionic://')) {
         callback(null, true);
       } else {
-        callback(null, true); // Allow all in development, restrict in production
+        // In production, be more restrictive
+        if (process.env.NODE_ENV === 'production') {
+          callback(new Error(`CORS blocked for origin: ${origin}`), false);
+        } else {
+          callback(null, true); // Allow all in development
+        }
       }
     },
     credentials: true,
@@ -44,6 +52,9 @@ app.use(
     exposedHeaders: ['Content-Range', 'X-Content-Range']
   })
 );
+
+// Handle preflight requests
+app.options('*', cors());
 
 // Rate Limiting
 const limiter = rateLimit({
@@ -74,6 +85,7 @@ app.get('/', (req, res) => {
     service: 'hakikisha-backend',
     message: 'Welcome to Hakikisha Backend!',
     timestamp: new Date().toISOString(),
+    version: '1.0.0'
   });
 });
 
@@ -85,6 +97,7 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     memory: process.memoryUsage(),
     environment: process.env.NODE_ENV,
+    service: 'hakikisha-backend'
   });
 });
 
@@ -95,11 +108,10 @@ app.get('/api/debug/env', (req, res) => {
     status: 'running',
     environment: process.env.NODE_ENV,
     database: {
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      name: process.env.DB_NAME,
-      schema: process.env.DB_SCHEMA,
-      hasConfig: true,
+      host: process.env.DB_HOST ? 'set' : 'not set',
+      user: process.env.DB_USER ? 'set' : 'not set',
+      name: process.env.DB_NAME ? 'set' : 'not set',
+      schema: process.env.DB_SCHEMA || 'hakikisha'
     },
     timestamp: new Date().toISOString(),
   });
@@ -107,16 +119,41 @@ app.get('/api/debug/env', (req, res) => {
 
 app.get('/api/debug/db', async (req, res) => {
   try {
-    const db = require('./src/config/database'); // ✅ match server.js
+    const db = require('./config/database'); // ✅ Fixed path - use ./config instead of ./src/config
     const result = await db.query(
       'SELECT current_schema(), version(), current_database()'
     );
 
+    // Check if tables exist
+    const tables = await db.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'hakikisha' 
+      ORDER BY table_name
+    `);
+
+    // Check if admin user exists
+    const adminCheck = await db.query(
+      'SELECT email, role FROM hakikisha.users WHERE email = $1', 
+      ['kellynyachiro@gmail.com']
+    );
+
     res.json({
       success: true,
-      database: result?.rows?.[0]?.current_database || null,
-      schema: result?.rows?.[0]?.current_schema || null,
-      version: result?.rows?.[0]?.version || null,
+      database: {
+        name: result?.rows?.[0]?.current_database || null,
+        schema: result?.rows?.[0]?.current_schema || null,
+        version: result?.rows?.[0]?.version || null,
+        status: 'connected'
+      },
+      tables: {
+        count: tables.rows.length,
+        list: tables.rows.map(t => t.table_name)
+      },
+      admin: {
+        exists: adminCheck.rows.length > 0,
+        user: adminCheck.rows[0] || null
+      },
       message: '✅ Database connected successfully',
     });
   } catch (error) {
@@ -126,6 +163,20 @@ app.get('/api/debug/db', async (req, res) => {
       message: '❌ Database connection failed',
     });
   }
+});
+
+// Test Route
+app.get('/api/test', (req, res) => {
+  res.json({ 
+    success: true,
+    message: 'HAKIKISHA API is running!',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+    admin: {
+      email: 'kellynyachiro@gmail.com',
+      note: 'Default admin user is automatically created on server start'
+    }
+  });
 });
 
 // API Routes (v1)
@@ -150,6 +201,7 @@ app.use('/api/v1/points', pointsRoutes);
 // 404 Handler
 app.use('*', (req, res) => {
   res.status(404).json({
+    success: false,
     error: 'Route not found',
     path: req.originalUrl,
     method: req.method,
@@ -160,7 +212,10 @@ app.use('*', (req, res) => {
 app.use((err, req, res, next) => {
   console.error('Error:', err);
   res.status(500).json({
-    error: 'Internal server error',
+    success: false,
+    error: process.env.NODE_ENV === 'production' 
+      ? 'Internal server error' 
+      : err.message
   });
 });
 

@@ -2,26 +2,24 @@
 const { Pool } = require('pg');
 
 console.log('🔧 Loading database configuration...');
-console.log('DB_HOST:', process.env.DB_HOST);
-console.log('DB_USER:', process.env.DB_USER);
 
 // Create pool with connection details
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   // Fallback to individual parameters
   host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
+  port: process.env.DB_PORT || 5432,
   database: process.env.DB_NAME,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  ssl: { rejectUnauthorized: false },
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
 });
 
 // Database initialization function
-const initializeDatabase = async (retries = 3, delay = 5000) => {
+const initializeDatabase = async (retries = 5, delay = 3000) => {
   for (let i = 0; i < retries; i++) {
     try {
       console.log(`🔄 Database connection attempt ${i + 1}/${retries}...`);
@@ -32,11 +30,12 @@ const initializeDatabase = async (retries = 3, delay = 5000) => {
       await client.query(`SET search_path TO ${process.env.DB_SCHEMA || 'hakikisha'}, public`);
       
       // Test basic query
-      const result = await client.query('SELECT current_schema(), version()');
+      const result = await client.query('SELECT version(), current_database(), current_schema()');
       
       console.log('✅ Database connected successfully!');
+      console.log(`🗃️ Database: ${result.rows[0].current_database}`);
       console.log(`📊 Schema: ${result.rows[0].current_schema}`);
-      console.log(`🗃️ PostgreSQL: ${result.rows[0].version.split(',')[0]}`);
+      console.log(`🔧 PostgreSQL: ${result.rows[0].version.split(',')[0]}`);
       
       client.release();
       return true;
@@ -65,7 +64,10 @@ pool.on('error', (err) => {
 });
 
 module.exports = {
-  query: (text, params) => pool.query(text, params),
+  query: (text, params) => {
+    console.log(`📝 Executing query: ${text.substring(0, 100)}...`);
+    return pool.query(text, params);
+  },
   pool,
   initializeDatabase
 };

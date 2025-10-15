@@ -1,70 +1,129 @@
+// server.js
 require('dotenv').config();
 
 console.log('🚀 Starting Hakikisha Server...');
-console.log('🔍 Checking environment variables:');
-console.log('DB_HOST:', process.env.DB_HOST);
-console.log('DB_USER:', process.env.DB_USER);
-console.log('DB_NAME:', process.env.DB_NAME);
+console.log('🔍 Environment:', process.env.NODE_ENV);
 
 const express = require('express');
-const app = require('./app'); // your main routes
+const app = require('./app');
+const db = require('./config/database');
+const DatabaseInitializer = require('./config/database-init');
+
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   try {
-    // Initialize database if available
     let dbInitialized = false;
-    let dbInitializedComplete = false;
+    let tablesInitialized = false;
+    let adminCreated = false;
+
+    console.log('🔄 Initializing database connection...');
     
     try {
-      const db = require('./src/config/database');
-      const DatabaseInitializer = require('./config/database-init');
+      // Initialize database connection
+      dbInitialized = await db.initializeDatabase();
       
-      if (db.initializeDatabase) {
-        console.log('🔄 Initializing database connection...');
-        dbInitialized = await db.initializeDatabase();
+      if (dbInitialized) {
+        console.log('🗃️ Initializing database tables and admin user...');
         
-        if (dbInitialized) {
-          console.log('🗃️ Initializing database tables and admin user...');
+        try {
+          // Initialize tables and admin user
           await DatabaseInitializer.initializeCompleteDatabase();
-          dbInitializedComplete = true;
-          console.log('✅ Database tables and admin user created successfully!');
-          console.log('👤 Default Admin: kellynyachiro@gmail.com');
+          tablesInitialized = true;
+          
+          // Verify admin user was created
+          const adminCheck = await db.query(
+            'SELECT email, role FROM hakikisha.users WHERE email = $1', 
+            ['kellynyachiro@gmail.com']
+          );
+          
+          adminCreated = adminCheck.rows.length > 0;
+          
+          if (adminCreated) {
+            console.log('✅ Admin user verified: kellynyachiro@gmail.com');
+          } else {
+            console.log('❌ Admin user not found after initialization');
+          }
+          
+          console.log('🎉 Database setup completed successfully!');
+        } catch (initError) {
+          console.error('❌ Database initialization failed:', initError.message);
+          console.log('⚠️ Continuing without database initialization...');
         }
-      } else {
-        console.warn('⚠️ No initializeDatabase() found, skipping DB init');
       }
     } catch (dbError) {
-      console.error('❌ Database configuration error:', dbError.message);
-      console.log('💡 Make sure src/config/database.js exports initializeDatabase()');
-      // do NOT exit — still allow server to start for testing
+      console.error('❌ Database connection error:', dbError.message);
+      console.log('⚠️ Starting server without database...');
     }
 
-    // Add a default root route so Render doesn't give 404
-    const expressApp = require('express')();
-    expressApp.use('/', (req, res, next) => {
-      if (req.path === '/' || req.path === '/health') {
-        return res.json({
-          status: 'ok',
-          service: 'hakikisha-backend',
-          db: dbInitialized ? 'connected' : 'not connected',
-          tables: dbInitializedComplete ? 'initialized' : 'not initialized',
-          admin: dbInitializedComplete ? 'created' : 'not created'
+    // Create express app with trust proxy for Render
+    const expressApp = express();
+    expressApp.set('trust proxy', 1); // Important for rate limiting on Render
+    
+    // Health check endpoint
+    expressApp.get('/health', (req, res) => {
+      res.json({
+        status: 'ok',
+        service: 'hakikisha-backend',
+        timestamp: new Date().toISOString(),
+        database: dbInitialized ? 'connected' : 'disconnected',
+        tables: tablesInitialized ? 'initialized' : 'not initialized',
+        admin: adminCreated ? 'created' : 'not created'
+      });
+    });
+
+    // Database debug endpoint
+    expressApp.get('/api/debug/db', async (req, res) => {
+      try {
+        const tables = await db.query(`
+          SELECT table_name 
+          FROM information_schema.tables 
+          WHERE table_schema = 'hakikisha' 
+          ORDER BY table_name
+        `);
+        
+        const users = await db.query('SELECT COUNT(*) as count FROM hakikisha.users');
+        const admin = await db.query('SELECT email, role FROM hakikisha.users WHERE email = $1', ['kellynyachiro@gmail.com']);
+        
+        res.json({
+          database: {
+            status: 'connected',
+            tables: tables.rows.map(t => t.table_name),
+            userCount: users.rows[0].count,
+            adminExists: admin.rows.length > 0,
+            admin: admin.rows[0] || null
+          }
+        });
+      } catch (error) {
+        res.status(500).json({
+          database: {
+            status: 'error',
+            error: error.message
+          }
         });
       }
-      next();
     });
-    expressApp.use(app); // plug in your main app
 
+    // Use your main app
+    expressApp.use(app);
+
+    // Start server
     expressApp.listen(PORT, '0.0.0.0', () => {
-      console.log(`🎉 Hakikisha Server running on port ${PORT}`);
+      console.log('');
+      console.log('🎉 ===================================');
+      console.log(`🎉 Hakikisha Server is running!`);
+      console.log(`🎉 ===================================`);
+      console.log(`🌍 Port: ${PORT}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`📊 Database: ${dbInitialized ? 'Connected ✅' : 'Not Connected ❌'}`);
-      console.log(`🗃️ Tables: ${dbInitializedComplete ? 'Initialized ✅' : 'Not Initialized ❌'}`);
-      console.log(`👤 Admin: ${dbInitializedComplete ? 'Created ✅' : 'Not Created ❌'}`);
-      console.log(`🏥 Health check: http://localhost:${PORT}/health`);
-      console.log(`🔍 DB Debug: http://localhost:${PORT}/api/debug/db`);
-      console.log(`🔧 Env Debug: http://localhost:${PORT}/api/debug/env`);
+      console.log(`🗃️ Tables: ${tablesInitialized ? 'Initialized ✅' : 'Not Initialized ❌'}`);
+      console.log(`👤 Admin: ${adminCreated ? 'Created ✅' : 'Not Created ❌'}`);
+      console.log('');
+      console.log('📍 Endpoints:');
+      console.log(`   Health: https://hakikisha-backend.onrender.com/health`);
+      console.log(`   DB Debug: https://hakikisha-backend.onrender.com/api/debug/db`);
+      console.log(`   API Test: https://hakikisha-backend.onrender.com/api/test`);
+      console.log('');
     });
 
   } catch (error) {
@@ -72,5 +131,14 @@ const startServer = async () => {
     process.exit(1);
   }
 };
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('💥 Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
 startServer();
