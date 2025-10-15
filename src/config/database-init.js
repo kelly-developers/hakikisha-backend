@@ -1,12 +1,11 @@
 // config/database-init.js
 const db = require('./database');
-const logger = require('../utils/logger');
 const bcrypt = require('bcryptjs');
 
 class DatabaseInitializer {
   static async initializeTables() {
     try {
-      logger.info('Starting database initialization...');
+      console.log('Starting database initialization...');
 
       // Create tables in correct order (respecting foreign key dependencies)
       await this.createUsersTable();
@@ -24,9 +23,9 @@ class DatabaseInitializer {
       await this.createUserSessionsTable();
       await this.createRegistrationRequestsTable();
 
-      logger.info('All tables created successfully!');
+      console.log('All tables created successfully!');
     } catch (error) {
-      logger.error('Error initializing database tables:', error);
+      console.error('Error initializing database tables:', error);
       throw error;
     }
   }
@@ -48,7 +47,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('Users table created/verified');
+    console.log('Users table created/verified');
   }
 
   static async createClaimsTable() {
@@ -72,7 +71,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('Claims table created/verified');
+    console.log('Claims table created/verified');
   }
 
   static async createAIVerdictsTable() {
@@ -90,7 +89,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('AI Verdicts table created/verified');
+    console.log('AI Verdicts table created/verified');
   }
 
   static async createFactCheckersTable() {
@@ -108,7 +107,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('Fact Checkers table created/verified');
+    console.log('Fact Checkers table created/verified');
   }
 
   static async createVerdictsTable() {
@@ -129,7 +128,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('Verdicts table created/verified');
+    console.log('Verdicts table created/verified');
   }
 
   static async createBlogArticlesTable() {
@@ -153,7 +152,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('Blog Articles table created/verified');
+    console.log('Blog Articles table created/verified');
   }
 
   static async createTrendingTopicsTable() {
@@ -173,7 +172,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('Trending Topics table created/verified');
+    console.log('Trending Topics table created/verified');
   }
 
   static async createNotificationsTable() {
@@ -192,7 +191,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('Notifications table created/verified');
+    console.log('Notifications table created/verified');
   }
 
   static async createUserAnalyticsTable() {
@@ -206,7 +205,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('User Analytics table created/verified');
+    console.log('User Analytics table created/verified');
   }
 
   static async createAdminActivitiesTable() {
@@ -224,7 +223,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('Admin Activities table created/verified');
+    console.log('Admin Activities table created/verified');
   }
 
   static async createFactCheckerActivitiesTable() {
@@ -245,7 +244,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('Fact Checker Activities table created/verified');
+    console.log('Fact Checker Activities table created/verified');
   }
 
   static async createSearchLogsTable() {
@@ -264,7 +263,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('Search Logs table created/verified');
+    console.log('Search Logs table created/verified');
   }
 
   static async createUserSessionsTable() {
@@ -283,7 +282,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('User Sessions table created/verified');
+    console.log('User Sessions table created/verified');
   }
 
   static async createRegistrationRequestsTable() {
@@ -300,7 +299,7 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    logger.info('Registration Requests table created/verified');
+    console.log('Registration Requests table created/verified');
   }
 
   // Add indexes for better performance
@@ -328,18 +327,22 @@ class DatabaseInitializer {
     ];
 
     for (const indexQuery of indexes) {
-      await db.query(indexQuery);
+      try {
+        await db.query(indexQuery);
+      } catch (error) {
+        console.log('Index might already exist:', error.message);
+      }
     }
-    logger.info('All indexes created/verified');
+    console.log('All indexes created/verified');
   }
 
   static async checkDatabaseConnection() {
     try {
       await db.query('SELECT 1');
-      logger.info('Database connection successful');
+      console.log('Database connection successful');
       return true;
     } catch (error) {
-      logger.error('Database connection failed:', error);
+      console.error('Database connection failed:', error);
       return false;
     }
   }
@@ -357,7 +360,7 @@ class DatabaseInitializer {
       );
 
       if (existingAdmin.rows.length > 0) {
-        logger.info('Default admin user already exists');
+        console.log('Default admin user already exists');
         return existingAdmin.rows[0];
       }
 
@@ -373,10 +376,10 @@ class DatabaseInitializer {
         [adminEmail, passwordHash, 'admin', true]
       );
 
-      logger.info(`✅ Default admin user created: ${adminEmail}`);
+      console.log(`✅ Default admin user created: ${adminEmail}`);
       return result.rows[0];
     } catch (error) {
-      logger.error('Error creating default admin user:', error);
+      console.error('Error creating default admin user:', error);
       throw error;
     }
   }
@@ -399,10 +402,10 @@ class DatabaseInitializer {
       // Create default admin user
       await this.createDefaultAdmin();
       
-      logger.info('🎉 Database initialization completed successfully!');
+      console.log('🎉 Database initialization completed successfully!');
       return true;
     } catch (error) {
-      logger.error('❌ Database initialization failed:', error);
+      console.error('❌ Database initialization failed:', error);
       throw error;
     }
   }
