@@ -10,6 +10,8 @@ const dbConfig = {
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
+  // Add SSL configuration for production
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 };
 
 class Database {
@@ -63,8 +65,5 @@ class Database {
 
 // Create single instance
 const db = new Database();
-
-// Initialize database when module is loaded
-db.initializeDatabase().catch(console.error);
 
 module.exports = db;
