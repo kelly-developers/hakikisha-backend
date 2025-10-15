@@ -187,8 +187,8 @@ const startServer = async () => {
     });
 
     // API routes
-    app.use('/api/v1/auth', require('./src/routes/auth'));
-    app.use('/api/v1/users', require('./src/routes/users'));
+    app.use('/api/v1/auth', require('./src/routes/authRoutes'));
+    app.use('/api/v1/users', require('./src/routes/userRoutes'));
     
     // Test endpoint
     app.get('/api/test', (req, res) => {
