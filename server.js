@@ -17,16 +17,14 @@ const startServer = async () => {
     console.log('🔄 Initializing database connection...');
     
     try {
-      // Try to load database configuration
+      // Try to load database configuration from src/config
       let db;
       try {
         db = require('./src/config/database');
-        console.log('✅ Database module loaded successfully');
+        console.log('✅ Database module loaded successfully from src/config');
       } catch (dbModuleError) {
-        console.error('❌ Database module not found:', dbModuleError.message);
-        console.log('📁 Current directory files:', require('fs').readdirSync('.'));
-        console.log('📁 Config directory files:', require('fs').existsSync('./config') ? require('fs').readdirSync('./config') : 'Config directory not found');
-        throw new Error('Database configuration not found');
+        console.error('❌ Database module not found in src/config:', dbModuleError.message);
+        throw new Error('Database configuration not found in src/config');
       }
       
       // Initialize database connection
@@ -37,7 +35,10 @@ const startServer = async () => {
           console.log('🗃️ Initializing database tables and admin user...');
           
           try {
-            const DatabaseInitializer = require('./config/database-init');
+            // ✅ FIXED PATH: Use src/config/database-init
+            const DatabaseInitializer = require('./src/config/database-init');
+            console.log('✅ DatabaseInitializer module loaded successfully');
+            
             await DatabaseInitializer.initializeCompleteDatabase();
             tablesInitialized = true;
             
@@ -58,6 +59,11 @@ const startServer = async () => {
             console.log('🎉 Database setup completed successfully!');
           } catch (initError) {
             console.error('❌ Database initialization failed:', initError.message);
+            console.log('🔧 Debug info:', {
+              errorStack: initError.stack,
+              currentDir: __dirname,
+              files: require('fs').readdirSync('./src/config')
+            });
             console.log('⚠️ Continuing without database initialization...');
           }
         }
@@ -71,7 +77,7 @@ const startServer = async () => {
 
     // Create express app with trust proxy for Render
     const expressApp = express();
-    expressApp.set('trust proxy', 1); // Important for rate limiting on Render
+    expressApp.set('trust proxy', 1);
     
     // Health check endpoint
     expressApp.get('/health', (req, res) => {
@@ -89,7 +95,7 @@ const startServer = async () => {
     // Database debug endpoint
     expressApp.get('/api/debug/db', async (req, res) => {
       try {
-        const db = require('./config/database');
+        const db = require('./src/config/database');
         const result = await db.query(
           'SELECT current_schema(), version(), current_database()'
         );
@@ -135,7 +141,7 @@ const startServer = async () => {
       }
     });
 
-    // File structure debug endpoint
+    // Files debug endpoint
     expressApp.get('/api/debug/files', (req, res) => {
       const fs = require('fs');
       const path = require('path');
@@ -162,7 +168,8 @@ const startServer = async () => {
       
       res.json({
         currentDirectory: process.cwd(),
-        files: getFiles('.')
+        files: getFiles('.'),
+        srcConfigFiles: getFiles('./src/config')
       });
     });
 
@@ -182,10 +189,10 @@ const startServer = async () => {
       console.log(`👤 Admin: ${adminCreated ? 'Created ✅' : 'Not Created ❌'}`);
       console.log('');
       console.log('📍 Endpoints:');
-      console.log(`   Health: http://localhost:${PORT}/health`);
-      console.log(`   DB Debug: http://localhost:${PORT}/api/debug/db`);
-      console.log(`   Files Debug: http://localhost:${PORT}/api/debug/files`);
-      console.log(`   API Test: http://localhost:${PORT}/api/test`);
+      console.log(`   Health: https://hakikisha-backend.onrender.com/health`);
+      console.log(`   DB Debug: https://hakikisha-backend.onrender.com/api/debug/db`);
+      console.log(`   Files Debug: https://hakikisha-backend.onrender.com/api/debug/files`);
+      console.log(`   API Test: https://hakikisha-backend.onrender.com/api/test`);
       console.log('');
     });
 
