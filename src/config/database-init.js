@@ -18,6 +18,9 @@ class DatabaseInitializer {
       // Initialize all tables
       await this.initializeTables();
       
+      // Add missing columns to existing tables
+      await this.addMissingColumns();
+      
       // Create indexes
       await this.createIndexes();
       
@@ -91,13 +94,144 @@ class DatabaseInitializer {
       )
     `;
     await db.query(query);
-    
-    // Add any missing columns
-    await this.addColumnIfNotExists('hakikisha.users', 'registration_status', 'VARCHAR(50) DEFAULT \'pending\'');
-    await this.addColumnIfNotExists('hakikisha.users', 'two_factor_enabled', 'BOOLEAN DEFAULT FALSE');
-    await this.addColumnIfNotExists('hakikisha.users', 'two_factor_secret', 'VARCHAR(255)');
-    
     console.log('✅ Users table created/verified');
+  }
+
+  static async addMissingColumns() {
+    try {
+      console.log('🔧 Checking for missing columns...');
+      
+      // Define all required columns for each table
+      const tableColumns = {
+        'users': [
+          { name: 'registration_status', type: 'VARCHAR(50) DEFAULT \'pending\'' },
+          { name: 'two_factor_enabled', type: 'BOOLEAN DEFAULT FALSE' },
+          { name: 'two_factor_secret', type: 'VARCHAR(255)' },
+          { name: 'login_count', type: 'INTEGER DEFAULT 0' },
+          { name: 'last_login', type: 'TIMESTAMP' },
+          { name: 'profile_picture', type: 'TEXT' },
+          { name: 'phone', type: 'VARCHAR(50)' },
+          { name: 'is_verified', type: 'BOOLEAN DEFAULT FALSE' },
+          { name: 'updated_at', type: 'TIMESTAMP DEFAULT NOW()' }
+        ],
+        'claims': [
+          { name: 'submission_count', type: 'INTEGER DEFAULT 1' },
+          { name: 'ai_verdict_id', type: 'UUID' },
+          { name: 'human_verdict_id', type: 'UUID' },
+          { name: 'assigned_fact_checker_id', type: 'UUID' },
+          { name: 'updated_at', type: 'TIMESTAMP DEFAULT NOW()' }
+        ],
+        'ai_verdicts': [
+          { name: 'confidence_score', type: 'DECIMAL(3,2) CHECK (confidence_score >= 0 AND confidence_score <= 1)' },
+          { name: 'evidence_sources', type: 'JSONB' },
+          { name: 'ai_model_version', type: 'VARCHAR(100)' },
+          { name: 'updated_at', type: 'TIMESTAMP DEFAULT NOW()' }
+        ],
+        'fact_checkers': [
+          { name: 'expertise_areas', type: 'JSONB DEFAULT \'[]\'' },
+          { name: 'rating', type: 'DECIMAL(3,2) DEFAULT 0 CHECK (rating >= 0 AND rating <= 5)' },
+          { name: 'total_reviews', type: 'INTEGER DEFAULT 0' },
+          { name: 'is_active', type: 'BOOLEAN DEFAULT TRUE' },
+          { name: 'updated_at', type: 'TIMESTAMP DEFAULT NOW()' }
+        ],
+        'verdicts': [
+          { name: 'evidence_sources', type: 'JSONB' },
+          { name: 'ai_verdict_id', type: 'UUID' },
+          { name: 'approval_status', type: 'VARCHAR(50) DEFAULT \'approved\' CHECK (approval_status IN (\'pending\', \'approved\', \'rejected\'))' },
+          { name: 'review_notes', type: 'TEXT' },
+          { name: 'time_spent', type: 'INTEGER DEFAULT 0' },
+          { name: 'updated_at', type: 'TIMESTAMP DEFAULT NOW()' }
+        ],
+        'blog_articles': [
+          { name: 'author_type', type: 'VARCHAR(50) DEFAULT \'human\' CHECK (author_type IN (\'human\', \'ai\'))' },
+          { name: 'source_claim_ids', type: 'JSONB DEFAULT \'[]\'' },
+          { name: 'trending_topic_id', type: 'UUID' },
+          { name: 'featured_image', type: 'TEXT' },
+          { name: 'read_time', type: 'INTEGER DEFAULT 5' },
+          { name: 'view_count', type: 'INTEGER DEFAULT 0' },
+          { name: 'published_at', type: 'TIMESTAMP' },
+          { name: 'updated_at', type: 'TIMESTAMP DEFAULT NOW()' }
+        ],
+        'trending_topics': [
+          { name: 'engagement_score', type: 'DECIMAL(5,2) DEFAULT 0' },
+          { name: 'related_claims', type: 'JSONB DEFAULT \'[]\'' },
+          { name: 'ai_generated_blog_id', type: 'UUID' },
+          { name: 'human_approved_blog_id', type: 'UUID' },
+          { name: 'last_updated', type: 'TIMESTAMP DEFAULT NOW()' }
+        ],
+        'notifications': [
+          { name: 'related_entity_type', type: 'VARCHAR(50)' },
+          { name: 'related_entity_id', type: 'UUID' },
+          { name: 'read_at', type: 'TIMESTAMP' }
+        ],
+        'user_analytics': [
+          { name: 'metadata', type: 'JSONB DEFAULT \'{}\'' }
+        ],
+        'admin_activities': [
+          { name: 'changes_made', type: 'JSONB DEFAULT \'{}\'' },
+          { name: 'ip_address', type: 'INET' },
+          { name: 'user_agent', type: 'TEXT' }
+        ],
+        'fact_checker_activities': [
+          { name: 'duration', type: 'INTEGER' },
+          { name: 'ip_address', type: 'INET' },
+          { name: 'device_info', type: 'JSONB DEFAULT \'{}\'' }
+        ],
+        'search_logs': [
+          { name: 'filters_applied', type: 'JSONB DEFAULT \'{}\'' },
+          { name: 'ip_address', type: 'INET' },
+          { name: 'user_agent', type: 'TEXT' }
+        ],
+        'user_sessions': [
+          { name: 'ip_address', type: 'INET' },
+          { name: 'user_agent', type: 'TEXT' },
+          { name: 'logout_time', type: 'TIMESTAMP' }
+        ],
+        'registration_requests': [
+          { name: 'admin_notes', type: 'TEXT' },
+          { name: 'reviewed_by', type: 'UUID' },
+          { name: 'reviewed_at', type: 'TIMESTAMP' }
+        ]
+      };
+
+      let totalColumnsAdded = 0;
+      for (const [tableName, columns] of Object.entries(tableColumns)) {
+        for (const column of columns) {
+          const added = await this.addColumnIfNotExists(`hakikisha.${tableName}`, column.name, column.type);
+          if (added) totalColumnsAdded++;
+        }
+      }
+      
+      console.log(`✅ Missing columns check completed. Added ${totalColumnsAdded} columns.`);
+    } catch (error) {
+      console.error('❌ Error adding missing columns:', error);
+    }
+  }
+
+  static async addColumnIfNotExists(table, column, definition) {
+    try {
+      const tableName = table.replace('hakikisha.', '');
+      const checkQuery = `
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' 
+        AND table_name = $1 
+        AND column_name = $2
+      `;
+      
+      const result = await db.query(checkQuery, [tableName, column]);
+      
+      if (result.rows.length === 0) {
+        const alterQuery = `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`;
+        await db.query(alterQuery);
+        console.log(`✅ Added missing column: ${table}.${column}`);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.log(`⚠️ Could not add column ${column} to ${table}:`, error.message);
+      return false;
+    }
   }
 
   static async createClaimsTable() {
@@ -385,29 +519,6 @@ class DatabaseInitializer {
     console.log('✅ All indexes created/verified');
   }
 
-  static async addColumnIfNotExists(table, column, definition) {
-    try {
-      const tableName = table.replace('hakikisha.', '');
-      const checkQuery = `
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_schema = 'hakikisha' 
-        AND table_name = $1 
-        AND column_name = $2
-      `;
-      
-      const result = await db.query(checkQuery, [tableName, column]);
-      
-      if (result.rows.length === 0) {
-        const alterQuery = `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`;
-        await db.query(alterQuery);
-        console.log(`✅ Added missing column: ${table}.${column}`);
-      }
-    } catch (error) {
-      console.log(`⚠️ Could not add column ${column} to ${table}:`, error.message);
-    }
-  }
-
   static async checkDatabaseConnection() {
     try {
       await db.query('SELECT 1');
@@ -514,7 +625,7 @@ class DatabaseInitializer {
         FROM information_schema.columns 
         WHERE table_schema = 'hakikisha' 
         AND table_name = 'users' 
-        AND column_name IN ('password_hash', 'email', 'role')
+        AND column_name IN ('password_hash', 'email', 'role', 'two_factor_enabled', 'registration_status')
       `);
       
       console.log(`🔑 Found ${criticalColumns.rows.length} critical columns in users table`);
