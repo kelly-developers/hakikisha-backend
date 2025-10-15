@@ -2,6 +2,7 @@
 const { Pool } = require('pg');
 
 console.log('🔧 Loading database configuration...');
+console.log('📁 Database config file loaded successfully');
 
 // Create pool with connection details
 const pool = new Pool({
