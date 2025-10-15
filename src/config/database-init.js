@@ -555,14 +555,14 @@ class DatabaseInitializer {
       for (const table of tables) {
         try {
           await db.query(`DROP TABLE IF EXISTS hakikisha.${table} CASCADE`);
-          console.log(`✅ Dropped table: ${table}`);
+          console.log(`Dropped table: ${table}`);
         } catch (error) {
           console.log(`⚠️ Could not drop table ${table}:`, error.message);
         }
       }
       
       await this.initializeCompleteDatabase();
-      console.log('🎉 Database reset and reinitialized successfully!');
+      console.log(' Database reset and reinitialized successfully!');
       
     } catch (error) {
       console.error('❌ Error resetting database:', error);
