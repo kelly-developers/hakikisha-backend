@@ -1,4 +1,4 @@
-// config/database.js
+// src/config/database.js
 const { Pool } = require('pg');
 
 console.log('🔧 Loading database configuration...');
@@ -13,7 +13,11 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  // Force SSL for Render PostgreSQL
+  ssl: {
+    rejectUnauthorized: false,
+    require: true
+  },
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
@@ -24,6 +28,7 @@ const initializeDatabase = async (retries = 5, delay = 3000) => {
   for (let i = 0; i < retries; i++) {
     try {
       console.log(`🔄 Database connection attempt ${i + 1}/${retries}...`);
+      console.log(`🔗 Connecting to: ${process.env.DB_HOST}`);
       
       const client = await pool.connect();
       
@@ -43,6 +48,12 @@ const initializeDatabase = async (retries = 5, delay = 3000) => {
       
     } catch (error) {
       console.error(`❌ Connection attempt ${i + 1}/${retries} failed:`, error.message);
+      console.log(`🔧 Connection details:`, {
+        host: process.env.DB_HOST,
+        database: process.env.DB_NAME,
+        user: process.env.DB_USER,
+        ssl: 'enforced'
+      });
       
       if (i < retries - 1) {
         console.log(`⏳ Retrying in ${delay / 1000} seconds...`);
@@ -63,6 +74,20 @@ pool.on('connect', () => {
 pool.on('error', (err) => {
   console.error('💥 Database pool error:', err);
 });
+
+// Test connection on startup
+const testConnection = async () => {
+  try {
+    const client = await pool.connect();
+    console.log('🧪 Connection test: SUCCESS');
+    client.release();
+  } catch (error) {
+    console.error('🧪 Connection test: FAILED -', error.message);
+  }
+};
+
+// Run test on require
+testConnection();
 
 module.exports = {
   query: (text, params) => {
