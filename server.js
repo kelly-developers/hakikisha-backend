@@ -20,7 +20,7 @@ const startServer = async () => {
       // Try to load database configuration
       let db;
       try {
-        db = require('./config/database');
+        db = require('./src/config/database');
         console.log('✅ Database module loaded successfully');
       } catch (dbModuleError) {
         console.error('❌ Database module not found:', dbModuleError.message);
