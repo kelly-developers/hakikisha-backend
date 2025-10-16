@@ -19,8 +19,8 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
-    const token = authHeader.replace('Bearer ', '');
-    console.log('Token extracted:', token ? `${token.substring(0, 20)}...` : 'Empty token');
+    const token = authHeader.replace('Bearer ', '').trim();
+    console.log('Token extracted:', token ? `${token.substring(0, 30)}...` : 'Empty token');
 
     if (!token) {
       console.log('❌ Empty token after extraction');
@@ -30,12 +30,14 @@ const authMiddleware = async (req, res, next) => {
       });
     }
 
-    // Verify JWT token
+    // Verify JWT token - USE YOUR ACTUAL JWT SECRET FROM RENDER
     console.log('Verifying JWT token...');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-change-in-production');
+    const JWT_SECRET = process.env.JWT_SECRET || '9ce6aa78491314d5b0e382628f1ca04eab3280570f8b5ca2707323e527ba82ec1787437a328dfad23d12816600a291121365058450664866088cb27d5f232f37';
+    
+    const decoded = jwt.verify(token, JWT_SECRET);
     console.log('✅ JWT token decoded successfully');
     console.log('Decoded token data:', {
-      userId: decoded.userId || decoded.id,
+      userId: decoded.userId,
       email: decoded.email,
       role: decoded.role,
       iat: decoded.iat,
@@ -48,11 +50,11 @@ const authMiddleware = async (req, res, next) => {
       `SELECT id, email, role, is_verified, registration_status 
        FROM hakikisha.users 
        WHERE id = $1`,
-      [decoded.userId || decoded.id]
+      [decoded.userId]
     );
 
     if (userResult.rows.length === 0) {
-      console.log('❌ User not found in database for ID:', decoded.userId || decoded.id);
+      console.log('❌ User not found in database for ID:', decoded.userId);
       return res.status(401).json({
         success: false,
         error: 'User account not found.'
@@ -69,21 +71,26 @@ const authMiddleware = async (req, res, next) => {
     });
 
     // Check if user is verified and approved
-    if (!user.is_verified || user.registration_status !== 'approved') {
-      console.log('❌ User not verified or approved:', {
-        is_verified: user.is_verified,
-        registration_status: user.registration_status
-      });
+    if (!user.is_verified) {
+      console.log('❌ User not verified');
       return res.status(401).json({
         success: false,
-        error: 'Account not verified or approved. Please contact administrator.'
+        error: 'Account not verified. Please verify your email.'
+      });
+    }
+
+    if (user.registration_status !== 'approved') {
+      console.log('❌ User registration not approved:', user.registration_status);
+      return res.status(401).json({
+        success: false,
+        error: 'Account not approved. Please contact administrator.'
       });
     }
 
     // Attach complete user information to request
     req.user = {
       userId: user.id,
-      id: user.id, // Add both for compatibility
+      id: user.id,
       email: user.email,
       role: user.role,
       is_verified: user.is_verified,
@@ -91,11 +98,7 @@ const authMiddleware = async (req, res, next) => {
     };
 
     console.log('✅ Authentication successful for user:', user.email);
-    console.log('User attached to request:', {
-      userId: req.user.userId,
-      email: req.user.email,
-      role: req.user.role
-    });
+    console.log('User attached to request:', req.user);
     
     next();
     
@@ -177,14 +180,16 @@ const optionalAuth = async (req, res, next) => {
     const authHeader = req.header('Authorization');
     
     if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.replace('Bearer ', '');
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-change-in-production');
+      const token = authHeader.replace('Bearer ', '').trim();
+      const JWT_SECRET = process.env.JWT_SECRET || '9ce6aa78491314d5b0e382628f1ca04eab3280570f8b5ca2707323e527ba82ec1787437a328dfad23d12816600a291121365058450664866088cb27d5f232f37';
+      
+      const decoded = jwt.verify(token, JWT_SECRET);
       
       const userResult = await db.query(
         `SELECT id, email, role, is_verified, registration_status 
          FROM hakikisha.users 
          WHERE id = $1 AND is_verified = true AND registration_status = 'approved'`,
-        [decoded.userId || decoded.id]
+        [decoded.userId]
       );
 
       if (userResult.rows.length > 0) {

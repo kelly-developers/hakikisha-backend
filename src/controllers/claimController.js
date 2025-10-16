@@ -1,14 +1,19 @@
 const { v4: uuidv4 } = require('uuid');
 const db = require('../config/database');
 const logger = require('../utils/logger');
-const { PointsService, POINTS } = require('../services/pointsService');
 
 class ClaimController {
   async submitClaim(req, res) {
     try {
+      console.log('📝 Submit Claim Request Received');
+      console.log('👤 User making request:', req.user);
+      console.log('📦 Request body:', req.body);
+
       const { category, claimText, videoLink, sourceLink, imageUrl } = req.body;
 
+      // Validate input
       if (!category || !claimText) {
+        console.log('❌ Validation failed: Category or claim text missing');
         return res.status(400).json({
           success: false,
           error: 'Category and claim text are required',
@@ -16,43 +21,96 @@ class ClaimController {
         });
       }
 
-      const claimId = uuidv4();
+      // Validate user exists in request
+      if (!req.user || !req.user.userId) {
+        console.log('❌ No user found in request');
+        return res.status(401).json({
+          success: false,
+          error: 'Authentication required',
+          code: 'AUTH_ERROR'
+        });
+      }
 
+      const claimId = uuidv4();
+      console.log('🆔 Generated claim ID:', claimId);
+
+      // Prepare media data
+      const mediaType = imageUrl || videoLink ? 'media' : 'text';
+      const mediaUrl = imageUrl || videoLink || null;
+
+      console.log('💾 Inserting claim into database...');
       const result = await db.query(
         `INSERT INTO hakikisha.claims (
           id, user_id, title, description, category, media_type, media_url,
-          status, priority, submission_count, is_trending, created_at
+          status, priority, submission_count, created_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'medium', 1, false, NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'medium', 1, NOW())
         RETURNING id, category, status, created_at as submittedDate`,
-        [claimId, req.user.userId, claimText.substring(0, 100), claimText, category, 
-         imageUrl || videoLink ? 'media' : 'text', imageUrl || videoLink || null]
+        [
+          claimId, 
+          req.user.userId, 
+          claimText.substring(0, 100), 
+          claimText, 
+          category, 
+          mediaType, 
+          mediaUrl
+        ]
       );
 
-      // Check if this is user's first claim
-      const claimCount = await db.query(
-        'SELECT COUNT(*) FROM hakikisha.claims WHERE user_id = $1',
-        [req.user.userId]
-      );
+      console.log('✅ Claim inserted successfully:', result.rows[0]);
 
-      const isFirstClaim = parseInt(claimCount.rows[0].count) === 1;
+      // Check if this is user's first claim (optional - for points system)
+      try {
+        const claimCount = await db.query(
+          'SELECT COUNT(*) FROM hakikisha.claims WHERE user_id = $1',
+          [req.user.userId]
+        );
 
-      // Award points
-      const pointsAwarded = await PointsService.awardPoints(
-        req.user.userId,
-        isFirstClaim ? POINTS.FIRST_CLAIM : POINTS.CLAIM_SUBMISSION,
-        'CLAIM_SUBMISSION',
-        isFirstClaim ? 'First claim submitted' : 'Claim submitted'
-      );
+        const isFirstClaim = parseInt(claimCount.rows[0].count) === 1;
+        console.log('🎯 Is first claim:', isFirstClaim);
+
+        // If you have PointsService, uncomment this section
+        /*
+        const pointsAwarded = await PointsService.awardPoints(
+          req.user.userId,
+          isFirstClaim ? POINTS.FIRST_CLAIM : POINTS.CLAIM_SUBMISSION,
+          'CLAIM_SUBMISSION',
+          isFirstClaim ? 'First claim submitted' : 'Claim submitted'
+        );
+        */
+
+      } catch (pointsError) {
+        console.log('⚠️ Points service not available, continuing without points');
+      }
 
       res.status(201).json({
         success: true,
         message: 'Claim submitted successfully',
-        claim: result.rows[0],
-        pointsAwarded: pointsAwarded.pointsAwarded
+        claim: result.rows[0]
+        // pointsAwarded: pointsAwarded?.pointsAwarded // Uncomment if using points
       });
+
     } catch (error) {
+      console.error('❌ Submit claim error:', error);
       logger.error('Submit claim error:', error);
+      
+      // Handle specific database errors
+      if (error.code === '23503') { // Foreign key violation
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid user account',
+          code: 'USER_NOT_FOUND'
+        });
+      }
+      
+      if (error.code === '23505') { // Unique violation
+        return res.status(409).json({
+          success: false,
+          error: 'Claim already exists',
+          code: 'DUPLICATE_CLAIM'
+        });
+      }
+
       res.status(500).json({
         success: false,
         error: 'Claim submission failed',
@@ -90,6 +148,7 @@ class ClaimController {
 
   async getMyClaims(req, res) {
     try {
+      console.log('📋 Get My Claims - User:', req.user.userId);
       const { status } = req.query;
 
       let query = `
@@ -111,8 +170,10 @@ class ClaimController {
 
       query += ` ORDER BY c.created_at DESC`;
 
+      console.log('🔍 Executing query for user claims');
       const result = await db.query(query, params);
 
+      console.log(`✅ Found ${result.rows.length} claims for user`);
       res.json({
         success: true,
         claims: result.rows
@@ -130,6 +191,7 @@ class ClaimController {
   async getClaimDetails(req, res) {
     try {
       const { claimId } = req.params;
+      console.log('🔍 Get Claim Details:', claimId);
 
       const result = await db.query(
         `SELECT c.*, 
@@ -144,6 +206,7 @@ class ClaimController {
       );
 
       if (result.rows.length === 0) {
+        console.log('❌ Claim not found:', claimId);
         return res.status(404).json({
           success: false,
           error: 'Claim not found',
@@ -152,6 +215,7 @@ class ClaimController {
       }
 
       const claim = result.rows[0];
+      console.log('✅ Claim found:', claim.id);
       
       res.json({
         success: true,
@@ -192,6 +256,7 @@ class ClaimController {
         });
       }
 
+      console.log('🔍 Search claims:', q);
       const result = await db.query(
         `SELECT c.id, c.title, c.description, c.category, c.status
          FROM hakikisha.claims c
@@ -201,6 +266,7 @@ class ClaimController {
         [`%${q}%`]
       );
 
+      console.log(`✅ Search found ${result.rows.length} results`);
       res.json({
         success: true,
         results: result.rows
@@ -219,7 +285,7 @@ class ClaimController {
     try {
       const { limit = 10 } = req.query;
       
-      console.log('Getting trending claims with limit:', limit);
+      console.log('🔥 Getting trending claims with limit:', limit);
 
       // First, let's check if the trending_score column exists
       let columnCheck;
@@ -294,7 +360,6 @@ class ClaimController {
       }
 
       console.log('Executing query:', query.substring(0, 100) + '...');
-
       const result = await db.query(query, params);
 
       console.log('Found', result.rows.length, 'trending/popular claims');

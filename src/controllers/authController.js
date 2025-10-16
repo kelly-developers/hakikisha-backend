@@ -1,12 +1,12 @@
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
+const jwt = require('jsonwebtoken');
 const db = require('../config/database');
 const DatabaseInitializer = require('../config/database-init');
 
 // Ensure database is ready before any auth operation
 async function ensureAuthDatabaseReady() {
   try {
-    // Quick check if users table has required structure
     await db.query('SELECT id, email, password_hash, role FROM hakikisha.users LIMIT 1');
   } catch (error) {
     if (error.code === '42703' || error.code === '42P01') {
@@ -18,19 +18,33 @@ async function ensureAuthDatabaseReady() {
   }
 }
 
+// Generate JWT token
+const generateJWTToken = (user) => {
+  const secret = process.env.JWT_SECRET || '9ce6aa78491314d5b0e382628f1ca04eab3280570f8b5ca2707323e527ba82ec1787437a328dfad23d12816600a291121365058450664866088cb27d5f232f37';
+  
+  return jwt.sign(
+    {
+      userId: user.id,
+      email: user.email,
+      role: user.role
+    },
+    secret,
+    {
+      expiresIn: '24h'
+    }
+  );
+};
+
 const register = async (req, res) => {
   try {
-    // Ensure database is ready
     await ensureAuthDatabaseReady();
 
     const { email, password, phone, role = 'user' } = req.body;
 
-    // Validate input
     if (!email || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Validation error',
-        message: 'Email and password are required'
+        error: 'Email and password are required'
       });
     }
 
@@ -43,8 +57,7 @@ const register = async (req, res) => {
     if (existingUser.rows.length > 0) {
       return res.status(409).json({
         success: false,
-        error: 'User exists',
-        message: 'User with this email already exists'
+        error: 'User with this email already exists'
       });
     }
 
@@ -66,21 +79,11 @@ const register = async (req, res) => {
 
     const newUser = result.rows[0];
 
-    // Create registration request for non-user roles
-    if (role !== 'user') {
-      await db.query(
-        `INSERT INTO hakikisha.registration_requests 
-         (id, user_id, request_type, status, submitted_at) 
-         VALUES ($1, $2, $3, $4, NOW())`,
-        [uuidv4(), newUser.id, role, 'pending']
-      );
-    }
-
     res.status(201).json({
       success: true,
       message: role === 'user' 
         ? 'Registration successful' 
-        : 'Registration submitted for approval. You will be notified once reviewed.',
+        : 'Registration submitted for approval',
       user: {
         id: newUser.id,
         email: newUser.email,
@@ -92,15 +95,13 @@ const register = async (req, res) => {
     console.error('Registration error:', error);
     res.status(500).json({
       success: false,
-      error: 'Registration failed',
-      message: error.message
+      error: 'Registration failed'
     });
   }
 };
 
 const login = async (req, res) => {
   try {
-    // Ensure database is ready
     await ensureAuthDatabaseReady();
 
     const { email, password } = req.body;
@@ -108,16 +109,14 @@ const login = async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Validation error',
-        message: 'Email and password are required'
+        error: 'Email and password are required'
       });
     }
 
     // Find user with password_hash
     const userResult = await db.query(
       `SELECT id, email, password_hash, role, is_verified, phone, 
-              two_factor_enabled, two_factor_secret, login_count, last_login,
-              registration_status
+              two_factor_enabled, registration_status
        FROM hakikisha.users 
        WHERE email = $1`,
       [email]
@@ -126,8 +125,7 @@ const login = async (req, res) => {
     if (userResult.rows.length === 0) {
       return res.status(401).json({
         success: false,
-        error: 'Authentication failed',
-        message: 'Invalid email or password'
+        error: 'Invalid email or password'
       });
     }
 
@@ -137,8 +135,7 @@ const login = async (req, res) => {
     if (user.registration_status !== 'approved') {
       return res.status(403).json({
         success: false,
-        error: 'Account pending approval',
-        message: 'Your account is pending admin approval'
+        error: 'Your account is pending admin approval'
       });
     }
 
@@ -146,8 +143,7 @@ const login = async (req, res) => {
     if (!user.password_hash) {
       return res.status(500).json({
         success: false,
-        error: 'Account error',
-        message: 'User account configuration error. Please contact support.'
+        error: 'User account configuration error'
       });
     }
 
@@ -156,8 +152,7 @@ const login = async (req, res) => {
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
-        error: 'Authentication failed',
-        message: 'Invalid email or password'
+        error: 'Invalid email or password'
       });
     }
 
@@ -169,16 +164,8 @@ const login = async (req, res) => {
       [user.id]
     );
 
-    // Generate session token
-    const sessionToken = uuidv4();
-
-    // Create session
-    await db.query(
-      `INSERT INTO hakikisha.user_sessions 
-       (id, user_id, session_token, login_time, last_activity, expires_at, is_active)
-       VALUES ($1, $2, $3, NOW(), NOW(), NOW() + INTERVAL '7 days', true)`,
-      [uuidv4(), user.id, sessionToken]
-    );
+    // Generate JWT token (NOT session token)
+    const token = generateJWTToken(user);
 
     // Check if 2FA is enabled
     const requires2FA = user.two_factor_enabled;
@@ -186,27 +173,30 @@ const login = async (req, res) => {
     const response = {
       success: true,
       message: requires2FA ? '2FA code required' : 'Login successful',
-      requires2FA,
+      requires2FA: requires2FA,
       user: {
         id: user.id,
         email: user.email,
         role: user.role,
         is_verified: user.is_verified,
+        registration_status: user.registration_status,
         two_factor_enabled: user.two_factor_enabled
       }
     };
 
     if (!requires2FA) {
-      response.session_token = sessionToken;
+      response.token = token; // Send JWT token
     }
+
+    console.log('✅ Login successful for user:', user.email);
+    console.log('🔐 JWT Token generated:', token.substring(0, 50) + '...');
 
     res.json(response);
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({
       success: false,
-      error: 'Login failed',
-      message: error.message
+      error: 'Login failed'
     });
   }
 };
@@ -218,52 +208,53 @@ const verify2FA = async (req, res) => {
     if (!userId || !code) {
       return res.status(400).json({
         success: false,
-        error: 'Validation error',
-        message: 'User ID and 2FA code are required'
+        error: 'User ID and 2FA code are required'
       });
     }
 
-    // In a real implementation, you would verify the 2FA code here
-    // For now, we'll just generate a session token
-    
-    const sessionToken = uuidv4();
-
-    // Create session
-    await db.query(
-      `INSERT INTO hakikisha.user_sessions 
-       (id, user_id, session_token, login_time, last_activity, expires_at, is_active)
-       VALUES ($1, $2, $3, NOW(), NOW(), NOW() + INTERVAL '7 days', true)`,
-      [uuidv4(), userId, sessionToken]
+    // Get user
+    const userResult = await db.query(
+      'SELECT id, email, role FROM hakikisha.users WHERE id = $1',
+      [userId]
     );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // In a real implementation, verify the 2FA code here
+    // For now, we'll just generate a JWT token
+    
+    const token = generateJWTToken(user);
 
     res.json({
       success: true,
       message: 'Login successful',
-      session_token: sessionToken
+      token: token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role
+      }
     });
   } catch (error) {
     console.error('2FA verification error:', error);
     res.status(500).json({
       success: false,
-      error: '2FA verification failed',
-      message: error.message
+      error: '2FA verification failed'
     });
   }
 };
 
 const logout = async (req, res) => {
   try {
-    const { session_token } = req.body;
-
-    if (session_token) {
-      await db.query(
-        `UPDATE hakikisha.user_sessions 
-         SET is_active = false, logout_time = NOW() 
-         WHERE session_token = $1 AND is_active = true`,
-        [session_token]
-      );
-    }
-
+    // With JWT, we don't need to maintain server-side sessions
+    // Client just discards the token
     res.json({
       success: true,
       message: 'Logout successful'
@@ -272,8 +263,7 @@ const logout = async (req, res) => {
     console.error('Logout error:', error);
     res.status(500).json({
       success: false,
-      error: 'Logout failed',
-      message: error.message
+      error: 'Logout failed'
     });
   }
 };
@@ -315,8 +305,7 @@ const getCurrentUser = async (req, res) => {
     console.error('Get current user error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to get user information',
-      message: error.message
+      error: 'Failed to get user information'
     });
   }
 };
