@@ -19,64 +19,73 @@ const startServer = async () => {
     
     try {
       // Try to load database configuration
-      let db;
-      try {
-        db = require('./src/config/database');
-        console.log('Database module loaded successfully');
-      } catch (dbModuleError) {
-        console.error('Database module not found:', dbModuleError.message);
-        throw new Error('Database configuration not found');
-      }
+      const db = require('./src/config/database');
+      const DatabaseInitializer = require('./src/config/database-init');
       
-      // Initialize database connection
-      if (db && typeof db.initializeDatabase === 'function') {
-        dbInitialized = await db.initializeDatabase();
-        
-        if (dbInitialized) {
-          console.log('Initializing database tables and admin user...');
-          
-          try {
-            const DatabaseInitializer = require('./src/config/database-init');
-            console.log('DatabaseInitializer module loaded successfully');
-            
-            await DatabaseInitializer.initializeCompleteDatabase();
-            tablesInitialized = true;
-            
-            // Verify admin user was created
-            const adminCheck = await db.query(
-              'SELECT email, role FROM hakikisha.users WHERE email = $1', 
-              ['kellynyachiro@gmail.com']
-            );
-            
-            adminCreated = adminCheck.rows.length > 0;
-            
-            if (adminCreated) {
-              console.log('Admin user verified: kellynyachiro@gmail.com');
-            } else {
-              console.log('Admin user not found after initialization');
-            }
-            
-            console.log('Database setup completed successfully!');
-          } catch (initError) {
-            console.error('Database initialization failed:', initError.message);
-            console.log('Continuing without database initialization...');
-          }
-        }
-      } else {
-        console.error('Database module does not export initializeDatabase function');
+      console.log('Database modules loaded successfully');
+      
+      // Check database connection first
+      const isConnected = await db.query('SELECT 1').then(() => true).catch(() => false);
+      if (!isConnected) {
+        throw new Error('Cannot connect to database');
       }
+      dbInitialized = true;
+
+      // Force database initialization
+      console.log('Starting database initialization...');
+      await DatabaseInitializer.initializeCompleteDatabase();
+      tablesInitialized = true;
+      adminCreated = true;
+      
+      console.log('Database setup completed successfully!');
+      
     } catch (dbError) {
       console.error('Database setup error:', dbError.message);
-      console.log('Starting server without database...');
+      console.log('Starting server with limited functionality...');
     }
 
     // Create express app with trust proxy for Render
     const app = express();
     app.set('trust proxy', 1);
     
+    // Enhanced CORS configuration
+    app.use(cors({
+      origin: function(origin, callback) {
+        // Allow requests with no origin (mobile apps, Postman)
+        if (!origin) return callback(null, true);
+        
+        const allowedOrigins = [
+          'capacitor://localhost',
+          'http://localhost',
+          'ionic://localhost',
+          'http://localhost:8100',
+          'http://localhost:3000',
+          'https://e2280cef-9c3e-485b-aca5-a7c342a041ca.lovableproject.com',
+          'https://hakikisha-backend.onrender.com'
+        ];
+        
+        if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('capacitor://') || origin.startsWith('ionic://')) {
+          callback(null, true);
+        } else {
+          // In production, be more restrictive
+          if (process.env.NODE_ENV === 'production') {
+            callback(new Error(`CORS blocked for origin: ${origin}`), false);
+          } else {
+            callback(null, true); // Allow all in development
+          }
+        }
+      },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Client-Info'],
+      exposedHeaders: ['Content-Range', 'X-Content-Range']
+    }));
+
+    // Handle preflight requests
+    app.options('*', cors());
+    
     // Middleware
     app.use(helmet());
-    app.use(cors());
     app.use(morgan('combined'));
     app.use(express.json({ limit: '10mb' }));
     app.use(express.urlencoded({ extended: true }));
@@ -84,7 +93,10 @@ const startServer = async () => {
     // Rate limiting
     const limiter = rateLimit({
       windowMs: 15 * 60 * 1000,
-      max: 100
+      max: 1000,
+      message: {
+        error: 'Too many requests from this IP, please try again later.',
+      }
     });
     app.use(limiter);
 
@@ -97,7 +109,8 @@ const startServer = async () => {
         database: dbInitialized ? 'connected' : 'disconnected',
         tables: tablesInitialized ? 'initialized' : 'not initialized',
         admin: adminCreated ? 'created' : 'not created',
-        port: process.env.PORT || 10000
+        port: process.env.PORT || 10000,
+        environment: process.env.NODE_ENV || 'development'
       });
     });
 
@@ -117,6 +130,8 @@ const startServer = async () => {
         `);
         
         const users = await db.query('SELECT COUNT(*) as count FROM hakikisha.users');
+        const claims = await db.query('SELECT COUNT(*) as count FROM hakikisha.claims');
+        const trending = await db.query('SELECT COUNT(*) as count FROM hakikisha.claims WHERE is_trending = true');
         const admin = await db.query('SELECT email, role FROM hakikisha.users WHERE email = $1', ['kellynyachiro@gmail.com']);
         
         res.json({
@@ -131,8 +146,10 @@ const startServer = async () => {
             count: tables.rows.length,
             list: tables.rows.map(t => t.table_name)
           },
-          users: {
-            count: users.rows[0].count
+          stats: {
+            users: users.rows[0].count,
+            claims: claims.rows[0].count,
+            trending_claims: trending.rows[0].count
           },
           admin: {
             exists: admin.rows.length > 0,
@@ -150,7 +167,7 @@ const startServer = async () => {
       }
     });
 
-    // API routes - FIXED: Added all missing routes
+    // API routes
     console.log('Loading API routes...');
     
     // Auth routes
@@ -161,52 +178,12 @@ const startServer = async () => {
     app.use('/api/v1/users', require('./src/routes/userRoutes'));
     console.log('✓ User routes loaded: /api/v1/users');
     
-    // Claims routes - THIS WAS MISSING!
+    // Claims routes
     try {
       app.use('/api/v1/claims', require('./src/routes/claimRoutes'));
       console.log('✓ Claims routes loaded: /api/v1/claims');
     } catch (error) {
       console.error('✗ Claims routes failed to load:', error.message);
-    }
-    
-    // Blog routes
-    try {
-      app.use('/api/v1/blogs', require('./src/routes/blogRoutes'));
-      console.log('✓ Blog routes loaded: /api/v1/blogs');
-    } catch (error) {
-      console.error('✗ Blog routes failed to load:', error.message);
-    }
-    
-    // Admin routes
-    try {
-      app.use('/api/v1/admin', require('./src/routes/adminRoutes'));
-      console.log('✓ Admin routes loaded: /api/v1/admin');
-    } catch (error) {
-      console.error('✗ Admin routes failed to load:', error.message);
-    }
-    
-    // Fact-checker routes
-    try {
-      app.use('/api/v1/fact-checker', require('./src/routes/factCheckerRoutes'));
-      console.log('✓ Fact-checker routes loaded: /api/v1/fact-checker');
-    } catch (error) {
-      console.error('✗ Fact-checker routes failed to load:', error.message);
-    }
-    
-    // AI routes
-    try {
-      app.use('/api/v1/ai', require('./src/routes/aiRoutes'));
-      console.log('✓ AI routes loaded: /api/v1/ai');
-    } catch (error) {
-      console.error('✗ AI routes failed to load:', error.message);
-    }
-    
-    // Points routes
-    try {
-      app.use('/api/v1/points', require('./src/routes/pointsRoutes'));
-      console.log('✓ Points routes loaded: /api/v1/points');
-    } catch (error) {
-      console.error('✗ Points routes failed to load:', error.message);
     }
 
     // Test endpoint
@@ -214,7 +191,8 @@ const startServer = async () => {
       res.json({
         message: 'Hakikisha API is working!',
         timestamp: new Date().toISOString(),
-        version: '1.0.0'
+        version: '1.0.0',
+        database: dbInitialized ? 'connected' : 'disconnected'
       });
     });
 
@@ -248,60 +226,21 @@ const startServer = async () => {
       });
     });
 
-    // TEMPORARY: Direct trending endpoint as fallback
-    app.get('/api/v1/claims/trending', async (req, res) => {
-      try {
-        const { limit = 10 } = req.query;
-        console.log('Direct trending endpoint hit with limit:', limit);
-        
-        const db = require('./src/config/database');
-        const result = await db.query(
-          `SELECT c.id, c.title, c.category, c.status,
-                  COALESCE(v.verdict, av.verdict) as verdict,
-                  c.created_at as submittedDate,
-                  v.created_at as verdictDate
-           FROM claims c
-           LEFT JOIN verdicts v ON c.human_verdict_id = v.id
-           LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
-           WHERE c.is_trending = true OR c.submission_count > 1
-           ORDER BY c.submission_count DESC, c.created_at DESC
-           LIMIT $1`,
-          [parseInt(limit)]
-        );
-
-        console.log('Trending query result:', result.rows.length, 'claims found');
-        
-        res.json({
-          success: true,
-          trendingClaims: result.rows,
-          count: result.rows.length,
-          message: 'Trending claims fetched successfully'
-        });
-      } catch (error) {
-        console.error('Trending claims error:', error);
-        res.status(500).json({
-          success: false,
-          error: 'Failed to get trending claims',
-          code: 'SERVER_ERROR'
-        });
-      }
-    });
-
     // Root endpoint
     app.get('/', (req, res) => {
       res.json({
         message: 'Hakikisha Backend API',
         version: '1.0.0',
         timestamp: new Date().toISOString(),
+        status: 'running',
+        database: dbInitialized ? 'connected' : 'disconnected',
         endpoints: {
           health: '/health',
           debug: '/api/debug/db',
           test: '/api/test',
           auth: '/api/v1/auth',
-          claims: '/api/v1/claims',
           users: '/api/v1/users',
-          blogs: '/api/v1/blogs',
-          admin: '/api/v1/admin'
+          claims: '/api/v1/claims'
         }
       });
     });
@@ -319,9 +258,7 @@ const startServer = async () => {
           '/api/test',
           '/api/v1/auth/*',
           '/api/v1/users/*',
-          '/api/v1/claims/*',
-          '/api/v1/blogs/*',
-          '/api/v1/admin/*'
+          '/api/v1/claims/*'
         ]
       });
     });
@@ -331,7 +268,8 @@ const startServer = async () => {
       console.error('Unhandled error:', error);
       res.status(500).json({
         error: 'Internal server error',
-        message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+        message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong',
+        path: req.originalUrl
       });
     });
 
