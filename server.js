@@ -1,14 +1,13 @@
 require('dotenv').config();
 
-console.log('🚀 Starting Hakikisha Server...');
-console.log('🔍 Environment:', process.env.NODE_ENV);
+console.log('Starting Hakikisha Server...');
+console.log('Environment:', process.env.NODE_ENV);
 
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
-const path = require('path');
 
 const startServer = async () => {
   try {
@@ -16,16 +15,16 @@ const startServer = async () => {
     let tablesInitialized = false;
     let adminCreated = false;
 
-    console.log('🔄 Initializing database connection...');
+    console.log('Initializing database connection...');
     
     try {
       // Try to load database configuration
       let db;
       try {
         db = require('./src/config/database');
-        console.log('✅ Database module loaded successfully');
+        console.log('Database module loaded successfully');
       } catch (dbModuleError) {
-        console.error('❌ Database module not found:', dbModuleError.message);
+        console.error('Database module not found:', dbModuleError.message);
         throw new Error('Database configuration not found');
       }
       
@@ -34,11 +33,11 @@ const startServer = async () => {
         dbInitialized = await db.initializeDatabase();
         
         if (dbInitialized) {
-          console.log('🗃️ Initializing database tables and admin user...');
+          console.log('Initializing database tables and admin user...');
           
           try {
             const DatabaseInitializer = require('./src/config/database-init');
-            console.log('✅ DatabaseInitializer module loaded successfully');
+            console.log('DatabaseInitializer module loaded successfully');
             
             await DatabaseInitializer.initializeCompleteDatabase();
             tablesInitialized = true;
@@ -52,23 +51,23 @@ const startServer = async () => {
             adminCreated = adminCheck.rows.length > 0;
             
             if (adminCreated) {
-              console.log('✅ Admin user verified: kellynyachiro@gmail.com');
+              console.log('Admin user verified: kellynyachiro@gmail.com');
             } else {
-              console.log('❌ Admin user not found after initialization');
+              console.log('Admin user not found after initialization');
             }
             
-            console.log('🎉 Database setup completed successfully!');
+            console.log('Database setup completed successfully!');
           } catch (initError) {
-            console.error('❌ Database initialization failed:', initError.message);
-            console.log('⚠️ Continuing without database initialization...');
+            console.error('Database initialization failed:', initError.message);
+            console.log('Continuing without database initialization...');
           }
         }
       } else {
-        console.error('❌ Database module does not export initializeDatabase function');
+        console.error('Database module does not export initializeDatabase function');
       }
     } catch (dbError) {
-      console.error('❌ Database setup error:', dbError.message);
-      console.log('⚠️ Starting server without database...');
+      console.error('Database setup error:', dbError.message);
+      console.log('Starting server without database...');
     }
 
     // Create express app with trust proxy for Render
@@ -201,35 +200,35 @@ const startServer = async () => {
     // Start server
     app.listen(PORT, '0.0.0.0', () => {
       console.log('');
-      console.log('🎉 ===================================');
-      console.log(`🎉 Hakikisha Server is running!`);
-      console.log(`🎉 ===================================`);
-      console.log(`🌍 Port: ${PORT}`);
-      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`📊 Database: ${dbInitialized ? 'Connected ✅' : 'Not Connected ❌'}`);
-      console.log(`🗃️ Tables: ${tablesInitialized ? 'Initialized ✅' : 'Not Initialized ❌'}`);
-      console.log(`👤 Admin: ${adminCreated ? 'Created ✅' : 'Not Created ❌'}`);
+      console.log('===================================');
+      console.log('Hakikisha Server is running!');
+      console.log('===================================');
+      console.log('Port: ' + PORT);
+      console.log('Environment: ' + (process.env.NODE_ENV || 'development'));
+      console.log('Database: ' + (dbInitialized ? 'Connected' : 'Not Connected'));
+      console.log('Tables: ' + (tablesInitialized ? 'Initialized' : 'Not Initialized'));
+      console.log('Admin: ' + (adminCreated ? 'Created' : 'Not Created'));
       console.log('');
-      console.log('📍 Endpoints:');
-      console.log(`   Health: http://localhost:${PORT}/health`);
-      console.log(`   DB Debug: http://localhost:${PORT}/api/debug/db`);
-      console.log(`   API Test: http://localhost:${PORT}/api/test`);
+      console.log('Endpoints:');
+      console.log('   Health: http://localhost:' + PORT + '/health');
+      console.log('   DB Debug: http://localhost:' + PORT + '/api/debug/db');
+      console.log('   API Test: http://localhost:' + PORT + '/api/test');
       console.log('');
     });
 
   } catch (error) {
-    console.error('❌ Server startup error:', error);
+    console.error('Server startup error:', error);
     process.exit(1);
   }
 };
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-  console.error('💥 Uncaught Exception:', error);
+  console.error('Uncaught Exception:', error);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 startServer();

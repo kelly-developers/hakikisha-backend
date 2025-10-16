@@ -7,10 +7,10 @@ const dbConfig = {
   database: process.env.DB_NAME || 'hakikisha_db',
   user: process.env.DB_USER || 'hakikisha_user',
   password: process.env.DB_PASSWORD || 'hakikisha_pass',
-  // Add SSL configuration for production
-  ssl: process.env.NODE_ENV === 'production' ? { 
-    rejectUnauthorized: false 
-  } : false,
+  // Force SSL for Render PostgreSQL
+  ssl: {
+    rejectUnauthorized: false
+  },
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
@@ -24,25 +24,25 @@ class Database {
 
   async initializeDatabase() {
     try {
-      console.log('🔧 Initializing database connection...');
-      console.log('📊 Database config:', {
+      console.log('Initializing database connection...');
+      console.log('Database config:', {
         host: dbConfig.host,
         port: dbConfig.port,
         database: dbConfig.database,
         user: dbConfig.user,
-        ssl: dbConfig.ssl
+        ssl: true
       });
 
       this.pool = new Pool(dbConfig);
       
       // Test connection
       const client = await this.pool.connect();
-      console.log('✅ Database connected successfully');
+      console.log('Database connected successfully');
       
       // Set schema if specified
       if (process.env.DB_SCHEMA) {
         await client.query(`SET search_path TO ${process.env.DB_SCHEMA}`);
-        console.log(`📋 Schema set to: ${process.env.DB_SCHEMA}`);
+        console.log(`Schema set to: ${process.env.DB_SCHEMA}`);
       }
       
       client.release();
@@ -50,7 +50,7 @@ class Database {
       this.isInitialized = true;
       return true;
     } catch (error) {
-      console.error('❌ Database connection failed:', error.message);
+      console.error('Database connection failed:', error.message);
       this.isInitialized = false;
       return false;
     }
@@ -68,10 +68,10 @@ class Database {
     try {
       const result = await this.pool.query(text, params);
       const duration = Date.now() - start;
-      console.log(`📝 Executed query: ${text}`, { duration, rows: result.rowCount });
+      console.log(`Executed query: ${text}`, { duration, rows: result.rowCount });
       return result;
     } catch (error) {
-      console.error('❌ Query error:', { text, error: error.message });
+      console.error('Query error:', { text, error: error.message });
       throw error;
     }
   }
