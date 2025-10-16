@@ -217,21 +217,39 @@ class ClaimController {
 
   async getTrendingClaims(req, res) {
     try {
+      const { limit = 10 } = req.query;
+      
+      console.log('Getting trending claims with limit:', limit);
+
+      // If there are no trending claims, return popular claims as fallback
       const result = await db.query(
         `SELECT c.id, c.title, c.category, c.status,
                 COALESCE(v.verdict, av.verdict) as verdict,
-                c.trending_score as trendingScore
+                c.trending_score as trendingScore,
+                c.created_at as submittedDate,
+                v.created_at as verdictDate,
+                c.submission_count,
+                c.is_trending
          FROM claims c
          LEFT JOIN verdicts v ON c.human_verdict_id = v.id
          LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
-         WHERE c.is_trending = true
-         ORDER BY c.trending_score DESC, c.submission_count DESC
-         LIMIT 10`
+         WHERE c.is_trending = true OR c.submission_count > 1
+         ORDER BY 
+           CASE WHEN c.is_trending = true THEN 1 ELSE 2 END,
+           c.trending_score DESC NULLS LAST, 
+           c.submission_count DESC,
+           c.created_at DESC
+         LIMIT $1`,
+        [parseInt(limit)]
       );
+
+      console.log('Found', result.rows.length, 'trending/popular claims');
 
       res.json({
         success: true,
-        trendingClaims: result.rows
+        trendingClaims: result.rows,
+        count: result.rows.length,
+        message: result.rows.length > 0 ? 'Trending claims fetched successfully' : 'No trending claims found'
       });
     } catch (error) {
       logger.error('Get trending claims error:', error);
