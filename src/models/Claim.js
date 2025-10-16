@@ -112,17 +112,18 @@ class Claim {
     }
   }
 
-  static async getTrendingClaims(limit = 10, timeframe = '7 days') {
+  static async getTrendingClaims(limit = 10) {
     const query = `
-      SELECT c.*, COUNT(*) as submission_count, 
-             AVG(av.confidence_score) as avg_confidence
+      SELECT c.id, c.title, c.category, c.status,
+             COALESCE(v.verdict, av.verdict) as verdict,
+             c.trending_score as trendingScore,
+             c.created_at as submittedDate,
+             v.created_at as verdictDate
       FROM claims c
+      LEFT JOIN verdicts v ON c.human_verdict_id = v.id
       LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
-      WHERE c.created_at >= NOW() - INTERVAL '${timeframe}'
-        AND c.submission_count > 1
-      GROUP BY c.id, c.title, c.description
-      HAVING COUNT(*) >= 3
-      ORDER BY submission_count DESC, avg_confidence DESC
+      WHERE c.is_trending = true
+      ORDER BY c.trending_score DESC, c.submission_count DESC
       LIMIT $1
     `;
 
@@ -163,6 +164,35 @@ class Claim {
       return result.rows;
     } catch (error) {
       logger.error('Error searching claims:', error);
+      throw error;
+    }
+  }
+
+  static async getUserClaims(userId, status = null) {
+    let query = `
+      SELECT c.id, c.title, c.category, c.status,
+             c.created_at as submittedDate,
+             v.created_at as verdictDate,
+             v.verdict, v.evidence_sources as sources
+      FROM claims c
+      LEFT JOIN verdicts v ON c.human_verdict_id = v.id
+      WHERE c.user_id = $1
+    `;
+
+    const params = [userId];
+
+    if (status && status !== 'all') {
+      query += ` AND c.status = $2`;
+      params.push(status);
+    }
+
+    query += ` ORDER BY c.created_at DESC`;
+
+    try {
+      const result = await db.query(query, params);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error getting user claims:', error);
       throw error;
     }
   }

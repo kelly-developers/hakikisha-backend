@@ -19,8 +19,8 @@ router.get('/search', claimController.searchClaims);
 // Protected routes (authentication required)
 router.use(authMiddleware);
 
-router.post('/submit', claimController.submitClaim);
-router.post('/upload-evidence', upload.single('file'), claimController.uploadEvidence);
+router.post('/', claimController.submitClaim);
+router.post('/upload-evidence', upload.single('evidence'), claimController.uploadEvidence);
 router.get('/my-claims', claimController.getMyClaims);
 router.get('/:claimId', claimController.getClaimDetails);
 
