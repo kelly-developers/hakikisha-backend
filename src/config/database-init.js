@@ -424,41 +424,55 @@ class DatabaseInitializer {
       const adminEmail = 'kellynyachiro@gmail.com';
       const adminPassword = 'Kelly@40125507';
       
-      console.log(`👤 Setting up admin user: ${adminEmail}`);
+      console.log('Setting up admin user: ' + adminEmail);
       
       // Check if admin already exists
       const existingAdmin = await db.query(
-        'SELECT id, email, password_hash, role FROM hakikisha.users WHERE email = $1',
+        'SELECT id, email, password_hash, role, registration_status FROM hakikisha.users WHERE email = $1',
         [adminEmail]
       );
 
       if (existingAdmin.rows.length > 0) {
         const admin = existingAdmin.rows[0];
-        console.log(`📊 Found existing admin: ${admin.email}, role: ${admin.role}`);
+        console.log('Found existing admin: ' + admin.email + ', role: ' + admin.role + ', status: ' + admin.registration_status);
+        
+        // Fix admin registration status if it's 'pending'
+        if (admin.registration_status === 'pending') {
+          console.log('Fixing admin registration status from pending to approved...');
+          
+          await db.query(
+            `UPDATE hakikisha.users 
+             SET registration_status = 'approved', is_verified = true, updated_at = NOW()
+             WHERE email = $1`,
+            [adminEmail]
+          );
+          
+          console.log('Admin registration status fixed');
+        }
         
         // Check if admin has password_hash set
         if (!admin.password_hash) {
-          console.log('🔧 Admin user exists but missing password_hash. Setting it now...');
+          console.log('Admin user exists but missing password_hash. Setting it now...');
           
           const saltRounds = 12;
           const passwordHash = await bcrypt.hash(adminPassword, saltRounds);
           
           await db.query(
             `UPDATE hakikisha.users 
-             SET password_hash = $1, role = 'admin', is_verified = true, registration_status = 'approved', updated_at = NOW()
+             SET password_hash = $1, updated_at = NOW()
              WHERE email = $2`,
             [passwordHash, adminEmail]
           );
           
-          console.log(`✅ Admin password set successfully for: ${adminEmail}`);
+          console.log('Admin password set successfully for: ' + adminEmail);
         } else {
-          console.log('✅ Default admin user already exists with password');
+          console.log('Default admin user already exists with password');
         }
         
         return existingAdmin.rows[0];
       } else {
         // Create new admin user
-        console.log('👤 Creating new admin user...');
+        console.log('Creating new admin user...');
         
         const saltRounds = 12;
         const passwordHash = await bcrypt.hash(adminPassword, saltRounds);
@@ -466,19 +480,19 @@ class DatabaseInitializer {
         const result = await db.query(
           `INSERT INTO hakikisha.users (email, password_hash, role, is_verified, registration_status) 
            VALUES ($1, $2, $3, $4, $5) 
-           RETURNING id, email, role`,
+           RETURNING id, email, role, registration_status`,
           [adminEmail, passwordHash, 'admin', true, 'approved']
         );
 
         const newAdmin = result.rows[0];
-        console.log(`✅ Default admin user created: ${newAdmin.email}`);
-        console.log(`🔑 Password: ${adminPassword}`);
-        console.log(`👑 Role: ${newAdmin.role}`);
+        console.log('Default admin user created: ' + newAdmin.email);
+        console.log('Role: ' + newAdmin.role);
+        console.log('Status: ' + newAdmin.registration_status);
         
         return newAdmin;
       }
     } catch (error) {
-      console.error('❌ Error creating/updating default admin user:', error);
+      console.error('Error creating/updating default admin user:', error);
       throw error;
     }
   }
