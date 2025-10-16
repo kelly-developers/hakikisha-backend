@@ -221,43 +221,151 @@ class ClaimController {
       
       console.log('Getting trending claims with limit:', limit);
 
-      // If there are no trending claims, return popular claims as fallback
-      const result = await db.query(
-        `SELECT c.id, c.title, c.category, c.status,
-                COALESCE(v.verdict, av.verdict) as verdict,
-                c.trending_score as trendingScore,
-                c.created_at as submittedDate,
-                v.created_at as verdictDate,
-                c.submission_count,
-                c.is_trending
-         FROM claims c
-         LEFT JOIN verdicts v ON c.human_verdict_id = v.id
-         LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
-         WHERE c.is_trending = true OR c.submission_count > 1
-         ORDER BY 
-           CASE WHEN c.is_trending = true THEN 1 ELSE 2 END,
-           c.trending_score DESC NULLS LAST, 
-           c.submission_count DESC,
-           c.created_at DESC
-         LIMIT $1`,
-        [parseInt(limit)]
-      );
+      // First, let's check if the trending_score column exists
+      let columnCheck;
+      try {
+        columnCheck = await db.query(`
+          SELECT column_name 
+          FROM information_schema.columns 
+          WHERE table_schema = 'hakikisha' 
+          AND table_name = 'claims' 
+          AND column_name = 'trending_score'
+        `);
+      } catch (columnError) {
+        console.log('Column check failed, assuming no trending_score column');
+      }
+
+      const hasTrendingScore = columnCheck && columnCheck.rows.length > 0;
+
+      // Build query based on available columns
+      let query;
+      let params = [parseInt(limit)];
+
+      if (hasTrendingScore) {
+        // Use trending_score if available
+        query = `
+          SELECT 
+            c.id, 
+            c.title, 
+            c.description,
+            c.category, 
+            c.status,
+            COALESCE(v.verdict, av.verdict) as verdict,
+            c.trending_score as trendingScore,
+            c.created_at as submittedDate,
+            v.created_at as verdictDate,
+            c.submission_count,
+            c.is_trending
+          FROM claims c
+          LEFT JOIN verdicts v ON c.human_verdict_id = v.id
+          LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
+          WHERE c.is_trending = true OR c.submission_count > 1
+          ORDER BY 
+            c.is_trending DESC,
+            c.trending_score DESC NULLS LAST, 
+            c.submission_count DESC,
+            c.created_at DESC
+          LIMIT $1
+        `;
+      } else {
+        // Fallback query without trending_score
+        query = `
+          SELECT 
+            c.id, 
+            c.title, 
+            c.description,
+            c.category, 
+            c.status,
+            COALESCE(v.verdict, av.verdict) as verdict,
+            c.created_at as submittedDate,
+            v.created_at as verdictDate,
+            c.submission_count,
+            c.is_trending
+          FROM claims c
+          LEFT JOIN verdicts v ON c.human_verdict_id = v.id
+          LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
+          WHERE c.is_trending = true OR c.submission_count > 1
+          ORDER BY 
+            c.is_trending DESC,
+            c.submission_count DESC,
+            c.created_at DESC
+          LIMIT $1
+        `;
+      }
+
+      console.log('Executing query:', query.substring(0, 100) + '...');
+
+      const result = await db.query(query, params);
 
       console.log('Found', result.rows.length, 'trending/popular claims');
 
-      res.json({
-        success: true,
-        trendingClaims: result.rows,
-        count: result.rows.length,
-        message: result.rows.length > 0 ? 'Trending claims fetched successfully' : 'No trending claims found'
-      });
+      // If no trending claims found, get recent popular claims as fallback
+      if (result.rows.length === 0) {
+        console.log('No trending claims found, fetching recent popular claims...');
+        const fallbackResult = await db.query(`
+          SELECT 
+            c.id, 
+            c.title, 
+            c.description,
+            c.category, 
+            c.status,
+            COALESCE(v.verdict, av.verdict) as verdict,
+            c.created_at as submittedDate,
+            v.created_at as verdictDate,
+            c.submission_count,
+            c.is_trending
+          FROM claims c
+          LEFT JOIN verdicts v ON c.human_verdict_id = v.id
+          LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
+          ORDER BY c.created_at DESC
+          LIMIT $1
+        `, [parseInt(limit)]);
+
+        console.log('Fallback found', fallbackResult.rows.length, 'recent claims');
+        
+        res.json({
+          success: true,
+          trendingClaims: fallbackResult.rows,
+          count: fallbackResult.rows.length,
+          message: 'Recent claims (no trending claims available)'
+        });
+      } else {
+        res.json({
+          success: true,
+          trendingClaims: result.rows,
+          count: result.rows.length,
+          message: 'Trending claims fetched successfully'
+        });
+      }
+
     } catch (error) {
+      console.error('Get trending claims error details:', error);
       logger.error('Get trending claims error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get trending claims',
-        code: 'SERVER_ERROR'
-      });
+      
+      // Try a simple fallback query
+      try {
+        console.log('Trying simple fallback query...');
+        const fallbackResult = await db.query(`
+          SELECT id, title, category, status, created_at as submittedDate
+          FROM claims 
+          ORDER BY created_at DESC 
+          LIMIT $1
+        `, [parseInt(req.query.limit) || 10]);
+
+        res.json({
+          success: true,
+          trendingClaims: fallbackResult.rows,
+          count: fallbackResult.rows.length,
+          message: 'Recent claims (fallback due to error)'
+        });
+      } catch (fallbackError) {
+        console.error('Fallback also failed:', fallbackError);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to get trending claims: ' + error.message,
+          code: 'SERVER_ERROR'
+        });
+      }
     }
   }
 }
