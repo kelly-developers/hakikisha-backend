@@ -50,6 +50,8 @@ class DatabaseInitializer {
 
       // Create tables in correct order
       await this.createUsersTable();
+      await this.createTwoFactorAuthTable();
+      await this.createPasswordResetTokensTable();
       await this.createClaimsTable();
       await this.createAIVerdictsTable();
       await this.createFactCheckersTable();
@@ -98,6 +100,40 @@ class DatabaseInitializer {
     await this.addColumnIfNotExists('hakikisha.users', 'two_factor_secret', 'VARCHAR(255)');
     
     console.log('✅ Users table created/verified');
+  }
+
+  static async createTwoFactorAuthTable() {
+    const query = `
+      CREATE TABLE IF NOT EXISTS hakikisha.two_factor_auth (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
+        method VARCHAR(50) NOT NULL DEFAULT 'email' CHECK (method IN ('email', 'sms', 'authenticator')),
+        secret VARCHAR(255),
+        backup_codes JSONB DEFAULT '[]',
+        is_enabled BOOLEAN DEFAULT FALSE,
+        last_used TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(user_id, method)
+      )
+    `;
+    await db.query(query);
+    console.log('✅ Two Factor Auth table created/verified');
+  }
+
+  static async createPasswordResetTokensTable() {
+    const query = `
+      CREATE TABLE IF NOT EXISTS hakikisha.password_reset_tokens (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
+        token_hash VARCHAR(255) NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        used BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `;
+    await db.query(query);
+    console.log('✅ Password Reset Tokens table created/verified');
   }
 
   static async createClaimsTable() {
@@ -372,7 +408,11 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_search_logs_created_at ON hakikisha.search_logs(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON hakikisha.user_sessions(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON hakikisha.user_sessions(session_token)',
-      'CREATE INDEX IF NOT EXISTS idx_registration_requests_status ON hakikisha.registration_requests(status)'
+      'CREATE INDEX IF NOT EXISTS idx_registration_requests_status ON hakikisha.registration_requests(status)',
+      'CREATE INDEX IF NOT EXISTS idx_two_factor_auth_user_id ON hakikisha.two_factor_auth(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_two_factor_auth_enabled ON hakikisha.two_factor_auth(is_enabled)',
+      'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON hakikisha.password_reset_tokens(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires ON hakikisha.password_reset_tokens(expires_at)'
     ];
 
     for (const indexQuery of indexes) {
@@ -449,12 +489,22 @@ class DatabaseInitializer {
                  registration_status = 'approved', 
                  is_verified = true, 
                  role = 'admin',
+                 two_factor_enabled = true,
                  updated_at = NOW()
              WHERE email = $2`,
             [passwordHash, adminEmail]
           );
           
-          console.log('Admin user fixed and password set');
+          // Enable 2FA for admin in the two_factor_auth table
+          await db.query(
+            `INSERT INTO hakikisha.two_factor_auth (user_id, method, is_enabled)
+             VALUES ($1, 'email', true)
+             ON CONFLICT (user_id, method) 
+             DO UPDATE SET is_enabled = true, updated_at = NOW()`,
+            [admin.id]
+          );
+          
+          console.log('Admin user fixed and password set with 2FA enabled');
         } else {
           console.log('Default admin user already exists with correct settings');
         }
@@ -468,16 +518,25 @@ class DatabaseInitializer {
         const passwordHash = await bcrypt.hash(adminPassword, saltRounds);
 
         const result = await db.query(
-          `INSERT INTO hakikisha.users (email, password_hash, role, is_verified, registration_status) 
-           VALUES ($1, $2, $3, $4, $5) 
+          `INSERT INTO hakikisha.users (email, password_hash, role, is_verified, registration_status, two_factor_enabled) 
+           VALUES ($1, $2, $3, $4, $5, $6) 
            RETURNING id, email, role, registration_status`,
-          [adminEmail, passwordHash, 'admin', true, 'approved']
+          [adminEmail, passwordHash, 'admin', true, 'approved', true]
         );
 
         const newAdmin = result.rows[0];
+        
+        // Enable 2FA for admin
+        await db.query(
+          `INSERT INTO hakikisha.two_factor_auth (user_id, method, is_enabled)
+           VALUES ($1, 'email', true)`,
+          [newAdmin.id]
+        );
+        
         console.log('Default admin user created: ' + newAdmin.email);
         console.log('Role: ' + newAdmin.role);
         console.log('Status: ' + newAdmin.registration_status);
+        console.log('2FA: Enabled');
         
         return newAdmin;
       }
@@ -501,13 +560,17 @@ class DatabaseInitializer {
       console.log(`📊 Found ${tables.rows.length} tables in hakikisha schema`);
       
       const adminCheck = await db.query(
-        'SELECT email, role, password_hash IS NOT NULL as has_password FROM hakikisha.users WHERE email = $1',
+        `SELECT u.email, u.role, u.password_hash IS NOT NULL as has_password, 
+                u.two_factor_enabled, tfa.is_enabled as tfa_active
+         FROM hakikisha.users u
+         LEFT JOIN hakikisha.two_factor_auth tfa ON u.id = tfa.user_id AND tfa.method = 'email'
+         WHERE u.email = $1`,
         ['kellynyachiro@gmail.com']
       );
       
       if (adminCheck.rows.length > 0) {
         const admin = adminCheck.rows[0];
-        console.log(`👤 Admin status: ${admin.email}, role: ${admin.role}, has_password: ${admin.has_password}`);
+        console.log(`👤 Admin status: ${admin.email}, role: ${admin.role}, has_password: ${admin.has_password}, 2FA enabled: ${admin.two_factor_enabled}, 2FA active: ${admin.tfa_active}`);
       } else {
         console.log('❌ Admin user not found');
       }
@@ -518,16 +581,25 @@ class DatabaseInitializer {
         FROM information_schema.columns 
         WHERE table_schema = 'hakikisha' 
         AND table_name = 'users' 
-        AND column_name IN ('password_hash', 'email', 'role')
+        AND column_name IN ('password_hash', 'email', 'role', 'two_factor_enabled')
       `);
       
       console.log(`🔑 Found ${criticalColumns.rows.length} critical columns in users table`);
+      
+      // Verify 2FA table exists and has data
+      const twoFactorCheck = await db.query(`
+        SELECT COUNT(*) as count FROM hakikisha.two_factor_auth
+      `);
+      
+      console.log(`🔐 Two-factor auth records: ${twoFactorCheck.rows[0].count}`);
       
       return {
         tableCount: tables.rows.length,
         adminExists: adminCheck.rows.length > 0,
         adminHasPassword: adminCheck.rows.length > 0 ? adminCheck.rows[0].has_password : false,
-        criticalColumns: criticalColumns.rows.length
+        admin2FAEnabled: adminCheck.rows.length > 0 ? adminCheck.rows[0].two_factor_enabled : false,
+        criticalColumns: criticalColumns.rows.length,
+        twoFactorRecords: parseInt(twoFactorCheck.rows[0].count)
       };
     } catch (error) {
       console.error('❌ Error verifying database state:', error);
@@ -540,6 +612,8 @@ class DatabaseInitializer {
       console.log('🔄 Resetting database...');
       
       const tables = [
+        'two_factor_auth',
+        'password_reset_tokens',
         'fact_checker_activities',
         'admin_activities',
         'user_analytics',
