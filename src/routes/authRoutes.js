@@ -95,32 +95,42 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Simple login endpoint
+// Enhanced login endpoint that accepts email or username
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, username, password } = req.body;
 
-    console.log('Login attempt:', { email });
+    console.log('Login attempt:', { email, username });
 
-    // Validate input
-    if (!email || !password) {
+    // Validate input - accept either email or username
+    if ((!email && !username) || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Email and password are required'
+        error: 'Email/username and password are required'
       });
     }
 
-    // Find user
-    const userResult = await db.query(
-      `SELECT id, email, password_hash, role, registration_status, is_verified 
-       FROM hakikisha.users WHERE email = $1`,
-      [email]
-    );
+    // Find user by email or username
+    let userResult;
+    if (email) {
+      userResult = await db.query(
+        `SELECT id, email, password_hash, role, registration_status, is_verified 
+         FROM hakikisha.users WHERE email = $1`,
+        [email]
+      );
+    } else {
+      // If using username, we need to check if username field exists or use email as username
+      userResult = await db.query(
+        `SELECT id, email, password_hash, role, registration_status, is_verified 
+         FROM hakikisha.users WHERE email = $1`,
+        [username] // For now, treat username as email since we don't have separate username field
+      );
+    }
 
     if (userResult.rows.length === 0) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid email or password'
+        error: 'Invalid email/username or password'
       });
     }
 
@@ -146,7 +156,7 @@ router.post('/login', async (req, res) => {
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid email or password'
+        error: 'Invalid email/username or password'
       });
     }
 

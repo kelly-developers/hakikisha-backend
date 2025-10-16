@@ -436,37 +436,27 @@ class DatabaseInitializer {
         const admin = existingAdmin.rows[0];
         console.log('Found existing admin: ' + admin.email + ', role: ' + admin.role + ', status: ' + admin.registration_status);
         
-        // Fix admin registration status if it's 'pending'
-        if (admin.registration_status === 'pending') {
-          console.log('Fixing admin registration status from pending to approved...');
-          
-          await db.query(
-            `UPDATE hakikisha.users 
-             SET registration_status = 'approved', is_verified = true, updated_at = NOW()
-             WHERE email = $1`,
-            [adminEmail]
-          );
-          
-          console.log('Admin registration status fixed');
-        }
-        
-        // Check if admin has password_hash set
-        if (!admin.password_hash) {
-          console.log('Admin user exists but missing password_hash. Setting it now...');
+        // ALWAYS ensure admin is approved and verified
+        if (admin.registration_status !== 'approved' || !admin.password_hash) {
+          console.log('Fixing admin user status and password...');
           
           const saltRounds = 12;
           const passwordHash = await bcrypt.hash(adminPassword, saltRounds);
           
           await db.query(
             `UPDATE hakikisha.users 
-             SET password_hash = $1, updated_at = NOW()
+             SET password_hash = $1, 
+                 registration_status = 'approved', 
+                 is_verified = true, 
+                 role = 'admin',
+                 updated_at = NOW()
              WHERE email = $2`,
             [passwordHash, adminEmail]
           );
           
-          console.log('Admin password set successfully for: ' + adminEmail);
+          console.log('Admin user fixed and password set');
         } else {
-          console.log('Default admin user already exists with password');
+          console.log('Default admin user already exists with correct settings');
         }
         
         return existingAdmin.rows[0];
