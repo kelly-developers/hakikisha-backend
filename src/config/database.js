@@ -7,9 +7,13 @@ const dbConfig = {
   database: process.env.DB_NAME || 'hakikisha_db',
   user: process.env.DB_USER || 'hakikisha_user',
   password: process.env.DB_PASSWORD || 'hakikisha_pass',
+  // Add SSL configuration for production
+  ssl: process.env.NODE_ENV === 'production' ? { 
+    rejectUnauthorized: false 
+  } : false,
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
+  connectionTimeoutMillis: 10000,
 };
 
 class Database {
@@ -20,11 +24,27 @@ class Database {
 
   async initializeDatabase() {
     try {
+      console.log('🔧 Initializing database connection...');
+      console.log('📊 Database config:', {
+        host: dbConfig.host,
+        port: dbConfig.port,
+        database: dbConfig.database,
+        user: dbConfig.user,
+        ssl: dbConfig.ssl
+      });
+
       this.pool = new Pool(dbConfig);
       
       // Test connection
       const client = await this.pool.connect();
       console.log('✅ Database connected successfully');
+      
+      // Set schema if specified
+      if (process.env.DB_SCHEMA) {
+        await client.query(`SET search_path TO ${process.env.DB_SCHEMA}`);
+        console.log(`📋 Schema set to: ${process.env.DB_SCHEMA}`);
+      }
+      
       client.release();
       
       this.isInitialized = true;
@@ -38,7 +58,10 @@ class Database {
 
   async query(text, params) {
     if (!this.isInitialized) {
-      await this.initializeDatabase();
+      const initialized = await this.initializeDatabase();
+      if (!initialized) {
+        throw new Error('Database not initialized');
+      }
     }
 
     const start = Date.now();
@@ -59,12 +82,16 @@ class Database {
     }
     return await this.pool.connect();
   }
+
+  async end() {
+    if (this.pool) {
+      await this.pool.end();
+      this.isInitialized = false;
+    }
+  }
 }
 
 // Create single instance
 const db = new Database();
-
-// Initialize database when module is loaded
-db.initializeDatabase().catch(console.error);
 
 module.exports = db;

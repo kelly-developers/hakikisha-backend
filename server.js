@@ -8,6 +8,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 
 const startServer = async () => {
   try {
@@ -59,10 +60,6 @@ const startServer = async () => {
             console.log('🎉 Database setup completed successfully!');
           } catch (initError) {
             console.error('❌ Database initialization failed:', initError.message);
-            console.log('🔧 Debug info:', {
-              errorStack: initError.stack,
-              currentDir: __dirname
-            });
             console.log('⚠️ Continuing without database initialization...');
           }
         }
@@ -154,38 +151,6 @@ const startServer = async () => {
       }
     });
 
-    // Files debug endpoint
-    app.get('/api/debug/files', (req, res) => {
-      const fs = require('fs');
-      const path = require('path');
-      
-      function getFiles(dir, prefix = '') {
-        let result = [];
-        try {
-          const items = fs.readdirSync(dir);
-          for (const item of items) {
-            const fullPath = path.join(dir, item);
-            const stat = fs.statSync(fullPath);
-            if (stat.isDirectory()) {
-              result.push(prefix + item + '/');
-              result = result.concat(getFiles(fullPath, prefix + item + '/'));
-            } else {
-              result.push(prefix + item);
-            }
-          }
-        } catch (error) {
-          result.push(`Error reading ${dir}: ${error.message}`);
-        }
-        return result;
-      }
-      
-      res.json({
-        currentDirectory: process.cwd(),
-        files: getFiles('.'),
-        srcConfigFiles: getFiles('./src/config')
-      });
-    });
-
     // API routes
     app.use('/api/v1/auth', require('./src/routes/authRoutes'));
     app.use('/api/v1/users', require('./src/routes/userRoutes'));
@@ -248,7 +213,6 @@ const startServer = async () => {
       console.log('📍 Endpoints:');
       console.log(`   Health: http://localhost:${PORT}/health`);
       console.log(`   DB Debug: http://localhost:${PORT}/api/debug/db`);
-      console.log(`   Files Debug: http://localhost:${PORT}/api/debug/files`);
       console.log(`   API Test: http://localhost:${PORT}/api/test`);
       console.log('');
     });
