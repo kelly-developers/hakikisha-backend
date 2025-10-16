@@ -110,21 +110,63 @@ class DatabaseInitializer {
           trending_score DECIMAL(5,2) DEFAULT 0,
           ai_verdict_id UUID,
           human_verdict_id UUID,
-          assigned_fact_checker_id UUID,
+          assigned_fact_checker_id UUID REFERENCES hakikisha.users(id),
           created_at TIMESTAMP DEFAULT NOW(),
           updated_at TIMESTAMP DEFAULT NOW()
         )
       `;
       await db.query(query);
       
-      // Add trending columns if they don't exist
-      await this.addColumnIfNotExists('hakikisha.claims', 'is_trending', 'BOOLEAN DEFAULT FALSE');
-      await this.addColumnIfNotExists('hakikisha.claims', 'trending_score', 'DECIMAL(5,2) DEFAULT 0');
+      // Also create the claims table in public schema for backward compatibility
+      await this.createPublicSchemaClaimsTable();
       
       console.log('✅ Claims table created/verified');
     } catch (error) {
       console.error('❌ Error creating claims table:', error);
       throw error;
+    }
+  }
+
+  static async createPublicSchemaClaimsTable() {
+    try {
+      // Create a view or table in public schema for backward compatibility
+      const viewQuery = `
+        CREATE OR REPLACE VIEW public.claims AS 
+        SELECT * FROM hakikisha.claims
+      `;
+      await db.query(viewQuery);
+      console.log('✅ Public schema claims view created');
+    } catch (error) {
+      console.log('⚠️ Could not create public schema view:', error.message);
+      
+      // Fallback: create table in public schema
+      try {
+        const tableQuery = `
+          CREATE TABLE IF NOT EXISTS public.claims (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            category VARCHAR(100),
+            media_type VARCHAR(50) DEFAULT 'text',
+            media_url TEXT,
+            status VARCHAR(50) DEFAULT 'pending',
+            priority VARCHAR(50) DEFAULT 'medium',
+            submission_count INTEGER DEFAULT 1,
+            is_trending BOOLEAN DEFAULT FALSE,
+            trending_score DECIMAL(5,2) DEFAULT 0,
+            ai_verdict_id UUID,
+            human_verdict_id UUID,
+            assigned_fact_checker_id UUID,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+          )
+        `;
+        await db.query(tableQuery);
+        console.log('✅ Public schema claims table created as fallback');
+      } catch (fallbackError) {
+        console.log('⚠️ Could not create public schema table:', fallbackError.message);
+      }
     }
   }
 
@@ -184,6 +226,7 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_claims_category ON hakikisha.claims(category)',
       'CREATE INDEX IF NOT EXISTS idx_claims_trending ON hakikisha.claims(is_trending)',
       'CREATE INDEX IF NOT EXISTS idx_claims_trending_score ON hakikisha.claims(trending_score)',
+      'CREATE INDEX IF NOT EXISTS idx_claims_created_at ON hakikisha.claims(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_claim_id ON hakikisha.ai_verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_id ON hakikisha.verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_users_email ON hakikisha.users(email)',
@@ -398,6 +441,14 @@ class DatabaseInitializer {
         }
       }
 
+      // Check public schema claims table/view
+      try {
+        const publicClaims = await db.query(`SELECT COUNT(*) as count FROM public.claims`);
+        console.log(`📋 public.claims: ${publicClaims.rows[0].count} records`);
+      } catch (error) {
+        console.log(`❌ public.claims: Table/view not accessible - ${error.message}`);
+      }
+
       // Verify admin user
       const adminCheck = await db.query(
         'SELECT email, role, password_hash IS NOT NULL as has_password FROM hakikisha.users WHERE email = $1',
@@ -447,6 +498,15 @@ class DatabaseInitializer {
         } catch (error) {
           console.log(`Could not drop table ${table}:`, error.message);
         }
+      }
+      
+      // Drop public schema claims view/table
+      try {
+        await db.query('DROP VIEW IF EXISTS public.claims CASCADE');
+        await db.query('DROP TABLE IF EXISTS public.claims CASCADE');
+        console.log('Dropped public.claims');
+      } catch (error) {
+        console.log('Could not drop public.claims:', error.message);
       }
       
       await this.initializeCompleteDatabase();

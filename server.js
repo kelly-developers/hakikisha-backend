@@ -131,6 +131,7 @@ const startServer = async () => {
         
         const users = await db.query('SELECT COUNT(*) as count FROM hakikisha.users');
         const claims = await db.query('SELECT COUNT(*) as count FROM hakikisha.claims');
+        const publicClaims = await db.query('SELECT COUNT(*) as count FROM public.claims');
         const trending = await db.query('SELECT COUNT(*) as count FROM hakikisha.claims WHERE is_trending = true');
         const admin = await db.query('SELECT email, role FROM hakikisha.users WHERE email = $1', ['kellynyachiro@gmail.com']);
         
@@ -149,6 +150,7 @@ const startServer = async () => {
           stats: {
             users: users.rows[0].count,
             claims: claims.rows[0].count,
+            public_claims: publicClaims.rows[0].count,
             trending_claims: trending.rows[0].count
           },
           admin: {
