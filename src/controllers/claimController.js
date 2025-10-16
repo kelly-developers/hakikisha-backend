@@ -19,7 +19,7 @@ class ClaimController {
       const claimId = uuidv4();
 
       const result = await db.query(
-        `INSERT INTO claims (
+        `INSERT INTO hakikisha.claims (
           id, user_id, title, description, category, media_type, media_url,
           status, priority, submission_count, is_trending, created_at
         )
@@ -31,7 +31,7 @@ class ClaimController {
 
       // Check if this is user's first claim
       const claimCount = await db.query(
-        'SELECT COUNT(*) FROM claims WHERE user_id = $1',
+        'SELECT COUNT(*) FROM hakikisha.claims WHERE user_id = $1',
         [req.user.userId]
       );
 
@@ -97,8 +97,8 @@ class ClaimController {
                c.created_at as submittedDate,
                v.created_at as verdictDate,
                v.verdict, v.evidence_sources as sources
-        FROM claims c
-        LEFT JOIN verdicts v ON c.human_verdict_id = v.id
+        FROM hakikisha.claims c
+        LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
         WHERE c.user_id = $1
       `;
 
@@ -136,9 +136,9 @@ class ClaimController {
                 u.email as submittedBy,
                 v.verdict, v.explanation as verdictExplanation, v.evidence_sources as sources,
                 v.created_at as verdictDate
-         FROM claims c
-         LEFT JOIN users u ON c.user_id = u.id
-         LEFT JOIN verdicts v ON c.human_verdict_id = v.id
+         FROM hakikisha.claims c
+         LEFT JOIN hakikisha.users u ON c.user_id = u.id
+         LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
          WHERE c.id = $1`,
         [claimId]
       );
@@ -194,7 +194,7 @@ class ClaimController {
 
       const result = await db.query(
         `SELECT c.id, c.title, c.description, c.category, c.status
-         FROM claims c
+         FROM hakikisha.claims c
          WHERE c.title ILIKE $1 OR c.description ILIKE $1
          ORDER BY c.created_at DESC
          LIMIT 50`,
@@ -256,9 +256,9 @@ class ClaimController {
             v.created_at as verdictDate,
             c.submission_count,
             c.is_trending
-          FROM claims c
-          LEFT JOIN verdicts v ON c.human_verdict_id = v.id
-          LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
+          FROM hakikisha.claims c
+          LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
+          LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
           WHERE c.is_trending = true OR c.submission_count > 1
           ORDER BY 
             c.is_trending DESC,
@@ -281,9 +281,9 @@ class ClaimController {
             v.created_at as verdictDate,
             c.submission_count,
             c.is_trending
-          FROM claims c
-          LEFT JOIN verdicts v ON c.human_verdict_id = v.id
-          LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
+          FROM hakikisha.claims c
+          LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
+          LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
           WHERE c.is_trending = true OR c.submission_count > 1
           ORDER BY 
             c.is_trending DESC,
@@ -314,9 +314,9 @@ class ClaimController {
             v.created_at as verdictDate,
             c.submission_count,
             c.is_trending
-          FROM claims c
-          LEFT JOIN verdicts v ON c.human_verdict_id = v.id
-          LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
+          FROM hakikisha.claims c
+          LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
+          LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
           ORDER BY c.created_at DESC
           LIMIT $1
         `, [parseInt(limit)]);
@@ -342,12 +342,12 @@ class ClaimController {
       console.error('Get trending claims error details:', error);
       logger.error('Get trending claims error:', error);
       
-      // Try a simple fallback query
+      // Try a simple fallback query with public schema
       try {
-        console.log('Trying simple fallback query...');
+        console.log('Trying simple fallback query with public schema...');
         const fallbackResult = await db.query(`
           SELECT id, title, category, status, created_at as submittedDate
-          FROM claims 
+          FROM public.claims 
           ORDER BY created_at DESC 
           LIMIT $1
         `, [parseInt(req.query.limit) || 10]);
@@ -360,11 +360,31 @@ class ClaimController {
         });
       } catch (fallbackError) {
         console.error('Fallback also failed:', fallbackError);
-        res.status(500).json({
-          success: false,
-          error: 'Failed to get trending claims: ' + error.message,
-          code: 'SERVER_ERROR'
-        });
+        
+        // Final fallback - try hakikisha schema directly
+        try {
+          console.log('Trying final fallback with hakikisha schema...');
+          const finalFallback = await db.query(`
+            SELECT id, title, category, status, created_at as submittedDate
+            FROM hakikisha.claims 
+            ORDER BY created_at DESC 
+            LIMIT $1
+          `, [parseInt(req.query.limit) || 10]);
+
+          res.json({
+            success: true,
+            trendingClaims: finalFallback.rows,
+            count: finalFallback.rows.length,
+            message: 'Recent claims (final fallback)'
+          });
+        } catch (finalError) {
+          console.error('All fallbacks failed:', finalError);
+          res.status(500).json({
+            success: false,
+            error: 'Failed to get trending claims: ' + error.message,
+            code: 'SERVER_ERROR'
+          });
+        }
       }
     }
   }
