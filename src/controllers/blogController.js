@@ -1,15 +1,28 @@
 const logger = require('../utils/logger');
+const BlogService = require('../services/blogService');
 
 class BlogController {
   async getBlogs(req, res) {
     try {
+      console.log('📝 Get Blogs Request Received');
+      const { category, limit = 10, page = 1 } = req.query;
+      
+      const blogs = await BlogService.getBlogs({
+        category,
+        limit: parseInt(limit),
+        offset: (parseInt(page) - 1) * parseInt(limit)
+      });
+
       return res.json({
-        message: 'Get blogs - working!',
-        blogs: []
+        success: true,
+        message: 'Blogs retrieved successfully',
+        blogs: blogs,
+        count: blogs.length
       });
     } catch (error) {
       logger.error('Get blogs error:', error);
       return res.status(500).json({
+        success: false,
         error: 'Failed to get blogs'
       });
     }
@@ -17,13 +30,30 @@ class BlogController {
 
   async getBlog(req, res) {
     try {
+      console.log('📝 Get Blog Request Received:', req.params.id);
+      const { id } = req.params;
+
+      const blog = await BlogService.getBlogById(id);
+      
+      if (!blog) {
+        return res.status(404).json({
+          success: false,
+          error: 'Blog not found'
+        });
+      }
+
+      // Update view count
+      await BlogService.incrementViewCount(id);
+
       return res.json({
-        message: 'Get blog - working!',
-        blog: { id: req.params.id }
+        success: true,
+        message: 'Blog retrieved successfully',
+        blog: blog
       });
     } catch (error) {
       logger.error('Get blog error:', error);
       return res.status(500).json({
+        success: false,
         error: 'Failed to get blog'
       });
     }
@@ -31,13 +61,21 @@ class BlogController {
 
   async getTrendingBlogs(req, res) {
     try {
+      console.log('🔥 Get Trending Blogs Request Received');
+      const { limit = 5 } = req.query;
+
+      const blogs = await BlogService.getTrendingBlogs(parseInt(limit));
+
       return res.json({
-        message: 'Get trending blogs - working!',
-        blogs: []
+        success: true,
+        message: 'Trending blogs retrieved successfully',
+        blogs: blogs,
+        count: blogs.length
       });
     } catch (error) {
       logger.error('Get trending blogs error:', error);
       return res.status(500).json({
+        success: false,
         error: 'Failed to get trending blogs'
       });
     }
@@ -45,13 +83,43 @@ class BlogController {
 
   async createBlog(req, res) {
     try {
-      return res.json({
+      console.log('📝 Create Blog Request Received');
+      console.log('👤 User:', req.user);
+      console.log('📦 Request body:', req.body);
+
+      const { title, content, category, source_claim_ids, featured_image, read_time } = req.body;
+
+      // Validate required fields
+      if (!title || !content) {
+        return res.status(400).json({
+          success: false,
+          error: 'Title and content are required'
+        });
+      }
+
+      const blogData = {
+        title,
+        content,
+        author_id: req.user.userId,
+        author_type: 'human',
+        category: category || 'fact_check',
+        source_claim_ids: source_claim_ids || [],
+        featured_image: featured_image || null,
+        read_time: read_time || 5,
+        status: 'draft'
+      };
+
+      const blog = await BlogService.createBlog(blogData);
+
+      return res.status(201).json({
+        success: true,
         message: 'Blog created successfully',
-        blog: req.body
+        blog: blog
       });
     } catch (error) {
       logger.error('Create blog error:', error);
       return res.status(500).json({
+        success: false,
         error: 'Failed to create blog'
       });
     }
@@ -59,12 +127,28 @@ class BlogController {
 
   async updateBlog(req, res) {
     try {
+      console.log('📝 Update Blog Request Received:', req.params.id);
+      const { id } = req.params;
+      const updateData = req.body;
+
+      const blog = await BlogService.updateBlog(id, updateData);
+      
+      if (!blog) {
+        return res.status(404).json({
+          success: false,
+          error: 'Blog not found'
+        });
+      }
+
       return res.json({
-        message: 'Blog updated successfully'
+        success: true,
+        message: 'Blog updated successfully',
+        blog: blog
       });
     } catch (error) {
       logger.error('Update blog error:', error);
       return res.status(500).json({
+        success: false,
         error: 'Failed to update blog'
       });
     }
@@ -72,12 +156,26 @@ class BlogController {
 
   async deleteBlog(req, res) {
     try {
+      console.log('🗑️ Delete Blog Request Received:', req.params.id);
+      const { id } = req.params;
+
+      const deleted = await BlogService.deleteBlog(id);
+      
+      if (!deleted) {
+        return res.status(404).json({
+          success: false,
+          error: 'Blog not found'
+        });
+      }
+
       return res.json({
+        success: true,
         message: 'Blog deleted successfully'
       });
     } catch (error) {
       logger.error('Delete blog error:', error);
       return res.status(500).json({
+        success: false,
         error: 'Failed to delete blog'
       });
     }
@@ -85,12 +183,33 @@ class BlogController {
 
   async generateAIBlog(req, res) {
     try {
+      console.log('🤖 Generate AI Blog Request Received');
+      const { topic, claims, tone = 'neutral', length = 'medium' } = req.body;
+
+      if (!topic) {
+        return res.status(400).json({
+          success: false,
+          error: 'Topic is required for AI blog generation'
+        });
+      }
+
+      const aiBlog = await BlogService.generateAIBlog({
+        topic,
+        claims: claims || [],
+        tone,
+        length,
+        author_id: req.user.userId
+      });
+
       return res.json({
-        message: 'AI blog generated successfully'
+        success: true,
+        message: 'AI blog generated successfully',
+        blog: aiBlog
       });
     } catch (error) {
       logger.error('Generate AI blog error:', error);
       return res.status(500).json({
+        success: false,
         error: 'Failed to generate AI blog'
       });
     }

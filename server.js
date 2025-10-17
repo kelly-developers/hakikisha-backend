@@ -60,6 +60,7 @@ const startServer = async () => {
           'ionic://localhost',
           'http://localhost:8100',
           'http://localhost:3000',
+          'http://localhost:5173',
           'https://e2280cef-9c3e-485b-aca5-a7c342a041ca.lovableproject.com',
           'https://hakikisha-backend.onrender.com'
         ];
@@ -188,6 +189,14 @@ const startServer = async () => {
       console.error('✗ Claims routes failed to load:', error.message);
     }
 
+    // Blog routes
+    try {
+      app.use('/api/v1/blogs', require('./src/routes/blogRoutes'));
+      console.log('✓ Blog routes loaded: /api/v1/blogs');
+    } catch (error) {
+      console.error('✗ Blog routes failed to load:', error.message);
+    }
+
     // Test endpoint
     app.get('/api/test', (req, res) => {
       res.json({
@@ -242,7 +251,8 @@ const startServer = async () => {
           test: '/api/test',
           auth: '/api/v1/auth',
           users: '/api/v1/users',
-          claims: '/api/v1/claims'
+          claims: '/api/v1/claims',
+          blogs: '/api/v1/blogs'
         }
       });
     });
@@ -260,7 +270,8 @@ const startServer = async () => {
           '/api/test',
           '/api/v1/auth/*',
           '/api/v1/users/*',
-          '/api/v1/claims/*'
+          '/api/v1/claims/*',
+          '/api/v1/blogs/*'
         ]
       });
     });
@@ -295,6 +306,8 @@ const startServer = async () => {
       console.log('   Routes Debug: http://localhost:' + PORT + '/api/debug/routes');
       console.log('   API Test: http://localhost:' + PORT + '/api/test');
       console.log('   Trending Claims: http://localhost:' + PORT + '/api/v1/claims/trending');
+      console.log('   Blogs: http://localhost:' + PORT + '/api/v1/blogs');
+      console.log('   Trending Blogs: http://localhost:' + PORT + '/api/v1/blogs/trending');
       console.log('');
     });
 

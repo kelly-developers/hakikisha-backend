@@ -19,7 +19,7 @@ class Blog {
 
     const id = uuidv4();
     const query = `
-      INSERT INTO blog_articles (
+      INSERT INTO hakikisha.blog_articles (
         id, title, content, author_id, author_type, category, source_claim_ids,
         trending_topic_id, status, featured_image, read_time, created_at
       )
@@ -46,9 +46,9 @@ class Blog {
              u.email as author_email,
              u.profile_picture as author_avatar,
              tt.topic as trending_topic
-      FROM blog_articles ba
-      LEFT JOIN users u ON ba.author_id = u.id
-      LEFT JOIN trending_topics tt ON ba.trending_topic_id = tt.id
+      FROM hakikisha.blog_articles ba
+      LEFT JOIN hakikisha.users u ON ba.author_id = u.id
+      LEFT JOIN hakikisha.trending_topics tt ON ba.trending_topic_id = tt.id
       WHERE ba.id = $1
     `;
     try {
@@ -63,8 +63,8 @@ class Blog {
   static async findByCategory(category, limit = 10, offset = 0) {
     const query = `
       SELECT ba.*, u.email as author_email, u.profile_picture as author_avatar
-      FROM blog_articles ba
-      LEFT JOIN users u ON ba.author_id = u.id
+      FROM hakikisha.blog_articles ba
+      LEFT JOIN hakikisha.users u ON ba.author_id = u.id
       WHERE ba.category = $1 AND ba.status = 'published'
       ORDER BY ba.created_at DESC
       LIMIT $2 OFFSET $3
@@ -82,10 +82,10 @@ class Blog {
   static async getTrendingBlogs(limit = 5) {
     const query = `
       SELECT ba.*, u.email as author_email, u.profile_picture as author_avatar
-      FROM blog_articles ba
-      LEFT JOIN users u ON ba.author_id = u.id
-      WHERE ba.status = 'published' AND ba.trending_topic_id IS NOT NULL
-      ORDER BY ba.view_count DESC, ba.created_at DESC
+      FROM hakikisha.blog_articles ba
+      LEFT JOIN hakikisha.users u ON ba.author_id = u.id
+      WHERE ba.status = 'published'
+      ORDER BY ba.view_count DESC NULLS LAST, ba.created_at DESC
       LIMIT $1
     `;
 
@@ -100,7 +100,7 @@ class Blog {
 
   static async updateViewCount(id) {
     const query = `
-      UPDATE blog_articles 
+      UPDATE hakikisha.blog_articles 
       SET view_count = COALESCE(view_count, 0) + 1
       WHERE id = $1
       RETURNING *
@@ -117,7 +117,7 @@ class Blog {
 
   static async publish(id) {
     const query = `
-      UPDATE blog_articles 
+      UPDATE hakikisha.blog_articles 
       SET status = 'published', published_at = NOW()
       WHERE id = $1
       RETURNING *
@@ -134,18 +134,17 @@ class Blog {
 
   static async search(queryText, limit = 10, offset = 0) {
     const query = `
-      SELECT ba.*, u.email as author_email, 
-             ts_rank(to_tsvector(ba.title || ' ' || ba.content), plainto_tsquery($1)) as rank
-      FROM blog_articles ba
-      LEFT JOIN users u ON ba.author_id = u.id
+      SELECT ba.*, u.email as author_email
+      FROM hakikisha.blog_articles ba
+      LEFT JOIN hakikisha.users u ON ba.author_id = u.id
       WHERE ba.status = 'published'
-        AND (to_tsvector(ba.title || ' ' || ba.content) @@ plainto_tsquery($1))
-      ORDER BY rank DESC, ba.created_at DESC
+        AND (ba.title ILIKE $1 OR ba.content ILIKE $1)
+      ORDER BY ba.created_at DESC
       LIMIT $2 OFFSET $3
     `;
 
     try {
-      const result = await db.query(query, [queryText, limit, offset]);
+      const result = await db.query(query, [`%${queryText}%`, limit, offset]);
       return result.rows;
     } catch (error) {
       logger.error('Error searching blogs:', error);

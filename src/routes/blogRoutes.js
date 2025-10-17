@@ -6,11 +6,13 @@ const router = express.Router();
 
 // Public routes
 router.get('/', blogController.getBlogs);
-router.get('/:blogId', blogController.getBlog);
+router.get('/trending', blogController.getTrendingBlogs);
+router.get('/:id', blogController.getBlog);
 
 // Protected routes (fact-checkers and admins only)
-router.post('/create', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.createBlog);
+router.post('/', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.createBlog);
 router.put('/:id', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.updateBlog);
 router.delete('/:id', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.deleteBlog);
+router.post('/generate-ai', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.generateAIBlog);
 
 module.exports = router;
