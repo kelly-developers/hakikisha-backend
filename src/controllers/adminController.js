@@ -4,6 +4,7 @@ const Verdict = require('../models/Verdict');
 const FactChecker = require('../models/FactChecker');
 const RegistrationRequest = require('../models/RegistrationRequest');
 const AdminActivity = require('../models/AdminActivity');
+const authService = require('../services/authService');
 const logger = require('../utils/logger');
 
 // User management
@@ -31,49 +32,146 @@ exports.getAllUsers = async (req, res, next) => {
   }
 };
 
+// CORRECTED: Register new fact checker (creates new user)
 exports.registerFactChecker = async (req, res, next) => {
   try {
-    const { userId, credentials, areasOfExpertise } = req.body;
+    const { email, username, password, credentials, areasOfExpertise } = req.body;
 
-    // Check if user exists
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+    // Validate required fields
+    if (!email || !username || !password) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Email, username, and password are required' 
+      });
     }
 
-    // Check if already a fact checker
-    const existingFactChecker = await FactChecker.findByUserId(userId);
-    if (existingFactChecker) {
-      return res.status(400).json({ error: 'User is already a fact checker' });
+    // Check if user already exists
+    const existingUser = await User.findByEmail(email);
+    if (existingUser) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'User already exists with this email address' 
+      });
     }
+
+    // Create new user
+    const newUser = await User.create({
+      email: email,
+      username: username,
+      password_hash: await authService.hashPassword(password),
+      role: 'fact_checker',
+      is_verified: true, // Auto-verify since admin is creating
+      status: 'active'
+    });
 
     // Create fact checker profile
     const factChecker = await FactChecker.create({
-      user_id: userId,
-      credentials,
-      areas_of_expertise: areasOfExpertise,
-      verification_status: 'approved'
+      user_id: newUser.id,
+      credentials: credentials || '',
+      areas_of_expertise: areasOfExpertise || [],
+      verification_status: 'approved',
+      is_active: true
     });
 
     // Log admin activity
     await AdminActivity.create({
       admin_id: req.user.userId,
       activity_type: 'fact_checker_registration',
-      description: `Registered user ${userId} as fact checker`,
-      target_user_id: userId,
-      changes_made: { fact_checker_id: factChecker.id }
+      description: `Registered new fact checker: ${email}`,
+      target_user_id: newUser.id,
+      changes_made: { 
+        fact_checker_id: factChecker.id,
+        email: email,
+        username: username
+      }
     });
 
-    logger.info(`Fact checker registered: ${userId} by admin ${req.user.userId}`);
+    logger.info(`New fact checker registered: ${email} by admin ${req.user.userId}`);
 
     res.json({
+      success: true,
       message: 'Fact checker registered successfully',
+      user: {
+        id: newUser.id,
+        email: newUser.email,
+        username: newUser.username,
+        role: newUser.role
+      },
       fact_checker: factChecker
     });
 
   } catch (error) {
     logger.error('Register fact checker error:', error);
-    next(error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to register fact checker: ' + error.message 
+    });
+  }
+};
+
+// NEW: Register admin user
+exports.registerAdmin = async (req, res, next) => {
+  try {
+    const { email, username, password } = req.body;
+
+    // Validate required fields
+    if (!email || !username || !password) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Email, username, and password are required' 
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findByEmail(email);
+    if (existingUser) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'User already exists with this email address' 
+      });
+    }
+
+    // Create new admin user
+    const newUser = await User.create({
+      email: email,
+      username: username,
+      password_hash: await authService.hashPassword(password),
+      role: 'admin',
+      is_verified: true,
+      status: 'active'
+    });
+
+    // Log admin activity
+    await AdminActivity.create({
+      admin_id: req.user.userId,
+      activity_type: 'admin_registration',
+      description: `Registered new admin: ${email}`,
+      target_user_id: newUser.id,
+      changes_made: { 
+        email: email,
+        username: username
+      }
+    });
+
+    logger.info(`New admin registered: ${email} by admin ${req.user.userId}`);
+
+    res.json({
+      success: true,
+      message: 'Admin registered successfully',
+      user: {
+        id: newUser.id,
+        email: newUser.email,
+        username: newUser.username,
+        role: newUser.role
+      }
+    });
+
+  } catch (error) {
+    logger.error('Register admin error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to register admin: ' + error.message 
+    });
   }
 };
 

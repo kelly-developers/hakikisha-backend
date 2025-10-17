@@ -10,6 +10,7 @@ router.use(authMiddleware, requireRole(['admin']));
 // User management
 router.get('/users', adminController.getAllUsers);
 router.post('/register-fact-checker', adminController.registerFactChecker);
+router.post('/register-admin', adminController.registerAdmin); // NEW ENDPOINT
 router.post('/user-action', adminController.userAction);
 
 // Dashboard and analytics
