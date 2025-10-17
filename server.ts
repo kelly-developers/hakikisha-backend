@@ -16,7 +16,7 @@ const startServer = async () => {
     const dbInitialized = await initializeDatabase();
 
     if (!dbInitialized) {
-      console.error('💥 Failed to initialize database. Server cannot start.');
+      console.error('Failed to initialize database. Server cannot start.');
       process.exit(1);
     }
 
@@ -27,15 +27,15 @@ const startServer = async () => {
     // Start server
     app.listen(PORT, () => {
       console.log('');
-      console.log('🎉 ===================================');
-      console.log(`🎉 HAKIKISHA Server is running!`);
-      console.log(`🎉 ===================================`);
-      console.log(`🌍 Port: ${PORT}`);
-      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`📊 Database: PostgreSQL ✅`);
-      console.log(`👤 Default Admin: kellynyachiro@gmail.com`);
+      console.log('===================================');
+      console.log(`HAKIKISHA Server is running!`);
+      console.log(`===================================`);
+      console.log(`Port: ${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`Database: PostgreSQL ✅`);
+      console.log(`Default Admin: kellynyachiro@gmail.com`);
       console.log('');
-      console.log('📍 Endpoints:');
+      console.log('Endpoints:');
       console.log(`   Health: http://localhost:${PORT}/health`);
       console.log(`   API Test: http://localhost:${PORT}/api/test`);
       console.log(`   Auth: http://localhost:${PORT}/api/auth/*`);
@@ -43,7 +43,7 @@ const startServer = async () => {
       console.log('');
     });
   } catch (error) {
-    console.error('❌ Server startup error:', error);
+    console.error('Server startup error:', error);
     process.exit(1);
   }
 };
