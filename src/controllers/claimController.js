@@ -152,10 +152,15 @@ class ClaimController {
       const { status } = req.query;
 
       let query = `
-        SELECT c.id, c.title, c.category, c.status,
-               c.created_at as submittedDate,
-               v.created_at as verdictDate,
-               v.verdict, v.evidence_sources as sources
+        SELECT 
+          c.id, 
+          c.title, 
+          c.category, 
+          c.status,
+          c.created_at as "submittedDate",
+          v.created_at as "verdictDate",
+          v.verdict, 
+          v.evidence_sources as sources
         FROM hakikisha.claims c
         LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
         WHERE c.user_id = $1
@@ -171,14 +176,31 @@ class ClaimController {
       query += ` ORDER BY c.created_at DESC`;
 
       console.log('🔍 Executing query for user claims');
+      console.log('Query:', query);
+      console.log('Params:', params);
+
       const result = await db.query(query, params);
 
       console.log(`✅ Found ${result.rows.length} claims for user`);
+      
+      // Format the response properly
+      const claims = result.rows.map(claim => ({
+        id: claim.id,
+        title: claim.title,
+        category: claim.category,
+        status: claim.status,
+        submittedDate: claim.submittedDate,
+        verdictDate: claim.verdictDate,
+        verdict: claim.verdict,
+        sources: claim.sources
+      }));
+
       res.json({
         success: true,
-        claims: result.rows
+        claims: claims
       });
     } catch (error) {
+      console.error('❌ Get my claims error:', error);
       logger.error('Get my claims error:', error);
       res.status(500).json({
         success: false,
@@ -193,11 +215,24 @@ class ClaimController {
       const { claimId } = req.params;
       console.log('🔍 Get Claim Details:', claimId);
 
+      // Validate claimId is a valid UUID
+      if (!claimId || !claimId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)) {
+        console.log('❌ Invalid claim ID format:', claimId);
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid claim ID format',
+          code: 'VALIDATION_ERROR'
+        });
+      }
+
       const result = await db.query(
-        `SELECT c.*, 
-                u.email as submittedBy,
-                v.verdict, v.explanation as verdictExplanation, v.evidence_sources as sources,
-                v.created_at as verdictDate
+        `SELECT 
+          c.*, 
+          u.email as "submittedBy",
+          v.verdict, 
+          v.explanation as "verdictExplanation", 
+          v.evidence_sources as sources,
+          v.created_at as "verdictDate"
          FROM hakikisha.claims c
          LEFT JOIN hakikisha.users u ON c.user_id = u.id
          LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
@@ -225,9 +260,9 @@ class ClaimController {
           description: claim.description,
           category: claim.category,
           status: claim.status,
-          submittedBy: claim.submittedby,
+          submittedBy: claim.submittedBy,
           submittedDate: claim.created_at,
-          verdictDate: claim.verdictdate,
+          verdictDate: claim.verdictDate,
           verdict: claim.verdict,
           sources: claim.sources,
           imageUrl: claim.media_url,
@@ -235,6 +270,7 @@ class ClaimController {
         }
       });
     } catch (error) {
+      console.error('❌ Get claim details error:', error);
       logger.error('Get claim details error:', error);
       res.status(500).json({
         success: false,
@@ -317,9 +353,9 @@ class ClaimController {
             c.category, 
             c.status,
             COALESCE(v.verdict, av.verdict) as verdict,
-            c.trending_score as trendingScore,
-            c.created_at as submittedDate,
-            v.created_at as verdictDate,
+            c.trending_score as "trendingScore",
+            c.created_at as "submittedDate",
+            v.created_at as "verdictDate",
             c.submission_count,
             c.is_trending
           FROM hakikisha.claims c
@@ -343,8 +379,8 @@ class ClaimController {
             c.category, 
             c.status,
             COALESCE(v.verdict, av.verdict) as verdict,
-            c.created_at as submittedDate,
-            v.created_at as verdictDate,
+            c.created_at as "submittedDate",
+            v.created_at as "verdictDate",
             c.submission_count,
             c.is_trending
           FROM hakikisha.claims c
@@ -375,8 +411,8 @@ class ClaimController {
             c.category, 
             c.status,
             COALESCE(v.verdict, av.verdict) as verdict,
-            c.created_at as submittedDate,
-            v.created_at as verdictDate,
+            c.created_at as "submittedDate",
+            v.created_at as "verdictDate",
             c.submission_count,
             c.is_trending
           FROM hakikisha.claims c
@@ -411,7 +447,7 @@ class ClaimController {
       try {
         console.log('Trying simple fallback query with public schema...');
         const fallbackResult = await db.query(`
-          SELECT id, title, category, status, created_at as submittedDate
+          SELECT id, title, category, status, created_at as "submittedDate"
           FROM public.claims 
           ORDER BY created_at DESC 
           LIMIT $1
@@ -430,7 +466,7 @@ class ClaimController {
         try {
           console.log('Trying final fallback with hakikisha schema...');
           const finalFallback = await db.query(`
-            SELECT id, title, category, status, created_at as submittedDate
+            SELECT id, title, category, status, created_at as "submittedDate"
             FROM hakikisha.claims 
             ORDER BY created_at DESC 
             LIMIT $1

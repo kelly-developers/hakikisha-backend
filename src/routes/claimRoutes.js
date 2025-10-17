@@ -15,13 +15,16 @@ const upload = multer({
 // Public routes (no auth required)
 router.get('/trending', claimController.getTrendingClaims);
 router.get('/search', claimController.searchClaims);
-router.get('/:claimId', claimController.getClaimDetails); // Make this public too
 
 // Protected routes (authentication required)
 router.use(authMiddleware);
 
+// Specific routes BEFORE parameterized routes
+router.get('/my-claims', claimController.getMyClaims);
 router.post('/', claimController.submitClaim);
 router.post('/upload-evidence', upload.single('evidence'), claimController.uploadEvidence);
-router.get('/my-claims', claimController.getMyClaims);
+
+// Parameterized routes LAST
+router.get('/:claimId', claimController.getClaimDetails);
 
 module.exports = router;
