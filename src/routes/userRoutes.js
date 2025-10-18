@@ -28,12 +28,14 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// Get user profile (protected)
+// Get user profile (protected) - FIXED ENDPOINT
 router.get('/profile', verifyToken, async (req, res) => {
   try {
+    console.log('Get profile request for user:', req.user.userId);
+    
     const userResult = await db.query(
-      `SELECT id, email, role, phone, is_verified, registration_status, 
-              profile_picture, login_count, last_login, created_at
+      `SELECT id, email, full_name, phone_number, role, is_verified, registration_status, 
+              profile_picture, login_count, last_login, created_at, updated_at
        FROM hakikisha.users WHERE id = $1`,
       [req.user.userId]
     );
@@ -46,10 +48,21 @@ router.get('/profile', verifyToken, async (req, res) => {
     }
 
     const user = userResult.rows[0];
-
+    
+    // Ensure consistent response format
     res.json({
       success: true,
-      user: user
+      data: {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        phone_number: user.phone_number,
+        role: user.role,
+        is_verified: user.is_verified,
+        profile_picture: user.profile_picture,
+        created_at: user.created_at,
+        updated_at: user.updated_at
+      }
     });
 
   } catch (error) {
@@ -64,10 +77,11 @@ router.get('/profile', verifyToken, async (req, res) => {
 // Update user profile (protected)
 router.put('/profile', verifyToken, async (req, res) => {
   try {
-    const { phone, profile_picture } = req.body;
+    const { full_name, phone_number, profile_picture } = req.body;
     const updates = {};
     
-    if (phone !== undefined) updates.phone = phone;
+    if (full_name !== undefined) updates.full_name = full_name;
+    if (phone_number !== undefined) updates.phone_number = phone_number;
     if (profile_picture !== undefined) updates.profile_picture = profile_picture;
 
     if (Object.keys(updates).length === 0) {
@@ -85,7 +99,7 @@ router.put('/profile', verifyToken, async (req, res) => {
       `UPDATE hakikisha.users 
        SET ${setClause}, updated_at = NOW()
        WHERE id = $${values.length}
-       RETURNING id, email, role, phone, profile_picture, is_verified, registration_status`,
+       RETURNING id, email, full_name, phone_number, role, profile_picture, is_verified, registration_status, created_at, updated_at`,
       values
     );
 
@@ -99,11 +113,40 @@ router.put('/profile', verifyToken, async (req, res) => {
     res.json({
       success: true,
       message: 'Profile updated successfully',
-      user: result.rows[0]
+      data: result.rows[0]
     });
 
   } catch (error) {
     console.error('Update profile error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Delete user account
+router.delete('/account', verifyToken, async (req, res) => {
+  try {
+    const result = await db.query(
+      'DELETE FROM hakikisha.users WHERE id = $1 RETURNING id',
+      [req.user.userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Account deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete account error:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error'
@@ -126,7 +169,7 @@ router.get('/', verifyToken, async (req, res) => {
     const offset = (page - 1) * limit;
 
     const usersResult = await db.query(
-      `SELECT id, email, role, phone, is_verified, registration_status, 
+      `SELECT id, email, full_name, phone_number, role, is_verified, registration_status, 
               login_count, last_login, created_at
        FROM hakikisha.users 
        ORDER BY created_at DESC
@@ -138,7 +181,7 @@ router.get('/', verifyToken, async (req, res) => {
 
     res.json({
       success: true,
-      users: usersResult.rows,
+      data: usersResult.rows,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),

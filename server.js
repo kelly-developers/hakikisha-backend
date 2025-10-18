@@ -178,8 +178,13 @@ const startServer = async () => {
     console.log('✓ Auth routes loaded: /api/v1/auth');
     
     // User routes  
-    app.use('/api/v1/users', require('./src/routes/userRoutes'));
-    console.log('✓ User routes loaded: /api/v1/users');
+// User routes - FIXED PATH
+app.use('/api/v1/user', require('./src/routes/userRoutes'));
+console.log('✓ User routes loaded: /api/v1/user');
+
+// Keep other routes the same
+app.use('/api/v1/users', require('./src/routes/adminUserRoutes')); // For admin user management
+console.log('✓ Admin user routes loaded: /api/v1/users');
     
     // Claims routes
     try {
