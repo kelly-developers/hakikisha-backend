@@ -53,6 +53,7 @@ class DatabaseInitializer {
 
       // Create tables in correct order with dependencies
       await this.createUsersTable();
+      await this.createAdminTables(); // ADD THIS
       await this.createClaimsTable();
       await this.createAIVerdictsTable();
       await this.createVerdictsTable();
@@ -70,12 +71,14 @@ class DatabaseInitializer {
         CREATE TABLE IF NOT EXISTS hakikisha.users (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           email VARCHAR(255) UNIQUE NOT NULL,
+          username VARCHAR(255) UNIQUE NOT NULL,
           password_hash VARCHAR(255) NOT NULL,
           phone VARCHAR(50),
           role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('user', 'fact_checker', 'admin')),
           profile_picture TEXT,
           is_verified BOOLEAN DEFAULT FALSE,
           registration_status VARCHAR(50) DEFAULT 'pending' CHECK (registration_status IN ('pending', 'approved', 'rejected')),
+          status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'inactive')),
           two_factor_enabled BOOLEAN DEFAULT FALSE,
           two_factor_secret VARCHAR(255),
           login_count INTEGER DEFAULT 0,
@@ -88,6 +91,67 @@ class DatabaseInitializer {
       console.log('✅ Users table created/verified');
     } catch (error) {
       console.error('❌ Error creating users table:', error);
+      throw error;
+    }
+  }
+
+  static async createAdminTables() {
+    try {
+      // Admin Activities Table
+      const adminActivitiesQuery = `
+        CREATE TABLE IF NOT EXISTS hakikisha.admin_activities (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          admin_id UUID NOT NULL REFERENCES hakikisha.users(id),
+          activity_type VARCHAR(100) NOT NULL,
+          description TEXT NOT NULL,
+          target_user_id UUID REFERENCES hakikisha.users(id),
+          changes_made JSONB,
+          ip_address VARCHAR(45),
+          user_agent TEXT,
+          created_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await db.query(adminActivitiesQuery);
+      console.log('✅ Admin activities table created/verified');
+
+      // Registration Requests Table
+      const registrationRequestsQuery = `
+        CREATE TABLE IF NOT EXISTS hakikisha.registration_requests (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES hakikisha.users(id),
+          request_type VARCHAR(50) DEFAULT 'user',
+          status VARCHAR(50) DEFAULT 'pending',
+          admin_notes TEXT,
+          reviewed_by UUID REFERENCES hakikisha.users(id),
+          reviewed_at TIMESTAMP,
+          submitted_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await db.query(registrationRequestsQuery);
+      console.log('✅ Registration requests table created/verified');
+
+      // Fact Checkers Table
+      const factCheckersQuery = `
+        CREATE TABLE IF NOT EXISTS hakikisha.fact_checkers (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL UNIQUE REFERENCES hakikisha.users(id),
+          credentials TEXT,
+          areas_of_expertise JSONB,
+          verification_status VARCHAR(50) DEFAULT 'pending',
+          is_active BOOLEAN DEFAULT TRUE,
+          suspension_reason TEXT,
+          suspended_at TIMESTAMP,
+          is_featured BOOLEAN DEFAULT FALSE,
+          promoted_at TIMESTAMP,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await db.query(factCheckersQuery);
+      console.log('✅ Fact checkers table created/verified');
+
+    } catch (error) {
+      console.error('❌ Error creating admin tables:', error);
       throw error;
     }
   }
@@ -230,7 +294,11 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_claim_id ON hakikisha.ai_verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_id ON hakikisha.verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_users_email ON hakikisha.users(email)',
-      'CREATE INDEX IF NOT EXISTS idx_users_role ON hakikisha.users(role)'
+      'CREATE INDEX IF NOT EXISTS idx_users_role ON hakikisha.users(role)',
+      'CREATE INDEX IF NOT EXISTS idx_users_status ON hakikisha.users(status)',
+      'CREATE INDEX IF NOT EXISTS idx_admin_activities_admin_id ON hakikisha.admin_activities(admin_id)',
+      'CREATE INDEX IF NOT EXISTS idx_registration_requests_user_id ON hakikisha.registration_requests(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_fact_checkers_user_id ON hakikisha.fact_checkers(user_id)'
     ];
 
     for (const indexQuery of essentialIndexes) {
@@ -242,29 +310,6 @@ class DatabaseInitializer {
       }
     }
     console.log('✅ All essential indexes created/verified');
-  }
-
-  static async addColumnIfNotExists(table, column, definition) {
-    try {
-      const tableName = table.replace('hakikisha.', '');
-      const checkQuery = `
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_schema = 'hakikisha' 
-        AND table_name = $1 
-        AND column_name = $2
-      `;
-      
-      const result = await db.query(checkQuery, [tableName, column]);
-      
-      if (result.rows.length === 0) {
-        const alterQuery = `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`;
-        await db.query(alterQuery);
-        console.log(`✅ Added missing column: ${table}.${column}`);
-      }
-    } catch (error) {
-      console.log(`⚠️ Could not add column ${column} to ${table}:`, error.message);
-    }
   }
 
   static async checkDatabaseConnection() {
@@ -308,6 +353,7 @@ class DatabaseInitializer {
                  registration_status = 'approved', 
                  is_verified = true, 
                  role = 'admin',
+                 status = 'active',
                  updated_at = NOW()
              WHERE email = $2`,
             [passwordHash, adminEmail]
@@ -327,10 +373,10 @@ class DatabaseInitializer {
         const passwordHash = await bcrypt.hash(adminPassword, saltRounds);
 
         const result = await db.query(
-          `INSERT INTO hakikisha.users (email, password_hash, role, is_verified, registration_status) 
-           VALUES ($1, $2, $3, $4, $5) 
+          `INSERT INTO hakikisha.users (email, username, password_hash, role, is_verified, registration_status, status) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7) 
            RETURNING id, email, role, registration_status`,
-          [adminEmail, passwordHash, 'admin', true, 'approved']
+          [adminEmail, 'admin', passwordHash, 'admin', true, 'approved', 'active']
         );
 
         const newAdmin = result.rows[0];
@@ -378,24 +424,6 @@ class DatabaseInitializer {
               is_trending: true,
               trending_score: 72.3,
               submission_count: 12
-            },
-            {
-              title: 'Public Health Awareness Campaign',
-              description: 'New public health campaign focuses on preventive care and community wellness.',
-              category: 'Health',
-              status: 'human_review',
-              is_trending: false,
-              trending_score: 45.0,
-              submission_count: 8
-            },
-            {
-              title: 'Education Reform Proposal',
-              description: 'Proposed education reforms aim to improve curriculum and teacher training.',
-              category: 'Education',
-              status: 'pending',
-              is_trending: false,
-              trending_score: 30.2,
-              submission_count: 5
             }
           ];
           
@@ -431,7 +459,7 @@ class DatabaseInitializer {
       console.log(`📊 Found ${tables.rows.length} tables in hakikisha schema`);
       
       // Check each essential table
-      const essentialTables = ['users', 'claims', 'ai_verdicts', 'verdicts'];
+      const essentialTables = ['users', 'claims', 'ai_verdicts', 'verdicts', 'admin_activities', 'registration_requests', 'fact_checkers'];
       for (const tableName of essentialTables) {
         try {
           const count = await db.query(`SELECT COUNT(*) FROM hakikisha.${tableName}`);
@@ -439,14 +467,6 @@ class DatabaseInitializer {
         } catch (error) {
           console.log(`❌ ${tableName}: Table not accessible - ${error.message}`);
         }
-      }
-
-      // Check public schema claims table/view
-      try {
-        const publicClaims = await db.query(`SELECT COUNT(*) as count FROM public.claims`);
-        console.log(`📋 public.claims: ${publicClaims.rows[0].count} records`);
-      } catch (error) {
-        console.log(`❌ public.claims: Table/view not accessible - ${error.message}`);
       }
 
       // Verify admin user
@@ -462,17 +482,10 @@ class DatabaseInitializer {
         console.log('❌ Admin user not found');
       }
 
-      // Check trending claims
-      const trendingClaims = await db.query(
-        'SELECT COUNT(*) as count FROM hakikisha.claims WHERE is_trending = true'
-      );
-      console.log(`🔥 Trending claims: ${trendingClaims.rows[0].count}`);
-      
       return {
         tableCount: tables.rows.length,
         adminExists: adminCheck.rows.length > 0,
-        adminHasPassword: adminCheck.rows.length > 0 ? adminCheck.rows[0].has_password : false,
-        trendingClaimsCount: parseInt(trendingClaims.rows[0].count)
+        adminHasPassword: adminCheck.rows.length > 0 ? adminCheck.rows[0].has_password : false
       };
     } catch (error) {
       console.error('❌ Error verifying database state:', error);
@@ -488,6 +501,9 @@ class DatabaseInitializer {
         'verdicts',
         'ai_verdicts', 
         'claims',
+        'admin_activities',
+        'registration_requests',
+        'fact_checkers',
         'users'
       ];
       

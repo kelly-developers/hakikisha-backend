@@ -109,7 +109,7 @@ exports.registerFactChecker = async (req, res, next) => {
   }
 };
 
-// NEW: Register admin user
+// CORRECTED: Register admin user
 exports.registerAdmin = async (req, res, next) => {
   try {
     const { email, username, password } = req.body;
@@ -239,28 +239,21 @@ exports.getDashboardStats = async (req, res, next) => {
       totalUsers,
       totalClaims,
       pendingClaims,
-      approvedClaims,
       activeFactCheckers
     ] = await Promise.all([
       User.countAll(),
       Claim.countAll(timeframe),
       Claim.countByStatus('pending'),
-      Claim.countByStatus('human_approved'),
       FactChecker.countActive()
     ]);
-
-    // Get recent activities
-    const recentActivities = await AdminActivity.getRecent(10);
 
     res.json({
       stats: {
         total_users: totalUsers,
         total_claims: totalClaims,
         pending_claims: pendingClaims,
-        approved_claims: approvedClaims,
         active_fact_checkers: activeFactCheckers
       },
-      recent_activities: recentActivities,
       timeframe
     });
 
@@ -295,7 +288,7 @@ exports.getFactCheckerActivity = async (req, res, next) => {
   }
 };
 
-// Registration management (existing)
+// Registration management
 exports.getRegistrationRequests = async (req, res, next) => {
   try {
     const { status = 'pending', page = 1, limit = 20 } = req.query;
@@ -378,7 +371,7 @@ exports.rejectRegistration = async (req, res, next) => {
 
     await RegistrationRequest.reject(requestId, req.user.userId, reason);
 
-    // Login for the admin activity
+    // Log admin activity
     await AdminActivity.create({
       admin_id: req.user.userId,
       activity_type: 'registration_rejection',

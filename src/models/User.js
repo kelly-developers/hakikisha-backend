@@ -3,25 +3,49 @@ const db = require('../config/database');
 const logger = require('../utils/logger');
 
 class User {
+  static async findByEmail(email) {
+    const query = 'SELECT * FROM hakikisha.users WHERE email = $1';
+    try {
+      const result = await db.query(query, [email]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Error finding user by email:', error);
+      throw error;
+    }
+  }
+
+  static async findById(id) {
+    const query = 'SELECT * FROM hakikisha.users WHERE id = $1';
+    try {
+      const result = await db.query(query, [id]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Error finding user by ID:', error);
+      throw error;
+    }
+  }
+
   static async create(userData) {
     const {
       email,
+      username,
       password_hash,
       phone = null,
       role = 'user',
-      profile_picture = null
+      is_verified = false,
+      status = 'active'
     } = userData;
 
     const id = uuidv4();
     const query = `
-      INSERT INTO users (id, email, password_hash, phone, role, profile_picture, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      INSERT INTO hakikisha.users (id, email, username, password_hash, phone, role, is_verified, status, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
       RETURNING *
     `;
 
     try {
       const result = await db.query(query, [
-        id, email, password_hash, phone, role, profile_picture
+        id, email, username, password_hash, phone, role, is_verified, status
       ]);
       return result.rows[0];
     } catch (error) {
@@ -30,52 +54,23 @@ class User {
     }
   }
 
-  static async findByEmail(email) {
-    const query = 'SELECT * FROM users WHERE email = $1';
-    try {
-      const result = await db.query(query, [email]);
-      return result.rows[0];
-    } catch (error) {
-      logger.error('Error finding user by email:', error);
-      throw error;
-    }
-  }
-
-  static async findById(id) {
-    const query = 'SELECT * FROM users WHERE id = $1';
-    try {
-      const result = await db.query(query, [id]);
-      return result.rows[0];
-    } catch (error) {
-      logger.error('Error finding user by id:', error);
-      throw error;
-    }
-  }
-
-  static async update(id, updates) {
-    const allowedFields = ['phone', 'profile_picture', 'last_login', 'is_verified'];
-    const setClause = [];
+  static async update(userId, updateData) {
+    const fields = [];
     const values = [];
     let paramCount = 1;
 
-    Object.keys(updates).forEach(field => {
-      if (allowedFields.includes(field)) {
-        setClause.push(`${field} = $${paramCount}`);
-        values.push(updates[field]);
-        paramCount++;
-      }
-    });
-
-    if (setClause.length === 0) {
-      throw new Error('No valid fields to update');
+    for (const [key, value] of Object.entries(updateData)) {
+      fields.push(`${key} = $${paramCount}`);
+      values.push(value);
+      paramCount++;
     }
 
-    setClause.push('updated_at = NOW()');
-    values.push(id);
+    fields.push('updated_at = NOW()');
+    values.push(userId);
 
     const query = `
-      UPDATE users 
-      SET ${setClause.join(', ')}
+      UPDATE hakikisha.users 
+      SET ${fields.join(', ')}
       WHERE id = $${paramCount}
       RETURNING *
     `;
@@ -89,36 +84,81 @@ class User {
     }
   }
 
-  static async updateLoginStats(id) {
-    const query = `
-      UPDATE users 
-      SET last_login = NOW(), login_count = COALESCE(login_count, 0) + 1
-      WHERE id = $1
-      RETURNING *
-    `;
+  static async findAll(options = {}) {
+    const { role, limit = 20, offset = 0 } = options;
+    
+    let query = 'SELECT * FROM hakikisha.users WHERE 1=1';
+    const params = [];
+    let paramCount = 1;
+
+    if (role) {
+      query += ` AND role = $${paramCount}`;
+      params.push(role);
+      paramCount++;
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+    params.push(limit, offset);
 
     try {
-      const result = await db.query(query, [id]);
-      return result.rows[0];
+      const result = await db.query(query, params);
+      return result.rows;
     } catch (error) {
-      logger.error('Error updating user login stats:', error);
+      logger.error('Error finding all users:', error);
       throw error;
     }
   }
 
-  static async getFactCheckers() {
+  static async countAll(options = {}) {
+    const { role } = options;
+    
+    let query = 'SELECT COUNT(*) FROM hakikisha.users WHERE 1=1';
+    const params = [];
+    let paramCount = 1;
+
+    if (role) {
+      query += ` AND role = $${paramCount}`;
+      params.push(role);
+    }
+
+    try {
+      const result = await db.query(query, params);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting users:', error);
+      throw error;
+    }
+  }
+
+  static async countNew(timeframe = '30 days') {
     const query = `
-      SELECT u.*, fc.expertise_areas, fc.verification_status, fc.rating
-      FROM users u
-      LEFT JOIN fact_checkers fc ON u.id = fc.user_id
-      WHERE u.role = 'fact_checker' AND fc.verification_status = 'approved'
+      SELECT COUNT(*) 
+      FROM hakikisha.users 
+      WHERE created_at >= NOW() - INTERVAL '${timeframe}'
     `;
 
     try {
       const result = await db.query(query);
-      return result.rows;
+      return parseInt(result.rows[0].count);
     } catch (error) {
-      logger.error('Error getting fact checkers:', error);
+      logger.error('Error counting new users:', error);
+      throw error;
+    }
+  }
+
+  static async countActive(timeframe = '30 days') {
+    const query = `
+      SELECT COUNT(*) 
+      FROM hakikisha.users 
+      WHERE last_login >= NOW() - INTERVAL '${timeframe}'
+        AND status = 'active'
+    `;
+
+    try {
+      const result = await db.query(query);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting active users:', error);
       throw error;
     }
   }
