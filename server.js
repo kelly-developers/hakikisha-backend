@@ -197,6 +197,38 @@ const startServer = async () => {
       console.error('✗ Blog routes failed to load:', error.message);
     }
 
+    // ADMIN ROUTES - ADDED THIS SECTION
+    try {
+      const adminRoutes = require('./src/routes/adminRoutes');
+      app.use('/api/v1/admin', adminRoutes);
+      console.log('✓ Admin routes loaded: /api/v1/admin');
+      console.log('  - GET /api/v1/admin/users');
+      console.log('  - POST /api/v1/admin/users/register-fact-checker');
+      console.log('  - POST /api/v1/admin/users/register-admin');
+      console.log('  - POST /api/v1/admin/users/action');
+      console.log('  - GET /api/v1/admin/dashboard/stats');
+      console.log('  - GET /api/v1/admin/dashboard/fact-checker-activity');
+    } catch (error) {
+      console.error('✗ Admin routes failed to load:', error.message);
+      console.log('Admin functionality will not be available');
+    }
+
+    // Fact Checker routes
+    try {
+      app.use('/api/v1/fact-checker', require('./src/routes/factCheckerRoutes'));
+      console.log('✓ Fact Checker routes loaded: /api/v1/fact-checker');
+    } catch (error) {
+      console.error('✗ Fact Checker routes failed to load:', error.message);
+    }
+
+    // Dashboard routes
+    try {
+      app.use('/api/v1/dashboard', require('./src/routes/dashboardRoutes'));
+      console.log('✓ Dashboard routes loaded: /api/v1/dashboard');
+    } catch (error) {
+      console.error('✗ Dashboard routes failed to load:', error.message);
+    }
+
     // Test endpoint
     app.get('/api/test', (req, res) => {
       res.json({
@@ -204,6 +236,20 @@ const startServer = async () => {
         timestamp: new Date().toISOString(),
         version: '1.0.0',
         database: dbInitialized ? 'connected' : 'disconnected'
+      });
+    });
+
+    // Admin test endpoint
+    app.get('/api/v1/admin/test', (req, res) => {
+      res.json({
+        message: 'Admin API is working!',
+        timestamp: new Date().toISOString(),
+        endpoints: {
+          register_fact_checker: 'POST /api/v1/admin/users/register-fact-checker',
+          register_admin: 'POST /api/v1/admin/users/register-admin',
+          get_users: 'GET /api/v1/admin/users',
+          dashboard_stats: 'GET /api/v1/admin/dashboard/stats'
+        }
       });
     });
 
@@ -252,7 +298,10 @@ const startServer = async () => {
           auth: '/api/v1/auth',
           users: '/api/v1/users',
           claims: '/api/v1/claims',
-          blogs: '/api/v1/blogs'
+          blogs: '/api/v1/blogs',
+          admin: '/api/v1/admin',
+          fact_checker: '/api/v1/fact-checker',
+          dashboard: '/api/v1/dashboard'
         }
       });
     });
@@ -271,7 +320,10 @@ const startServer = async () => {
           '/api/v1/auth/*',
           '/api/v1/users/*',
           '/api/v1/claims/*',
-          '/api/v1/blogs/*'
+          '/api/v1/blogs/*',
+          '/api/v1/admin/*',
+          '/api/v1/fact-checker/*',
+          '/api/v1/dashboard/*'
         ]
       });
     });
@@ -305,9 +357,16 @@ const startServer = async () => {
       console.log('   DB Debug: http://localhost:' + PORT + '/api/debug/db');
       console.log('   Routes Debug: http://localhost:' + PORT + '/api/debug/routes');
       console.log('   API Test: http://localhost:' + PORT + '/api/test');
+      console.log('   Admin Test: http://localhost:' + PORT + '/api/v1/admin/test');
       console.log('   Trending Claims: http://localhost:' + PORT + '/api/v1/claims/trending');
       console.log('   Blogs: http://localhost:' + PORT + '/api/v1/blogs');
       console.log('   Trending Blogs: http://localhost:' + PORT + '/api/v1/blogs/trending');
+      console.log('');
+      console.log('Admin Endpoints:');
+      console.log('   Register Fact Checker: POST http://localhost:' + PORT + '/api/v1/admin/users/register-fact-checker');
+      console.log('   Register Admin: POST http://localhost:' + PORT + '/api/v1/admin/users/register-admin');
+      console.log('   Get Users: GET http://localhost:' + PORT + '/api/v1/admin/users');
+      console.log('   Dashboard Stats: GET http://localhost:' + PORT + '/api/v1/admin/dashboard/stats');
       console.log('');
     });
 
