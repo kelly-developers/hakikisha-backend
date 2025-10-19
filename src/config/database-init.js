@@ -90,49 +90,81 @@ class DatabaseInitializer {
       await db.query(query);
       console.log('✅ Users table created/verified');
       
-      // Ensure username column exists (for existing tables)
-      await this.ensureUsernameColumn();
+      // Ensure all required columns exist (for existing tables)
+      await this.ensureRequiredColumns();
     } catch (error) {
       console.error('❌ Error creating users table:', error);
       throw error;
     }
   }
 
-  static async ensureUsernameColumn() {
+  static async ensureRequiredColumns() {
     try {
-      // Check if username column exists
+      console.log('🔍 Checking for missing columns in users table...');
+      
+      const requiredColumns = [
+        { name: 'username', type: 'VARCHAR(255)', defaultValue: "'user_' || substr(md5(random()::text), 1, 8)", isUnique: true },
+        { name: 'status', type: 'VARCHAR(50)', defaultValue: "'active'", isUnique: false },
+        { name: 'registration_status', type: 'VARCHAR(50)', defaultValue: "'pending'", isUnique: false },
+        { name: 'is_verified', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
+        { name: 'role', type: 'VARCHAR(50)', defaultValue: "'user'", isUnique: false },
+        { name: 'phone', type: 'VARCHAR(50)', defaultValue: 'NULL', isUnique: false },
+        { name: 'profile_picture', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
+        { name: 'two_factor_enabled', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
+        { name: 'two_factor_secret', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: false },
+        { name: 'login_count', type: 'INTEGER', defaultValue: '0', isUnique: false },
+        { name: 'last_login', type: 'TIMESTAMP', defaultValue: 'NULL', isUnique: false }
+      ];
+
+      for (const column of requiredColumns) {
+        await this.ensureColumnExists('users', column);
+      }
+      
+      console.log('✅ All required columns verified in users table');
+    } catch (error) {
+      console.error('❌ Error ensuring required columns:', error);
+      throw error;
+    }
+  }
+
+  static async ensureColumnExists(tableName, column) {
+    try {
       const checkQuery = `
         SELECT column_name 
         FROM information_schema.columns 
         WHERE table_schema = 'hakikisha' 
-        AND table_name = 'users' 
-        AND column_name = 'username'
+        AND table_name = $1 
+        AND column_name = $2
       `;
-      const result = await db.query(checkQuery);
+      const result = await db.query(checkQuery, [tableName, column.name]);
       
       if (result.rows.length === 0) {
-        console.log('🔄 Adding missing username column to users table...');
-        const alterQuery = `
-          ALTER TABLE hakikisha.users 
-          ADD COLUMN username VARCHAR(255) UNIQUE NOT NULL DEFAULT 'user_' || substr(md5(random()::text), 1, 8)
-        `;
-        await db.query(alterQuery);
-        console.log('✅ Username column added to users table');
+        console.log(`🔄 Adding missing column ${column.name} to ${tableName} table...`);
         
-        // Update existing records with proper usernames
-        const updateQuery = `
-          UPDATE hakikisha.users 
-          SET username = 'user_' || substr(md5(random()::text), 1, 8) 
-          WHERE username IS NULL OR username LIKE 'user_%'
-        `;
-        await db.query(updateQuery);
-        console.log('✅ Existing users updated with usernames');
+        let alterQuery = `ALTER TABLE hakikisha.${tableName} ADD COLUMN ${column.name} ${column.type}`;
+        
+        if (column.isUnique) {
+          alterQuery += ` UNIQUE`;
+        }
+        
+        if (column.defaultValue !== 'NULL') {
+          alterQuery += ` DEFAULT ${column.defaultValue}`;
+        }
+        
+        await db.query(alterQuery);
+        console.log(`✅ Column ${column.name} added to ${tableName} table`);
+        
+        // Update existing records if needed
+        if (column.defaultValue !== 'NULL' && !column.defaultValue.includes('random()')) {
+          const updateQuery = `UPDATE hakikisha.${tableName} SET ${column.name} = ${column.defaultValue} WHERE ${column.name} IS NULL`;
+          await db.query(updateQuery);
+          console.log(`✅ Existing records updated with default ${column.name}`);
+        }
       } else {
-        console.log('✅ Username column already exists in users table');
+        console.log(`✅ Column ${column.name} already exists in ${tableName} table`);
       }
     } catch (error) {
-      console.error('❌ Error ensuring username column:', error);
-      throw error;
+      console.error(`❌ Error ensuring column ${column.name}:`, error.message);
     }
   }
 
@@ -338,6 +370,7 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_users_username ON hakikisha.users(username)',
       'CREATE INDEX IF NOT EXISTS idx_users_role ON hakikisha.users(role)',
       'CREATE INDEX IF NOT EXISTS idx_users_status ON hakikisha.users(status)',
+      'CREATE INDEX IF NOT EXISTS idx_users_registration_status ON hakikisha.users(registration_status)',
       'CREATE INDEX IF NOT EXISTS idx_admin_activities_admin_id ON hakikisha.admin_activities(admin_id)',
       'CREATE INDEX IF NOT EXISTS idx_registration_requests_user_id ON hakikisha.registration_requests(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checkers_user_id ON hakikisha.fact_checkers(user_id)'
@@ -374,7 +407,7 @@ class DatabaseInitializer {
       
       // Check if admin already exists
       const existingAdmin = await db.query(
-        'SELECT id, email, username, password_hash, role, registration_status FROM hakikisha.users WHERE email = $1',
+        'SELECT id, email, username, password_hash, role, registration_status, status FROM hakikisha.users WHERE email = $1',
         [adminEmail]
       );
 
@@ -417,7 +450,7 @@ class DatabaseInitializer {
         const result = await db.query(
           `INSERT INTO hakikisha.users (email, username, password_hash, role, is_verified, registration_status, status) 
            VALUES ($1, $2, $3, $4, $5, $6, $7) 
-           RETURNING id, email, username, role, registration_status`,
+           RETURNING id, email, username, role, registration_status, status`,
           [adminEmail, 'admin', passwordHash, 'admin', true, 'approved', 'active']
         );
 
@@ -426,7 +459,8 @@ class DatabaseInitializer {
         console.log('Default admin user created: ' + newAdmin.email);
         console.log('Username: ' + newAdmin.username);
         console.log('Role: ' + newAdmin.role);
-        console.log('Status: ' + newAdmin.registration_status);
+        console.log('Registration Status: ' + newAdmin.registration_status);
+        console.log('Status: ' + newAdmin.status);
         
         return newAdmin;
       }
@@ -512,36 +546,53 @@ class DatabaseInitializer {
         }
       }
 
-      // Verify admin user and check username
+      // Verify admin user and check all columns
       const adminCheck = await db.query(
-        'SELECT email, username, role, password_hash IS NOT NULL as has_password FROM hakikisha.users WHERE email = $1',
+        `SELECT email, username, role, status, registration_status, is_verified, 
+                password_hash IS NOT NULL as has_password 
+         FROM hakikisha.users WHERE email = $1`,
         ['kellynyachiro@gmail.com']
       );
       
       if (adminCheck.rows.length > 0) {
         const admin = adminCheck.rows[0];
-        console.log(`👤 Admin status: ${admin.email}, username: ${admin.username}, role: ${admin.role}, has_password: ${admin.has_password}`);
+        console.log(`👤 Admin status: ${admin.email}`);
+        console.log(`   Username: ${admin.username}`);
+        console.log(`   Role: ${admin.role}`);
+        console.log(`   Status: ${admin.status}`);
+        console.log(`   Registration Status: ${admin.registration_status}`);
+        console.log(`   Is Verified: ${admin.is_verified}`);
+        console.log(`   Has Password: ${admin.has_password}`);
       } else {
         console.log('❌ Admin user not found');
       }
 
-      // Verify username column exists and has data
-      const usernameCheck = await db.query(`
+      // Verify all required columns exist and have data
+      const columnCheck = await db.query(`
         SELECT 
           COUNT(*) as total_users,
           COUNT(username) as users_with_username,
-          COUNT(DISTINCT username) as unique_usernames
+          COUNT(status) as users_with_status,
+          COUNT(registration_status) as users_with_reg_status,
+          COUNT(is_verified) as users_with_verified,
+          COUNT(role) as users_with_role
         FROM hakikisha.users
       `);
       
-      const usernameStats = usernameCheck.rows[0];
-      console.log(`📊 Username stats: ${usernameStats.users_with_username}/${usernameStats.total_users} users have usernames, ${usernameStats.unique_usernames} unique usernames`);
+      const stats = columnCheck.rows[0];
+      console.log(`📊 Column completeness stats:`);
+      console.log(`   Username: ${stats.users_with_username}/${stats.total_users}`);
+      console.log(`   Status: ${stats.users_with_status}/${stats.total_users}`);
+      console.log(`   Registration Status: ${stats.users_with_reg_status}/${stats.total_users}`);
+      console.log(`   Is Verified: ${stats.users_with_verified}/${stats.total_users}`);
+      console.log(`   Role: ${stats.users_with_role}/${stats.total_users}`);
 
       return {
         tableCount: tables.rows.length,
         adminExists: adminCheck.rows.length > 0,
         adminHasPassword: adminCheck.rows.length > 0 ? adminCheck.rows[0].has_password : false,
-        usernameColumnWorking: usernameStats.users_with_username === usernameStats.total_users
+        allColumnsPresent: stats.users_with_username === stats.total_users && 
+                          stats.users_with_status === stats.total_users
       };
     } catch (error) {
       console.error('❌ Error verifying database state:', error);
@@ -595,8 +646,8 @@ class DatabaseInitializer {
     try {
       console.log('🔧 Fixing existing database schema...');
       
-      // Ensure username column exists
-      await this.ensureUsernameColumn();
+      // Ensure all required columns exist
+      await this.ensureRequiredColumns();
       
       // Recreate indexes that might be missing
       await this.createIndexes();
