@@ -266,22 +266,128 @@ class ClaimController {
       let aiSources = [];
       
       try {
-        humanSources = claim.evidence_sources ? 
-          (typeof claim.evidence_sources === 'string' ? 
-            JSON.parse(claim.evidence_sources) : claim.evidence_sources) : [];
+        // Handle evidence_sources - it might be a string, JSON string, or array
+        if (claim.evidence_sources) {
+          if (typeof claim.evidence_sources === 'string') {
+            // Try to parse as JSON first
+            try {
+              const parsed = JSON.parse(claim.evidence_sources);
+              if (Array.isArray(parsed)) {
+                humanSources = parsed;
+              } else if (typeof parsed === 'string') {
+                // If it's a single string, wrap it in an array
+                humanSources = [{ title: parsed, url: parsed }];
+              } else if (parsed && typeof parsed === 'object') {
+                // If it's a single object, wrap it in an array
+                humanSources = [parsed];
+              }
+            } catch (parseError) {
+              // If JSON parsing fails, treat it as a single source string
+              console.log('Evidence sources is not valid JSON, treating as string:', claim.evidence_sources);
+              humanSources = [{ title: claim.evidence_sources, url: claim.evidence_sources }];
+            }
+          } else if (Array.isArray(claim.evidence_sources)) {
+            humanSources = claim.evidence_sources;
+          } else if (typeof claim.evidence_sources === 'object') {
+            humanSources = [claim.evidence_sources];
+          }
+        }
       } catch (e) {
         console.log('Error parsing human evidence sources:', e);
         humanSources = [];
       }
       
       try {
-        aiSources = claim.ai_sources ? 
-          (typeof claim.ai_sources === 'string' ? 
-            JSON.parse(claim.ai_sources) : claim.ai_sources) : [];
+        // Handle AI sources
+        if (claim.ai_sources) {
+          if (typeof claim.ai_sources === 'string') {
+            try {
+              const parsed = JSON.parse(claim.ai_sources);
+              if (Array.isArray(parsed)) {
+                aiSources = parsed;
+              } else if (typeof parsed === 'string') {
+                aiSources = [{ title: parsed, url: parsed }];
+              } else if (parsed && typeof parsed === 'object') {
+                aiSources = [parsed];
+              }
+            } catch (parseError) {
+              console.log('AI sources is not valid JSON, treating as string:', claim.ai_sources);
+              aiSources = [{ title: claim.ai_sources, url: claim.ai_sources }];
+            }
+          } else if (Array.isArray(claim.ai_sources)) {
+            aiSources = claim.ai_sources;
+          } else if (typeof claim.ai_sources === 'object') {
+            aiSources = [claim.ai_sources];
+          }
+        }
       } catch (e) {
         console.log('Error parsing AI evidence sources:', e);
         aiSources = [];
       }
+
+      // Fix malformed source objects (where strings are split into character objects)
+      humanSources = humanSources.map(source => {
+        if (source && typeof source === 'object') {
+          // Check if this is a malformed object with numbered keys (split string)
+          const keys = Object.keys(source);
+          const hasNumberedKeys = keys.some(key => !isNaN(parseInt(key)));
+          
+          if (hasNumberedKeys && !source.title && !source.url) {
+            // Reconstruct the string from numbered keys
+            const reconstructedString = keys
+              .filter(key => !isNaN(parseInt(key)))
+              .sort((a, b) => parseInt(a) - parseInt(b))
+              .map(key => source[key])
+              .join('');
+            
+            return { 
+              title: reconstructedString, 
+              url: reconstructedString,
+              type: 'human'
+            };
+          }
+          
+          // Ensure the source has proper structure
+          return {
+            title: source.title || source.name || 'Source',
+            url: source.url || source.link || '',
+            type: source.type || 'human'
+          };
+        } else if (typeof source === 'string') {
+          return { title: source, url: source, type: 'human' };
+        }
+        return source;
+      });
+
+      aiSources = aiSources.map(source => {
+        if (source && typeof source === 'object') {
+          const keys = Object.keys(source);
+          const hasNumberedKeys = keys.some(key => !isNaN(parseInt(key)));
+          
+          if (hasNumberedKeys && !source.title && !source.url) {
+            const reconstructedString = keys
+              .filter(key => !isNaN(parseInt(key)))
+              .sort((a, b) => parseInt(a) - parseInt(b))
+              .map(key => source[key])
+              .join('');
+            
+            return { 
+              title: reconstructedString, 
+              url: reconstructedString,
+              type: 'ai'
+            };
+          }
+          
+          return {
+            title: source.title || source.name || 'Source',
+            url: source.url || source.link || '',
+            type: source.type || 'ai'
+          };
+        } else if (typeof source === 'string') {
+          return { title: source, url: source, type: 'ai' };
+        }
+        return source;
+      });
 
       // Combine sources with type indicator
       const allSources = [
@@ -322,6 +428,8 @@ class ClaimController {
         id: responseData.id,
         hasVerdict: !!responseData.verdict,
         sourcesCount: responseData.sources.length,
+        humanSourcesCount: humanSources.length,
+        aiSourcesCount: aiSources.length,
         factChecker: responseData.factChecker
       });
 
