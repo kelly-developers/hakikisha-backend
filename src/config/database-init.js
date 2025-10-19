@@ -170,6 +170,8 @@ class DatabaseInitializer {
 
   static async createAdminTables() {
     try {
+      console.log('🛠️ Creating admin tables...');
+
       // Admin Activities Table
       const adminActivitiesQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.admin_activities (
@@ -226,6 +228,9 @@ class DatabaseInitializer {
       // Ensure all fact_checkers columns exist
       await this.ensureFactCheckersColumns();
       
+      // Ensure admin_activities columns exist
+      await this.ensureAdminActivitiesColumns();
+      
     } catch (error) {
       console.error('❌ Error creating admin tables:', error);
       throw error;
@@ -256,6 +261,32 @@ class DatabaseInitializer {
       console.log('✅ All required columns verified in fact_checkers table');
     } catch (error) {
       console.error('❌ Error ensuring fact_checkers columns:', error);
+      throw error;
+    }
+  }
+
+  static async ensureAdminActivitiesColumns() {
+    try {
+      console.log('🔍 Checking for missing columns in admin_activities table...');
+      
+      const requiredColumns = [
+        { name: 'admin_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
+        { name: 'activity_type', type: 'VARCHAR(100)', defaultValue: "'general'", isUnique: false },
+        { name: 'description', type: 'TEXT', defaultValue: "''", isUnique: false },
+        { name: 'target_user_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
+        { name: 'changes_made', type: 'JSONB', defaultValue: "'{}'::jsonb", isUnique: false },
+        { name: 'ip_address', type: 'VARCHAR(45)', defaultValue: 'NULL', isUnique: false },
+        { name: 'user_agent', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
+        { name: 'created_at', type: 'TIMESTAMP', defaultValue: 'NOW()', isUnique: false }
+      ];
+
+      for (const column of requiredColumns) {
+        await this.ensureColumnExists('admin_activities', column);
+      }
+      
+      console.log('✅ All required columns verified in admin_activities table');
+    } catch (error) {
+      console.error('❌ Error ensuring admin_activities columns:', error);
       throw error;
     }
   }
@@ -403,6 +434,7 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_users_status ON hakikisha.users(status)',
       'CREATE INDEX IF NOT EXISTS idx_users_registration_status ON hakikisha.users(registration_status)',
       'CREATE INDEX IF NOT EXISTS idx_admin_activities_admin_id ON hakikisha.admin_activities(admin_id)',
+      'CREATE INDEX IF NOT EXISTS idx_admin_activities_created_at ON hakikisha.admin_activities(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_registration_requests_user_id ON hakikisha.registration_requests(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checkers_user_id ON hakikisha.fact_checkers(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checkers_status ON hakikisha.fact_checkers(verification_status)',
@@ -613,6 +645,19 @@ class DatabaseInitializer {
         console.log(`   - ${col.column_name} (${col.data_type})`);
       });
 
+      // Verify admin_activities table structure
+      const adminActivitiesColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'admin_activities'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`📋 Admin activities table columns: ${adminActivitiesColumns.rows.length}`);
+      adminActivitiesColumns.rows.forEach(col => {
+        console.log(`   - ${col.column_name} (${col.data_type})`);
+      });
+
       // Verify all required columns exist and have data
       const columnCheck = await db.query(`
         SELECT 
@@ -698,6 +743,9 @@ class DatabaseInitializer {
       // Ensure fact_checkers columns exist
       await this.ensureFactCheckersColumns();
       
+      // Ensure admin_activities columns exist
+      await this.ensureAdminActivitiesColumns();
+      
       // Recreate indexes that might be missing
       await this.createIndexes();
       
@@ -705,6 +753,23 @@ class DatabaseInitializer {
     } catch (error) {
       console.error('❌ Error fixing existing database:', error);
       throw error;
+    }
+  }
+
+  // New method to check if admin_activities table exists
+  static async checkAdminActivitiesTable() {
+    try {
+      const result = await db.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'hakikisha' 
+          AND table_name = 'admin_activities'
+        )
+      `);
+      return result.rows[0].exists;
+    } catch (error) {
+      console.error('Error checking admin_activities table:', error);
+      return false;
     }
   }
 }
