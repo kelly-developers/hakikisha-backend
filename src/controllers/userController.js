@@ -5,8 +5,10 @@ const logger = require('../utils/logger');
 class UserController {
   async getProfile(req, res) {
     try {
+      console.log('Get Profile Request for user:', req.user.userId);
+      
       const result = await db.query(
-        `SELECT id, email, username, phone, profile_picture, is_verified, role, status, created_at 
+        `SELECT id, email, username, phone, profile_picture, is_verified, role, status, registration_status, created_at, last_login, login_count
          FROM hakikisha.users WHERE id = $1`,
         [req.user.userId]
       );
@@ -24,6 +26,7 @@ class UserController {
         profile: result.rows[0]
       });
     } catch (error) {
+      console.error('Get profile error:', error);
       logger.error('Get profile error:', error);
       res.status(500).json({
         success: false,
@@ -35,6 +38,7 @@ class UserController {
 
   async updateProfile(req, res) {
     try {
+      console.log('Update Profile Request for user:', req.user.userId);
       const { username, phone, bio } = req.body;
       
       const updates = [];
@@ -126,6 +130,7 @@ class UserController {
         profile: result.rows[0]
       });
     } catch (error) {
+      console.error('Update profile error:', error);
       logger.error('Update profile error:', error);
       res.status(500).json({
         success: false,
@@ -137,6 +142,8 @@ class UserController {
 
   async uploadProfilePicture(req, res) {
     try {
+      console.log('Upload Profile Picture Request');
+      
       if (!req.file) {
         return res.status(400).json({
           success: false,
@@ -145,7 +152,6 @@ class UserController {
         });
       }
 
-      // TODO: Upload to S3 or cloud storage
       const imageUrl = `/uploads/profiles/${req.user.userId}-${Date.now()}.jpg`;
 
       await db.query(
@@ -159,6 +165,7 @@ class UserController {
         imageUrl
       });
     } catch (error) {
+      console.error('Upload profile picture error:', error);
       logger.error('Upload profile picture error:', error);
       res.status(500).json({
         success: false,
@@ -170,6 +177,7 @@ class UserController {
 
   async changePassword(req, res) {
     try {
+      console.log('Change Password Request for user:', req.user.userId);
       const { currentPassword, newPassword } = req.body;
 
       if (!currentPassword || !newPassword) {
@@ -226,6 +234,7 @@ class UserController {
         message: 'Password changed successfully'
       });
     } catch (error) {
+      console.error('Change password error:', error);
       logger.error('Change password error:', error);
       res.status(500).json({
         success: false,
@@ -237,6 +246,7 @@ class UserController {
 
   async getMyClaims(req, res) {
     try {
+      console.log('Get My Claims - User:', req.user.userId);
       const { status } = req.query;
 
       let query = `
@@ -264,6 +274,7 @@ class UserController {
         claims: result.rows
       });
     } catch (error) {
+      console.error('Get my claims error:', error);
       logger.error('Get my claims error:', error);
       res.status(500).json({
         success: false,
@@ -275,6 +286,7 @@ class UserController {
 
   async deleteAccount(req, res) {
     try {
+      console.log('Delete Account Request for user:', req.user.userId);
       const { password } = req.body;
 
       if (!password) {
@@ -319,6 +331,7 @@ class UserController {
         message: 'Account deleted successfully'
       });
     } catch (error) {
+      console.error('Delete account error:', error);
       logger.error('Delete account error:', error);
       res.status(500).json({
         success: false,

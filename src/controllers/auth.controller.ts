@@ -16,7 +16,7 @@ export class AuthController {
 
       res.status(201).json({
         success: true,
-        message: role === 'fact_checker' 
+        message: validated.role === 'fact_checker' 
           ? 'Registration submitted for approval. You will be notified once reviewed.'
           : 'Registration successful',
         user: {

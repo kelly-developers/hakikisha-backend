@@ -5,12 +5,12 @@ const logger = require('../utils/logger');
 class FactCheckerController {
   async getPendingClaims(req, res) {
     try {
-      console.log('🔍 Fetching pending claims for fact checker:', req.user.userId);
+      console.log('Fetching pending claims for fact checker:', req.user.userId);
       
       const result = await db.query(
         `SELECT 
           c.id, 
-          c.title as "claimTitle", 
+          c.title, 
           c.description, 
           c.category,
           c.user_id as "submittedBy", 
@@ -25,27 +25,26 @@ class FactCheckerController {
          LIMIT 50`
       );
 
-      console.log(`✅ Found ${result.rows.length} pending claims`);
+      console.log(`Found ${result.rows.length} pending claims`);
 
-      // Transform data to match frontend expectations
       const claims = result.rows.map(claim => ({
         id: claim.id,
-        title: claim.claimTitle, // Map claimTitle to title
+        title: claim.title,
         description: claim.description,
         category: claim.category,
         submittedBy: claim.submitterEmail || claim.submittedBy,
         submittedDate: new Date(claim.submittedDate).toISOString().split('T')[0],
         imageUrl: claim.imageUrl,
         videoLink: claim.media_type === 'video' ? claim.imageUrl : null,
-        sourceLink: null // Add if available in your schema
+        sourceLink: null
       }));
 
       res.json({
         success: true,
-        claims: claims // Changed from pendingClaims to claims
+        claims: claims
       });
     } catch (error) {
-      console.error('❌ Get pending claims error:', error);
+      console.error('Get pending claims error:', error);
       logger.error('Get pending claims error:', error);
       res.status(500).json({
         success: false,
@@ -58,9 +57,8 @@ class FactCheckerController {
   async submitVerdict(req, res) {
     try {
       const { claimId, status, verdict, sources } = req.body;
-      console.log('📝 Submitting verdict for claim:', claimId);
+      console.log('Submitting verdict for claim:', claimId);
 
-      // Validate input
       if (!claimId || !status || !verdict) {
         return res.status(400).json({
           success: false,
@@ -71,10 +69,8 @@ class FactCheckerController {
 
       const verdictId = uuidv4();
 
-      // Start transaction
       await db.query('BEGIN');
 
-      // Insert verdict
       await db.query(
         `INSERT INTO hakikisha.verdicts (
           id, claim_id, fact_checker_id, verdict, explanation, 
@@ -90,7 +86,6 @@ class FactCheckerController {
         ]
       );
 
-      // Update claim status
       await db.query(
         `UPDATE hakikisha.claims 
          SET status = 'human_approved', 
@@ -103,7 +98,7 @@ class FactCheckerController {
 
       await db.query('COMMIT');
 
-      console.log('✅ Verdict submitted successfully for claim:', claimId);
+      console.log('Verdict submitted successfully for claim:', claimId);
 
       res.json({
         success: true,
@@ -111,7 +106,7 @@ class FactCheckerController {
       });
     } catch (error) {
       await db.query('ROLLBACK');
-      console.error('❌ Submit verdict error:', error);
+      console.error('Submit verdict error:', error);
       logger.error('Submit verdict error:', error);
       res.status(500).json({ 
         success: false, 
@@ -123,9 +118,8 @@ class FactCheckerController {
 
   async getStats(req, res) {
     try {
-      console.log('📊 Fetching stats for fact checker:', req.user.userId);
+      console.log('Fetching stats for fact checker:', req.user.userId);
       
-      // Get actual stats from database
       const totalResult = await db.query(
         `SELECT COUNT(*) as total
          FROM hakikisha.verdicts 
@@ -146,12 +140,10 @@ class FactCheckerController {
         [req.user.userId]
       );
 
-      // Calculate actual stats (you might want to add more sophisticated calculations)
       const totalVerified = parseInt(totalResult.rows[0]?.total) || 0;
       const pendingReview = parseInt(pendingResult.rows[0]?.total) || 0;
       const totalVerdicts = parseInt(accuracyResult.rows[0]?.total_verdicts) || 1;
       
-      // Simple accuracy calculation (you might want to implement proper accuracy tracking)
       const accuracy = Math.min(95, Math.max(80, 95 - (totalVerdicts % 5)));
 
       res.json({
@@ -164,7 +156,7 @@ class FactCheckerController {
         }
       });
     } catch (error) {
-      console.error('❌ Get stats error:', error);
+      console.error('Get stats error:', error);
       logger.error('Get stats error:', error);
       res.status(500).json({ 
         success: false, 
@@ -176,12 +168,12 @@ class FactCheckerController {
 
   async getAISuggestions(req, res) {
     try {
-      console.log('🤖 Fetching AI suggestions for fact checker:', req.user.userId);
+      console.log('Fetching AI suggestions for fact checker:', req.user.userId);
       
       const result = await db.query(
         `SELECT 
           c.id, 
-          c.title as "claimTitle",
+          c.title,
           c.description,
           c.category,
           c.user_id as "submittedBy",
@@ -198,11 +190,11 @@ class FactCheckerController {
          LIMIT 20`
       );
 
-      console.log(`✅ Found ${result.rows.length} AI suggestions`);
+      console.log(`Found ${result.rows.length} AI suggestions`);
 
       const claims = result.rows.map(claim => ({
         id: claim.id,
-        title: claim.claimTitle,
+        title: claim.title,
         description: claim.description,
         category: claim.category,
         submittedBy: claim.submittedBy,
@@ -217,10 +209,10 @@ class FactCheckerController {
 
       res.json({ 
         success: true, 
-        claims: claims // Changed from suggestions to claims
+        claims: claims
       });
     } catch (error) {
-      console.error('❌ Get AI suggestions error:', error);
+      console.error('Get AI suggestions error:', error);
       logger.error('Get AI suggestions error:', error);
       res.status(500).json({ 
         success: false, 
@@ -232,8 +224,8 @@ class FactCheckerController {
 
   async approveAIVerdict(req, res) {
     try {
-      const { claimId } = req.body;
-      console.log('✅ Approving AI verdict for claim:', claimId);
+      const { claimId, approved, editedVerdict } = req.body;
+      console.log('Approving AI verdict for claim:', claimId);
 
       if (!claimId) {
         return res.status(400).json({
@@ -245,7 +237,6 @@ class FactCheckerController {
 
       await db.query('BEGIN');
 
-      // Get AI verdict details
       const aiVerdictResult = await db.query(
         `SELECT av.verdict, av.explanation, av.evidence_sources
          FROM hakikisha.ai_verdicts av
@@ -266,72 +257,8 @@ class FactCheckerController {
       const aiVerdict = aiVerdictResult.rows[0];
       const verdictId = uuidv4();
 
-      // Create human verdict based on AI verdict
-      await db.query(
-        `INSERT INTO hakikisha.verdicts (
-          id, claim_id, fact_checker_id, verdict, explanation, 
-          evidence_sources, is_final, ai_verdict_id, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, true, $7, NOW())`,
-        [
-          verdictId,
-          claimId,
-          req.user.userId,
-          aiVerdict.verdict,
-          aiVerdict.explanation,
-          aiVerdict.evidence_sources,
-          aiVerdict.id
-        ]
-      );
+      const finalVerdict = editedVerdict || aiVerdict.explanation;
 
-      // Update claim status
-      await db.query(
-        `UPDATE hakikisha.claims 
-         SET status = 'human_approved', 
-             human_verdict_id = $1, 
-             updated_at = NOW(),
-             assigned_fact_checker_id = $2
-         WHERE id = $3`,
-        [verdictId, req.user.userId, claimId]
-      );
-
-      await db.query('COMMIT');
-
-      console.log('✅ AI verdict approved for claim:', claimId);
-
-      res.json({ 
-        success: true, 
-        message: 'AI verdict approved and sent to user' 
-      });
-    } catch (error) {
-      await db.query('ROLLBACK');
-      console.error('❌ Approve AI verdict error:', error);
-      logger.error('Approve AI verdict error:', error);
-      res.status(500).json({ 
-        success: false, 
-        error: 'Failed to approve AI verdict', 
-        code: 'SERVER_ERROR' 
-      });
-    }
-  }
-
-  async submitEditedVerdict(req, res) {
-    try {
-      const { claimId, status, verdict, sources } = req.body;
-      console.log('📝 Submitting edited verdict for claim:', claimId);
-
-      if (!claimId || !status || !verdict) {
-        return res.status(400).json({
-          success: false,
-          error: 'Claim ID, status, and verdict are required',
-          code: 'VALIDATION_ERROR'
-        });
-      }
-
-      const verdictId = uuidv4();
-
-      await db.query('BEGIN');
-
-      // Create new verdict with edited content
       await db.query(
         `INSERT INTO hakikisha.verdicts (
           id, claim_id, fact_checker_id, verdict, explanation, 
@@ -341,13 +268,12 @@ class FactCheckerController {
           verdictId,
           claimId,
           req.user.userId,
-          status,
-          verdict,
-          JSON.stringify(sources || [])
+          aiVerdict.verdict,
+          finalVerdict,
+          aiVerdict.evidence_sources
         ]
       );
 
-      // Update claim status
       await db.query(
         `UPDATE hakikisha.claims 
          SET status = 'human_approved', 
@@ -360,20 +286,20 @@ class FactCheckerController {
 
       await db.query('COMMIT');
 
-      console.log('✅ Edited verdict submitted for claim:', claimId);
+      console.log('AI verdict approved for claim:', claimId);
 
-      res.json({
-        success: true,
-        message: 'Edited verdict submitted and sent to user'
+      res.json({ 
+        success: true, 
+        message: 'Verdict approved and sent to user' 
       });
     } catch (error) {
       await db.query('ROLLBACK');
-      console.error('❌ Submit edited verdict error:', error);
-      logger.error('Submit edited verdict error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to submit edited verdict',
-        code: 'SERVER_ERROR'
+      console.error('Approve AI verdict error:', error);
+      logger.error('Approve AI verdict error:', error);
+      res.status(500).json({ 
+        success: false, 
+        error: 'Failed to approve AI verdict', 
+        code: 'SERVER_ERROR' 
       });
     }
   }

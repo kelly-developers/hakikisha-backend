@@ -4,7 +4,7 @@ const BlogService = require('../services/blogService');
 class BlogController {
   async getBlogs(req, res) {
     try {
-      console.log('📝 Get Blogs Request Received');
+      console.log('Get Blogs Request Received');
       const { category, limit = 10, page = 1 } = req.query;
       
       const blogs = await BlogService.getBlogs({
@@ -30,7 +30,7 @@ class BlogController {
 
   async getBlog(req, res) {
     try {
-      console.log('📝 Get Blog Request Received:', req.params.id);
+      console.log('Get Blog Request Received:', req.params.id);
       const { id } = req.params;
 
       const blog = await BlogService.getBlogById(id);
@@ -42,7 +42,6 @@ class BlogController {
         });
       }
 
-      // Update view count
       await BlogService.incrementViewCount(id);
 
       return res.json({
@@ -61,7 +60,7 @@ class BlogController {
 
   async getTrendingBlogs(req, res) {
     try {
-      console.log('🔥 Get Trending Blogs Request Received');
+      console.log('Get Trending Blogs Request Received');
       const { limit = 5 } = req.query;
 
       const blogs = await BlogService.getTrendingBlogs(parseInt(limit));
@@ -83,13 +82,12 @@ class BlogController {
 
   async createBlog(req, res) {
     try {
-      console.log('📝 Create Blog Request Received');
-      console.log('👤 User:', req.user);
-      console.log('📦 Request body:', req.body);
+      console.log('Create Blog Request Received');
+      console.log('User:', req.user);
+      console.log('Request body:', req.body);
 
       const { title, content, category, source_claim_ids, featured_image, read_time } = req.body;
 
-      // Validate required fields
       if (!title || !content) {
         return res.status(400).json({
           success: false,
@@ -127,7 +125,7 @@ class BlogController {
 
   async updateBlog(req, res) {
     try {
-      console.log('📝 Update Blog Request Received:', req.params.id);
+      console.log('Update Blog Request Received:', req.params.id);
       const { id } = req.params;
       const updateData = req.body;
 
@@ -156,7 +154,7 @@ class BlogController {
 
   async deleteBlog(req, res) {
     try {
-      console.log('🗑️ Delete Blog Request Received:', req.params.id);
+      console.log('Delete Blog Request Received:', req.params.id);
       const { id } = req.params;
 
       const deleted = await BlogService.deleteBlog(id);
@@ -183,7 +181,7 @@ class BlogController {
 
   async generateAIBlog(req, res) {
     try {
-      console.log('🤖 Generate AI Blog Request Received');
+      console.log('Generate AI Blog Request Received');
       const { topic, claims, tone = 'neutral', length = 'medium' } = req.body;
 
       if (!topic) {
