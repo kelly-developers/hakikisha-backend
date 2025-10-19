@@ -197,6 +197,28 @@ class User {
     }
   }
 
+  // FIXED: Added count() method that accepts where conditions
+  static async count(where = {}) {
+    let query = 'SELECT COUNT(*) FROM hakikisha.users WHERE 1=1';
+    const params = [];
+    let paramCount = 1;
+
+    for (const [key, value] of Object.entries(where)) {
+      query += ` AND ${key} = $${paramCount}`;
+      params.push(value);
+      paramCount++;
+    }
+
+    try {
+      const result = await db.query(query, params);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting users:', error);
+      throw error;
+    }
+  }
+
+  // Keep the existing countAll method for backward compatibility
   static async countAll(options = {}) {
     const { role, status, registration_status } = options;
     
