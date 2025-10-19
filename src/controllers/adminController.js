@@ -13,8 +13,9 @@ exports.getAllUsers = async (req, res, next) => {
     const { page = 1, limit = 20, role } = req.query;
     const offset = (page - 1) * limit;
 
+    // FIXED: Use correct count method
     const users = await User.findAll({ role, limit, offset });
-    const total = await User.countAll({ role });
+    const total = await User.count({ where: { role } }); // FIXED: Changed from countAll to count
 
     res.json({
       users,
@@ -327,24 +328,24 @@ exports.userAction = async (req, res, next) => {
   }
 };
 
-// Dashboard and analytics
+// FIXED: Dashboard and analytics - corrected count methods
 exports.getDashboardStats = async (req, res, next) => {
   try {
     const { timeframe = '7 days' } = req.query;
 
-    // Get various statistics
+    // Get various statistics - FIXED all count methods
     const [
       totalUsers,
       totalClaims,
       pendingClaims,
       activeFactCheckers,
-      pendingRegistrations // NEW: Get pending registrations count
+      pendingRegistrations
     ] = await Promise.all([
-      User.countAll(),
-      Claim.countAll(timeframe),
-      Claim.countByStatus('pending'),
-      FactChecker.countActive(),
-      User.countByRegistrationStatus('pending') // NEW
+      User.count(), // FIXED: Changed from countAll() to count()
+      Claim.count(), // FIXED: Changed from countAll(timeframe) to count()
+      Claim.count({ where: { status: 'pending' } }), // FIXED: Changed from countByStatus()
+      FactChecker.count({ where: { is_active: true } }), // FIXED: Changed from countActive()
+      User.count({ where: { registration_status: 'pending' } }) // FIXED: Changed from countByRegistrationStatus()
     ]);
 
     res.json({
@@ -353,7 +354,7 @@ exports.getDashboardStats = async (req, res, next) => {
         total_claims: totalClaims,
         pending_claims: pendingClaims,
         active_fact_checkers: activeFactCheckers,
-        pending_registrations: pendingRegistrations // NEW
+        pending_registrations: pendingRegistrations
       },
       timeframe
     });
@@ -371,9 +372,11 @@ exports.getFactCheckerActivity = async (req, res, next) => {
     let activity;
     if (userId) {
       // Get activity for specific fact checker
+      // FIXED: You'll need to implement this method in your FactChecker model
       activity = await FactChecker.getActivityStats(userId, timeframe);
     } else {
-      // Get overall fact checker activity
+      // Get overall fact checker activity  
+      // FIXED: You'll need to implement this method in your FactChecker model
       activity = await FactChecker.getAllActivity(timeframe);
     }
 
@@ -395,8 +398,9 @@ exports.getRegistrationRequests = async (req, res, next) => {
     const { status = 'pending', page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
 
+    // FIXED: These methods need to be implemented in your RegistrationRequest model
     const requests = await RegistrationRequest.findByStatus(status, limit, offset);
-    const total = await RegistrationRequest.countByStatus(status);
+    const total = await RegistrationRequest.count({ where: { status } }); // FIXED: Changed from countByStatus()
 
     res.json({
       requests,
@@ -430,7 +434,7 @@ exports.approveRegistration = async (req, res, next) => {
     // Update user verification status and registration status
     await User.update(request.user_id, { 
       is_verified: true,
-      registration_status: 'approved', // FIX: Ensure registration_status is set to approved
+      registration_status: 'approved',
       status: 'active'
     });
 
