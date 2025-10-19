@@ -158,10 +158,13 @@ class ClaimController {
           v.verdict, 
           v.explanation as "verdictText",
           v.evidence_sources as sources,
-          u.email as "factCheckerName"
+          u.email as "factCheckerName",
+          fc.username as "factCheckerUsername"
         FROM hakikisha.claims c
         LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
         LEFT JOIN hakikisha.users u ON v.fact_checker_id = u.id
+        LEFT JOIN hakikisha.fact_checkers fc_profile ON u.id = fc_profile.user_id
+        LEFT JOIN hakikisha.users fc ON fc_profile.user_id = fc.id
         WHERE c.user_id = $1
       `;
 
@@ -189,7 +192,7 @@ class ClaimController {
         verdict: claim.verdict,
         verdictText: claim.verdictText,
         sources: claim.sources || [],
-        factCheckerName: claim.factCheckerName
+        factCheckerName: claim.factCheckerUsername || claim.factCheckerName || 'Fact Checker'
       }));
 
       res.json({
@@ -225,15 +228,23 @@ class ClaimController {
         `SELECT 
           c.*, 
           u.email as "submittedBy",
-          v.verdict, 
-          v.explanation as "verdictText", 
-          v.evidence_sources as sources,
+          v.verdict as "human_verdict", 
+          v.explanation as "human_explanation", 
+          v.evidence_sources as "evidence_sources",
           v.created_at as "verdictDate",
-          fc.email as "factCheckerName"
+          v.time_spent as "review_time",
+          fc.email as "factCheckerEmail",
+          fc.username as "factCheckerName",
+          fc.profile_picture as "factCheckerAvatar",
+          av.verdict as "ai_verdict",
+          av.explanation as "ai_explanation",
+          av.confidence_score as "ai_confidence",
+          av.evidence_sources as "ai_sources"
          FROM hakikisha.claims c
          LEFT JOIN hakikisha.users u ON c.user_id = u.id
          LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
          LEFT JOIN hakikisha.users fc ON v.fact_checker_id = fc.id
+         LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
          WHERE c.id = $1`,
         [claimId]
       );
@@ -250,24 +261,73 @@ class ClaimController {
       const claim = result.rows[0];
       console.log('Claim found:', claim.id);
       
+      // Process evidence sources to ensure consistent format
+      let humanSources = [];
+      let aiSources = [];
+      
+      try {
+        humanSources = claim.evidence_sources ? 
+          (typeof claim.evidence_sources === 'string' ? 
+            JSON.parse(claim.evidence_sources) : claim.evidence_sources) : [];
+      } catch (e) {
+        console.log('Error parsing human evidence sources:', e);
+        humanSources = [];
+      }
+      
+      try {
+        aiSources = claim.ai_sources ? 
+          (typeof claim.ai_sources === 'string' ? 
+            JSON.parse(claim.ai_sources) : claim.ai_sources) : [];
+      } catch (e) {
+        console.log('Error parsing AI evidence sources:', e);
+        aiSources = [];
+      }
+
+      // Combine sources with type indicator
+      const allSources = [
+        ...humanSources.map(source => ({ ...source, type: 'human' })),
+        ...aiSources.map(source => ({ ...source, type: 'ai' }))
+      ];
+
+      const responseData = {
+        id: claim.id,
+        title: claim.title,
+        description: claim.description,
+        category: claim.category,
+        status: claim.status,
+        submittedBy: claim.submittedBy,
+        submittedDate: claim.created_at,
+        verdictDate: claim.verdictDate,
+        verdict: claim.human_verdict || claim.ai_verdict,
+        human_verdict: claim.human_verdict,
+        ai_verdict: claim.ai_verdict,
+        verdictText: claim.human_explanation || claim.ai_explanation,
+        human_explanation: claim.human_explanation,
+        ai_explanation: claim.ai_explanation,
+        sources: allSources,
+        evidence_sources: humanSources,
+        ai_sources: aiSources,
+        factChecker: {
+          name: claim.factCheckerName || 'Fact Checker',
+          email: claim.factCheckerEmail,
+          avatar: claim.factCheckerAvatar
+        },
+        ai_confidence: claim.ai_confidence,
+        review_time: claim.review_time,
+        imageUrl: claim.media_url,
+        videoLink: claim.media_type === 'video' ? claim.media_url : null
+      };
+
+      console.log('Processed claim data for frontend:', {
+        id: responseData.id,
+        hasVerdict: !!responseData.verdict,
+        sourcesCount: responseData.sources.length,
+        factChecker: responseData.factChecker
+      });
+
       res.json({
         success: true,
-        claim: {
-          id: claim.id,
-          title: claim.title,
-          description: claim.description,
-          category: claim.category,
-          status: claim.status,
-          submittedBy: claim.submittedBy,
-          submittedDate: claim.created_at,
-          verdictDate: claim.verdictDate,
-          verdict: claim.verdict,
-          verdictText: claim.verdictText,
-          sources: claim.sources || [],
-          factCheckerName: claim.factCheckerName,
-          imageUrl: claim.media_url,
-          videoLink: claim.media_type === 'video' ? claim.media_url : null
-        }
+        claim: responseData
       });
     } catch (error) {
       console.error('Get claim details error:', error);
@@ -331,21 +391,23 @@ class ClaimController {
           c.category, 
           c.status,
           COALESCE(v.verdict, av.verdict) as verdict,
-          v.explanation as "verdictText",
+          COALESCE(v.explanation, av.explanation) as "verdictText",
+          COALESCE(v.evidence_sources, av.evidence_sources) as sources,
           c.created_at as "submittedDate",
           v.created_at as "verdictDate",
           c.submission_count,
           c.is_trending,
           c.trending_score as "trendingScore",
-          v.evidence_sources as sources,
-          fc.email as "factCheckerName"
+          fc.username as "factCheckerName",
+          av.confidence_score as "ai_confidence"
         FROM hakikisha.claims c
         LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
         LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
         LEFT JOIN hakikisha.users fc ON v.fact_checker_id = fc.id
-        WHERE c.status IN ('human_approved', 'published')
+        WHERE c.status IN ('human_approved', 'published', 'resolved')
         ORDER BY 
           c.is_trending DESC,
+          c.trending_score DESC,
           c.submission_count DESC,
           c.created_at DESC
         LIMIT $1
@@ -356,7 +418,25 @@ class ClaimController {
 
       console.log('Found', result.rows.length, 'trending claims');
 
-      if (result.rows.length === 0) {
+      const processedClaims = result.rows.map(claim => {
+        let sources = [];
+        try {
+          sources = claim.sources ? 
+            (typeof claim.sources === 'string' ? 
+              JSON.parse(claim.sources) : claim.sources) : [];
+        } catch (e) {
+          console.log('Error parsing sources for claim:', claim.id, e);
+          sources = [];
+        }
+
+        return {
+          ...claim,
+          sources: sources,
+          ai_confidence: claim.ai_confidence
+        };
+      });
+
+      if (processedClaims.length === 0) {
         console.log('No trending claims found, fetching recent claims...');
         const fallbackResult = await db.query(`
           SELECT 
@@ -366,39 +446,51 @@ class ClaimController {
             c.category, 
             c.status,
             COALESCE(v.verdict, av.verdict) as verdict,
-            v.explanation as "verdictText",
+            COALESCE(v.explanation, av.explanation) as "verdictText",
+            COALESCE(v.evidence_sources, av.evidence_sources) as sources,
             c.created_at as "submittedDate",
             v.created_at as "verdictDate",
             c.submission_count,
             c.is_trending,
-            v.evidence_sources as sources,
-            fc.email as "factCheckerName"
+            fc.username as "factCheckerName",
+            av.confidence_score as "ai_confidence"
           FROM hakikisha.claims c
           LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
           LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
           LEFT JOIN hakikisha.users fc ON v.fact_checker_id = fc.id
+          WHERE c.status NOT IN ('rejected', 'pending')
           ORDER BY c.created_at DESC
           LIMIT $1
         `, [parseInt(limit)]);
 
-        console.log('Fallback found', fallbackResult.rows.length, 'recent claims');
+        const fallbackClaims = fallbackResult.rows.map(claim => {
+          let sources = [];
+          try {
+            sources = claim.sources ? 
+              (typeof claim.sources === 'string' ? 
+                JSON.parse(claim.sources) : claim.sources) : [];
+          } catch (e) {
+            console.log('Error parsing sources for fallback claim:', claim.id, e);
+            sources = [];
+          }
+
+          return {
+            ...claim,
+            sources: sources,
+            ai_confidence: claim.ai_confidence
+          };
+        });
         
         res.json({
           success: true,
-          trendingClaims: fallbackResult.rows.map(claim => ({
-            ...claim,
-            sources: claim.sources || []
-          })),
-          count: fallbackResult.rows.length
+          trendingClaims: fallbackClaims,
+          count: fallbackClaims.length
         });
       } else {
         res.json({
           success: true,
-          trendingClaims: result.rows.map(claim => ({
-            ...claim,
-            sources: claim.sources || []
-          })),
-          count: result.rows.length
+          trendingClaims: processedClaims,
+          count: processedClaims.length
         });
       }
 
