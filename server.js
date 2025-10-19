@@ -183,7 +183,7 @@ app.use('/api/v1/user', require('./src/routes/userRoutes'));
 console.log('✓ User routes loaded: /api/v1/user');
 
 // Keep other routes the same
-app.use('/api/v1/users', require('./src/routes/adminUserRoutes')); // For admin user management
+app.use('/api/v1/users', require('./src/routes/adminRoutes')); // For admin user management
 console.log('✓ Admin user routes loaded: /api/v1/users');
     
     // Claims routes
