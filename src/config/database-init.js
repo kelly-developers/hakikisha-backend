@@ -223,8 +223,39 @@ class DatabaseInitializer {
       await db.query(factCheckersQuery);
       console.log('✅ Fact checkers table created/verified');
 
+      // Ensure all fact_checkers columns exist
+      await this.ensureFactCheckersColumns();
+      
     } catch (error) {
       console.error('❌ Error creating admin tables:', error);
+      throw error;
+    }
+  }
+
+  static async ensureFactCheckersColumns() {
+    try {
+      console.log('🔍 Checking for missing columns in fact_checkers table...');
+      
+      const requiredColumns = [
+        { name: 'credentials', type: 'TEXT', defaultValue: "''", isUnique: false },
+        { name: 'areas_of_expertise', type: 'JSONB', defaultValue: "'[]'::jsonb", isUnique: false },
+        { name: 'verification_status', type: 'VARCHAR(50)', defaultValue: "'pending'", isUnique: false },
+        { name: 'is_active', type: 'BOOLEAN', defaultValue: 'TRUE', isUnique: false },
+        { name: 'suspension_reason', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
+        { name: 'suspended_at', type: 'TIMESTAMP', defaultValue: 'NULL', isUnique: false },
+        { name: 'is_featured', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
+        { name: 'promoted_at', type: 'TIMESTAMP', defaultValue: 'NULL', isUnique: false },
+        { name: 'created_at', type: 'TIMESTAMP', defaultValue: 'NOW()', isUnique: false },
+        { name: 'updated_at', type: 'TIMESTAMP', defaultValue: 'NOW()', isUnique: false }
+      ];
+
+      for (const column of requiredColumns) {
+        await this.ensureColumnExists('fact_checkers', column);
+      }
+      
+      console.log('✅ All required columns verified in fact_checkers table');
+    } catch (error) {
+      console.error('❌ Error ensuring fact_checkers columns:', error);
       throw error;
     }
   }
@@ -373,7 +404,9 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_users_registration_status ON hakikisha.users(registration_status)',
       'CREATE INDEX IF NOT EXISTS idx_admin_activities_admin_id ON hakikisha.admin_activities(admin_id)',
       'CREATE INDEX IF NOT EXISTS idx_registration_requests_user_id ON hakikisha.registration_requests(user_id)',
-      'CREATE INDEX IF NOT EXISTS idx_fact_checkers_user_id ON hakikisha.fact_checkers(user_id)'
+      'CREATE INDEX IF NOT EXISTS idx_fact_checkers_user_id ON hakikisha.fact_checkers(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_fact_checkers_status ON hakikisha.fact_checkers(verification_status)',
+      'CREATE INDEX IF NOT EXISTS idx_fact_checkers_active ON hakikisha.fact_checkers(is_active)'
     ];
 
     for (const indexQuery of essentialIndexes) {
@@ -567,6 +600,19 @@ class DatabaseInitializer {
         console.log('❌ Admin user not found');
       }
 
+      // Verify fact_checkers table structure
+      const factCheckersColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'fact_checkers'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`📋 Fact checkers table columns: ${factCheckersColumns.rows.length}`);
+      factCheckersColumns.rows.forEach(col => {
+        console.log(`   - ${col.column_name} (${col.data_type})`);
+      });
+
       // Verify all required columns exist and have data
       const columnCheck = await db.query(`
         SELECT 
@@ -648,6 +694,9 @@ class DatabaseInitializer {
       
       // Ensure all required columns exist
       await this.ensureRequiredColumns();
+      
+      // Ensure fact_checkers columns exist
+      await this.ensureFactCheckersColumns();
       
       // Recreate indexes that might be missing
       await this.createIndexes();
