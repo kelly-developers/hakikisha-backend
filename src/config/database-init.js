@@ -53,7 +53,7 @@ class DatabaseInitializer {
 
       // Create tables in correct order with dependencies
       await this.createUsersTable();
-      await this.createAdminTables(); // ADD THIS
+      await this.createAdminTables();
       await this.createClaimsTable();
       await this.createAIVerdictsTable();
       await this.createVerdictsTable();
@@ -89,8 +89,49 @@ class DatabaseInitializer {
       `;
       await db.query(query);
       console.log('✅ Users table created/verified');
+      
+      // Ensure username column exists (for existing tables)
+      await this.ensureUsernameColumn();
     } catch (error) {
       console.error('❌ Error creating users table:', error);
+      throw error;
+    }
+  }
+
+  static async ensureUsernameColumn() {
+    try {
+      // Check if username column exists
+      const checkQuery = `
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' 
+        AND table_name = 'users' 
+        AND column_name = 'username'
+      `;
+      const result = await db.query(checkQuery);
+      
+      if (result.rows.length === 0) {
+        console.log('🔄 Adding missing username column to users table...');
+        const alterQuery = `
+          ALTER TABLE hakikisha.users 
+          ADD COLUMN username VARCHAR(255) UNIQUE NOT NULL DEFAULT 'user_' || substr(md5(random()::text), 1, 8)
+        `;
+        await db.query(alterQuery);
+        console.log('✅ Username column added to users table');
+        
+        // Update existing records with proper usernames
+        const updateQuery = `
+          UPDATE hakikisha.users 
+          SET username = 'user_' || substr(md5(random()::text), 1, 8) 
+          WHERE username IS NULL OR username LIKE 'user_%'
+        `;
+        await db.query(updateQuery);
+        console.log('✅ Existing users updated with usernames');
+      } else {
+        console.log('✅ Username column already exists in users table');
+      }
+    } catch (error) {
+      console.error('❌ Error ensuring username column:', error);
       throw error;
     }
   }
@@ -294,6 +335,7 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_claim_id ON hakikisha.ai_verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_id ON hakikisha.verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_users_email ON hakikisha.users(email)',
+      'CREATE INDEX IF NOT EXISTS idx_users_username ON hakikisha.users(username)',
       'CREATE INDEX IF NOT EXISTS idx_users_role ON hakikisha.users(role)',
       'CREATE INDEX IF NOT EXISTS idx_users_status ON hakikisha.users(status)',
       'CREATE INDEX IF NOT EXISTS idx_admin_activities_admin_id ON hakikisha.admin_activities(admin_id)',
@@ -332,7 +374,7 @@ class DatabaseInitializer {
       
       // Check if admin already exists
       const existingAdmin = await db.query(
-        'SELECT id, email, password_hash, role, registration_status FROM hakikisha.users WHERE email = $1',
+        'SELECT id, email, username, password_hash, role, registration_status FROM hakikisha.users WHERE email = $1',
         [adminEmail]
       );
 
@@ -375,13 +417,14 @@ class DatabaseInitializer {
         const result = await db.query(
           `INSERT INTO hakikisha.users (email, username, password_hash, role, is_verified, registration_status, status) 
            VALUES ($1, $2, $3, $4, $5, $6, $7) 
-           RETURNING id, email, role, registration_status`,
+           RETURNING id, email, username, role, registration_status`,
           [adminEmail, 'admin', passwordHash, 'admin', true, 'approved', 'active']
         );
 
         const newAdmin = result.rows[0];
         
         console.log('Default admin user created: ' + newAdmin.email);
+        console.log('Username: ' + newAdmin.username);
         console.log('Role: ' + newAdmin.role);
         console.log('Status: ' + newAdmin.registration_status);
         
@@ -469,23 +512,36 @@ class DatabaseInitializer {
         }
       }
 
-      // Verify admin user
+      // Verify admin user and check username
       const adminCheck = await db.query(
-        'SELECT email, role, password_hash IS NOT NULL as has_password FROM hakikisha.users WHERE email = $1',
+        'SELECT email, username, role, password_hash IS NOT NULL as has_password FROM hakikisha.users WHERE email = $1',
         ['kellynyachiro@gmail.com']
       );
       
       if (adminCheck.rows.length > 0) {
         const admin = adminCheck.rows[0];
-        console.log(`👤 Admin status: ${admin.email}, role: ${admin.role}, has_password: ${admin.has_password}`);
+        console.log(`👤 Admin status: ${admin.email}, username: ${admin.username}, role: ${admin.role}, has_password: ${admin.has_password}`);
       } else {
         console.log('❌ Admin user not found');
       }
 
+      // Verify username column exists and has data
+      const usernameCheck = await db.query(`
+        SELECT 
+          COUNT(*) as total_users,
+          COUNT(username) as users_with_username,
+          COUNT(DISTINCT username) as unique_usernames
+        FROM hakikisha.users
+      `);
+      
+      const usernameStats = usernameCheck.rows[0];
+      console.log(`📊 Username stats: ${usernameStats.users_with_username}/${usernameStats.total_users} users have usernames, ${usernameStats.unique_usernames} unique usernames`);
+
       return {
         tableCount: tables.rows.length,
         adminExists: adminCheck.rows.length > 0,
-        adminHasPassword: adminCheck.rows.length > 0 ? adminCheck.rows[0].has_password : false
+        adminHasPassword: adminCheck.rows.length > 0 ? adminCheck.rows[0].has_password : false,
+        usernameColumnWorking: usernameStats.users_with_username === usernameStats.total_users
       };
     } catch (error) {
       console.error('❌ Error verifying database state:', error);
@@ -530,6 +586,24 @@ class DatabaseInitializer {
       
     } catch (error) {
       console.error('Error resetting database:', error);
+      throw error;
+    }
+  }
+
+  // New method to fix existing database without full reset
+  static async fixExistingDatabase() {
+    try {
+      console.log('🔧 Fixing existing database schema...');
+      
+      // Ensure username column exists
+      await this.ensureUsernameColumn();
+      
+      // Recreate indexes that might be missing
+      await this.createIndexes();
+      
+      console.log('✅ Existing database fixed successfully!');
+    } catch (error) {
+      console.error('❌ Error fixing existing database:', error);
       throw error;
     }
   }
