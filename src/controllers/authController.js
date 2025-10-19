@@ -42,11 +42,15 @@ const register = async (req, res) => {
 
     const { email, username, password, phone, role = 'user' } = req.body;
 
+    // Log the incoming request for debugging
+    console.log('📝 Registration attempt:', { email, username, phone, role });
+
     // Validate required fields
     if (!email || !username || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Email, username, and password are required'
+        error: 'Email, username, and password are required',
+        code: 'VALIDATION_ERROR'
       });
     }
 
@@ -55,7 +59,8 @@ const register = async (req, res) => {
     if (!emailRegex.test(email)) {
       return res.status(400).json({
         success: false,
-        error: 'Please provide a valid email address'
+        error: 'Please provide a valid email address',
+        code: 'VALIDATION_ERROR'
       });
     }
 
@@ -64,7 +69,8 @@ const register = async (req, res) => {
     if (!usernameRegex.test(username)) {
       return res.status(400).json({
         success: false,
-        error: 'Username must be 3-20 characters and can only contain letters, numbers, underscores, and hyphens'
+        error: 'Username must be 3-20 characters and can only contain letters, numbers, underscores, and hyphens',
+        code: 'VALIDATION_ERROR'
       });
     }
 
@@ -72,8 +78,35 @@ const register = async (req, res) => {
     if (password.length < 6) {
       return res.status(400).json({
         success: false,
-        error: 'Password must be at least 6 characters long'
+        error: 'Password must be at least 6 characters long',
+        code: 'VALIDATION_ERROR'
       });
+    }
+
+    // Validate phone format if provided
+    if (phone) {
+      const phoneRegex = /^\+?[\d\s-()]{10,}$/;
+      if (!phoneRegex.test(phone)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid phone number format',
+          code: 'VALIDATION_ERROR'
+        });
+      }
+
+      // Check if phone already exists
+      const existingUserByPhone = await db.query(
+        'SELECT id FROM hakikisha.users WHERE phone = $1',
+        [phone]
+      );
+
+      if (existingUserByPhone.rows.length > 0) {
+        return res.status(409).json({
+          success: false,
+          error: 'Phone number already registered',
+          code: 'PHONE_EXISTS'
+        });
+      }
     }
 
     // Check if user already exists with email
@@ -85,7 +118,8 @@ const register = async (req, res) => {
     if (existingUserByEmail.rows.length > 0) {
       return res.status(409).json({
         success: false,
-        error: 'User with this email already exists'
+        error: 'User with this email already exists',
+        code: 'EMAIL_EXISTS'
       });
     }
 
@@ -98,7 +132,8 @@ const register = async (req, res) => {
     if (existingUserByUsername.rows.length > 0) {
       return res.status(409).json({
         success: false,
-        error: 'Username already taken'
+        error: 'Username already taken',
+        code: 'USERNAME_EXISTS'
       });
     }
 
@@ -115,8 +150,8 @@ const register = async (req, res) => {
       `INSERT INTO hakikisha.users 
        (id, email, username, password_hash, phone, role, is_verified, registration_status, created_at, updated_at) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW()) 
-       RETURNING id, email, username, role, is_verified, registration_status`,
-      [uuidv4(), email, username, passwordHash, phone, role, isVerified, registrationStatus]
+       RETURNING id, email, username, phone, role, is_verified, registration_status, status`,
+      [uuidv4(), email, username, passwordHash, phone || null, role, isVerified, registrationStatus]
     );
 
     const newUser = result.rows[0];
@@ -124,42 +159,61 @@ const register = async (req, res) => {
     // Generate JWT token
     const token = generateJWTToken(newUser);
 
+    console.log('✅ User registered successfully:', { 
+      email: newUser.email, 
+      username: newUser.username,
+      phone: newUser.phone 
+    });
+
     res.status(201).json({
       success: true,
       message: role === 'user' 
         ? 'Registration successful' 
         : 'Registration submitted for approval',
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        username: newUser.username,
-        role: newUser.role,
-        is_verified: newUser.is_verified,
-        registration_status: newUser.registration_status
-      },
-      token: token
+      data: {
+        user: {
+          id: newUser.id,
+          email: newUser.email,
+          username: newUser.username,
+          phone: newUser.phone,
+          role: newUser.role,
+          is_verified: newUser.is_verified,
+          registration_status: newUser.registration_status,
+          status: newUser.status
+        },
+        token: token
+      }
     });
   } catch (error) {
-    console.error('Registration error:', error);
+    console.error('❌ Registration error:', error);
     
     // Handle unique constraint violations
     if (error.code === '23505') {
       if (error.constraint.includes('email')) {
         return res.status(409).json({
           success: false,
-          error: 'Email already registered'
+          error: 'Email already registered',
+          code: 'EMAIL_EXISTS'
         });
       } else if (error.constraint.includes('username')) {
         return res.status(409).json({
           success: false,
-          error: 'Username already taken'
+          error: 'Username already taken',
+          code: 'USERNAME_EXISTS'
+        });
+      } else if (error.constraint.includes('phone')) {
+        return res.status(409).json({
+          success: false,
+          error: 'Phone number already registered',
+          code: 'PHONE_EXISTS'
         });
       }
     }
     
     res.status(500).json({
       success: false,
-      error: 'Registration failed'
+      error: 'Registration failed',
+      code: 'SERVER_ERROR'
     });
   }
 };
@@ -168,28 +222,30 @@ const login = async (req, res) => {
   try {
     await ensureAuthDatabaseReady();
 
-    const { identifier, password } = req.body; // identifier can be email or username
+    const { identifier, password } = req.body; // identifier can be email, username, or phone
 
     if (!identifier || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Email/username and password are required'
+        error: 'Email/username/phone and password are required',
+        code: 'VALIDATION_ERROR'
       });
     }
 
-    // Find user by email or username
+    // Find user by email, username, or phone
     const userResult = await db.query(
       `SELECT id, email, username, password_hash, role, is_verified, phone, 
               two_factor_enabled, registration_status, status
        FROM hakikisha.users 
-       WHERE email = $1 OR username = $1`,
+       WHERE email = $1 OR username = $1 OR phone = $1`,
       [identifier]
     );
 
     if (userResult.rows.length === 0) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid email/username or password'
+        error: 'Invalid email/username/phone or password',
+        code: 'AUTH_INVALID'
       });
     }
 
@@ -199,7 +255,8 @@ const login = async (req, res) => {
     if (user.status !== 'active') {
       return res.status(401).json({
         success: false,
-        error: 'Your account has been suspended. Please contact support.'
+        error: 'Your account has been suspended. Please contact support.',
+        code: 'ACCOUNT_SUSPENDED'
       });
     }
 
@@ -207,7 +264,8 @@ const login = async (req, res) => {
     if (user.registration_status !== 'approved') {
       return res.status(403).json({
         success: false,
-        error: 'Your account is pending admin approval'
+        error: 'Your account is pending admin approval',
+        code: 'PENDING_APPROVAL'
       });
     }
 
@@ -215,7 +273,8 @@ const login = async (req, res) => {
     if (!user.password_hash) {
       return res.status(500).json({
         success: false,
-        error: 'User account configuration error'
+        error: 'User account configuration error',
+        code: 'ACCOUNT_ERROR'
       });
     }
 
@@ -224,7 +283,8 @@ const login = async (req, res) => {
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid email/username or password'
+        error: 'Invalid email/username/phone or password',
+        code: 'AUTH_INVALID'
       });
     }
 
@@ -246,31 +306,33 @@ const login = async (req, res) => {
       success: true,
       message: requires2FA ? '2FA code required' : 'Login successful',
       requires2FA: requires2FA,
-      user: {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        role: user.role,
-        is_verified: user.is_verified,
-        registration_status: user.registration_status,
-        two_factor_enabled: user.two_factor_enabled,
-        phone: user.phone
+      data: {
+        user: {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          phone: user.phone,
+          role: user.role,
+          is_verified: user.is_verified,
+          registration_status: user.registration_status,
+          two_factor_enabled: user.two_factor_enabled
+        }
       }
     };
 
     if (!requires2FA) {
-      response.token = token; // Send JWT token
+      response.data.token = token; // Send JWT token
     }
 
     console.log('✅ Login successful for user:', user.email, `(${user.username})`);
-    console.log('🔐 JWT Token generated:', token.substring(0, 50) + '...');
 
     res.json(response);
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('❌ Login error:', error);
     res.status(500).json({
       success: false,
-      error: 'Login failed'
+      error: 'Login failed',
+      code: 'SERVER_ERROR'
     });
   }
 };
@@ -282,20 +344,22 @@ const verify2FA = async (req, res) => {
     if (!userId || !code) {
       return res.status(400).json({
         success: false,
-        error: 'User ID and 2FA code are required'
+        error: 'User ID and 2FA code are required',
+        code: 'VALIDATION_ERROR'
       });
     }
 
     // Get user
     const userResult = await db.query(
-      'SELECT id, email, username, role FROM hakikisha.users WHERE id = $1',
+      'SELECT id, email, username, role, phone FROM hakikisha.users WHERE id = $1',
       [userId]
     );
 
     if (userResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        error: 'User not found'
+        error: 'User not found',
+        code: 'NOT_FOUND'
       });
     }
 
@@ -309,19 +373,23 @@ const verify2FA = async (req, res) => {
     res.json({
       success: true,
       message: 'Login successful',
-      token: token,
-      user: {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        role: user.role
+      data: {
+        token: token,
+        user: {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          phone: user.phone,
+          role: user.role
+        }
       }
     });
   } catch (error) {
-    console.error('2FA verification error:', error);
+    console.error('❌ 2FA verification error:', error);
     res.status(500).json({
       success: false,
-      error: '2FA verification failed'
+      error: '2FA verification failed',
+      code: 'SERVER_ERROR'
     });
   }
 };
@@ -335,10 +403,11 @@ const logout = async (req, res) => {
       message: 'Logout successful'
     });
   } catch (error) {
-    console.error('Logout error:', error);
+    console.error('❌ Logout error:', error);
     res.status(500).json({
       success: false,
-      error: 'Logout failed'
+      error: 'Logout failed',
+      code: 'SERVER_ERROR'
     });
   }
 };
@@ -350,13 +419,14 @@ const getCurrentUser = async (req, res) => {
     if (!userId) {
       return res.status(400).json({
         success: false,
-        error: 'User ID is required'
+        error: 'User ID is required',
+        code: 'VALIDATION_ERROR'
       });
     }
 
     const userResult = await db.query(
       `SELECT id, email, username, role, is_verified, phone, 
-              profile_picture, created_at, last_login, registration_status
+              profile_picture, created_at, last_login, registration_status, status
        FROM hakikisha.users 
        WHERE id = $1`,
       [userId]
@@ -365,7 +435,8 @@ const getCurrentUser = async (req, res) => {
     if (userResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        error: 'User not found'
+        error: 'User not found',
+        code: 'NOT_FOUND'
       });
     }
 
@@ -373,25 +444,29 @@ const getCurrentUser = async (req, res) => {
 
     res.json({
       success: true,
-      user
+      data: {
+        user
+      }
     });
   } catch (error) {
-    console.error('Get current user error:', error);
+    console.error('❌ Get current user error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to get user information'
+      error: 'Failed to get user information',
+      code: 'SERVER_ERROR'
     });
   }
 };
 
 const checkAvailability = async (req, res) => {
   try {
-    const { email, username } = req.query;
+    const { email, username, phone } = req.query;
 
-    if (!email && !username) {
+    if (!email && !username && !phone) {
       return res.status(400).json({
         success: false,
-        error: 'Please provide either email or username to check'
+        error: 'Please provide either email, username, or phone to check',
+        code: 'VALIDATION_ERROR'
       });
     }
 
@@ -408,6 +483,7 @@ const checkAvailability = async (req, res) => {
       if (existingUser.rows.length > 0) {
         result.available = false;
         result.message = 'Email already registered';
+        result.code = 'EMAIL_EXISTS';
       }
     }
 
@@ -419,6 +495,19 @@ const checkAvailability = async (req, res) => {
       if (existingUser.rows.length > 0) {
         result.available = false;
         result.message = 'Username already taken';
+        result.code = 'USERNAME_EXISTS';
+      }
+    }
+
+    if (phone && result.available) {
+      const existingUser = await db.query(
+        'SELECT id FROM hakikisha.users WHERE phone = $1',
+        [phone]
+      );
+      if (existingUser.rows.length > 0) {
+        result.available = false;
+        result.message = 'Phone number already registered';
+        result.code = 'PHONE_EXISTS';
       }
     }
 
@@ -428,10 +517,11 @@ const checkAvailability = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Check availability error:', error);
+    console.error('❌ Check availability error:', error);
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'Internal server error',
+      code: 'SERVER_ERROR'
     });
   }
 };
@@ -443,7 +533,8 @@ const updateProfile = async (req, res) => {
     if (!userId) {
       return res.status(400).json({
         success: false,
-        error: 'User ID is required'
+        error: 'User ID is required',
+        code: 'VALIDATION_ERROR'
       });
     }
 
@@ -453,7 +544,8 @@ const updateProfile = async (req, res) => {
       if (!usernameRegex.test(username)) {
         return res.status(400).json({
           success: false,
-          error: 'Username must be 3-20 characters and can only contain letters, numbers, underscores, and hyphens'
+          error: 'Username must be 3-20 characters and can only contain letters, numbers, underscores, and hyphens',
+          code: 'VALIDATION_ERROR'
         });
       }
 
@@ -464,8 +556,35 @@ const updateProfile = async (req, res) => {
       if (existingUser.rows.length > 0) {
         return res.status(409).json({
           success: false,
-          error: 'Username already taken'
+          error: 'Username already taken',
+          code: 'USERNAME_EXISTS'
         });
+      }
+    }
+
+    // Check if phone is being updated and if it's available
+    if (phone !== undefined && phone !== null) {
+      if (phone) {
+        const phoneRegex = /^\+?[\d\s-()]{10,}$/;
+        if (!phoneRegex.test(phone)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid phone number format',
+            code: 'VALIDATION_ERROR'
+          });
+        }
+
+        const existingUser = await db.query(
+          'SELECT id FROM hakikisha.users WHERE phone = $1 AND id != $2',
+          [phone, userId]
+        );
+        if (existingUser.rows.length > 0) {
+          return res.status(409).json({
+            success: false,
+            error: 'Phone number already registered',
+            code: 'PHONE_EXISTS'
+          });
+        }
       }
     }
 
@@ -494,7 +613,8 @@ const updateProfile = async (req, res) => {
     if (updateFields.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'No fields to update'
+        error: 'No fields to update',
+        code: 'VALIDATION_ERROR'
       });
     }
 
@@ -514,14 +634,17 @@ const updateProfile = async (req, res) => {
     res.json({
       success: true,
       message: 'Profile updated successfully',
-      user: updatedUser
+      data: {
+        user: updatedUser
+      }
     });
 
   } catch (error) {
-    console.error('Update profile error:', error);
+    console.error('❌ Update profile error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to update profile'
+      error: 'Failed to update profile',
+      code: 'SERVER_ERROR'
     });
   }
 };

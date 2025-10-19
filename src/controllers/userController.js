@@ -6,8 +6,8 @@ class UserController {
   async getProfile(req, res) {
     try {
       const result = await db.query(
-        `SELECT id, email, phone, profile_picture, is_verified, created_at 
-         FROM users WHERE id = $1`,
+        `SELECT id, email, username, phone, profile_picture, is_verified, role, status, created_at 
+         FROM hakikisha.users WHERE id = $1`,
         [req.user.userId]
       );
 
@@ -42,12 +42,62 @@ class UserController {
       let paramCount = 1;
 
       if (username !== undefined) {
-        updates.push(`email = $${paramCount}`);
+        // Validate username format
+        const usernameRegex = /^[a-zA-Z0-9_-]{3,30}$/;
+        if (!usernameRegex.test(username)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Username must be 3-30 characters and contain only letters, numbers, underscores, and hyphens',
+            code: 'VALIDATION_ERROR'
+          });
+        }
+
+        // Check if username is already taken
+        const existingUser = await db.query(
+          'SELECT id FROM hakikisha.users WHERE username = $1 AND id != $2',
+          [username, req.user.userId]
+        );
+        
+        if (existingUser.rows.length > 0) {
+          return res.status(409).json({
+            success: false,
+            error: 'Username already taken',
+            code: 'USERNAME_EXISTS'
+          });
+        }
+
+        updates.push(`username = $${paramCount}`);
         params.push(username);
         paramCount++;
       }
 
       if (phone !== undefined) {
+        if (phone) {
+          // Validate phone format
+          const phoneRegex = /^\+?[\d\s-()]{10,}$/;
+          if (!phoneRegex.test(phone)) {
+            return res.status(400).json({
+              success: false,
+              error: 'Invalid phone number format',
+              code: 'VALIDATION_ERROR'
+            });
+          }
+
+          // Check if phone is already registered
+          const existingUser = await db.query(
+            'SELECT id FROM hakikisha.users WHERE phone = $1 AND id != $2',
+            [phone, req.user.userId]
+          );
+          
+          if (existingUser.rows.length > 0) {
+            return res.status(409).json({
+              success: false,
+              error: 'Phone number already registered',
+              code: 'PHONE_EXISTS'
+            });
+          }
+        }
+
         updates.push(`phone = $${paramCount}`);
         params.push(phone);
         paramCount++;
@@ -65,8 +115,8 @@ class UserController {
       params.push(req.user.userId);
 
       const result = await db.query(
-        `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount} 
-         RETURNING id, email, phone, profile_picture, created_at`,
+        `UPDATE hakikisha.users SET ${updates.join(', ')} WHERE id = $${paramCount} 
+         RETURNING id, email, username, phone, profile_picture, created_at`,
         params
       );
 
@@ -99,7 +149,7 @@ class UserController {
       const imageUrl = `/uploads/profiles/${req.user.userId}-${Date.now()}.jpg`;
 
       await db.query(
-        'UPDATE users SET profile_picture = $1, updated_at = NOW() WHERE id = $2',
+        'UPDATE hakikisha.users SET profile_picture = $1, updated_at = NOW() WHERE id = $2',
         [imageUrl, req.user.userId]
       );
 
@@ -130,9 +180,18 @@ class UserController {
         });
       }
 
+      // Validate new password strength
+      if (newPassword.length < 6) {
+        return res.status(400).json({
+          success: false,
+          error: 'New password must be at least 6 characters long',
+          code: 'VALIDATION_ERROR'
+        });
+      }
+
       // Get current password hash
       const userResult = await db.query(
-        'SELECT password_hash FROM users WHERE id = $1',
+        'SELECT password_hash FROM hakikisha.users WHERE id = $1',
         [req.user.userId]
       );
 
@@ -155,9 +214,10 @@ class UserController {
       }
 
       // Hash and update new password
-      const newPasswordHash = await bcrypt.hash(newPassword, 10);
+      const saltRounds = 12;
+      const newPasswordHash = await bcrypt.hash(newPassword, saltRounds);
       await db.query(
-        'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+        'UPDATE hakikisha.users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
         [newPasswordHash, req.user.userId]
       );
 
@@ -182,9 +242,9 @@ class UserController {
       let query = `
         SELECT c.*, 
                COALESCE(v.verdict, av.verdict) as final_verdict
-        FROM claims c
-        LEFT JOIN verdicts v ON c.human_verdict_id = v.id
-        LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
+        FROM hakikisha.claims c
+        LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
+        LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
         WHERE c.user_id = $1
       `;
       
@@ -213,96 +273,56 @@ class UserController {
     }
   }
 
-  async getNotifications(req, res) {
+  async deleteAccount(req, res) {
     try {
-      const result = await db.query(
-        `SELECT * FROM notifications 
-         WHERE user_id = $1 
-         ORDER BY created_at DESC 
-         LIMIT 50`,
+      const { password } = req.body;
+
+      if (!password) {
+        return res.status(400).json({
+          success: false,
+          error: 'Password is required to delete account',
+          code: 'VALIDATION_ERROR'
+        });
+      }
+
+      // Verify password
+      const userResult = await db.query(
+        'SELECT password_hash FROM hakikisha.users WHERE id = $1',
         [req.user.userId]
       );
 
-      res.json({
-        success: true,
-        notifications: result.rows
-      });
-    } catch (error) {
-      logger.error('Get notifications error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get notifications',
-        code: 'SERVER_ERROR'
-      });
-    }
-  }
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'User not found',
+          code: 'NOT_FOUND'
+        });
+      }
 
-  async markNotificationAsRead(req, res) {
-    try {
+      const isValid = await bcrypt.compare(password, userResult.rows[0].password_hash);
+      if (!isValid) {
+        return res.status(401).json({
+          success: false,
+          error: 'Password is incorrect',
+          code: 'AUTH_INVALID'
+        });
+      }
+
+      // Soft delete by updating status
       await db.query(
-        `UPDATE notifications 
-         SET is_read = true, updated_at = NOW() 
-         WHERE id = $1 AND user_id = $2`,
-        [req.params.id, req.user.userId]
+        'UPDATE hakikisha.users SET status = $1, updated_at = NOW() WHERE id = $2',
+        ['inactive', req.user.userId]
       );
 
       res.json({
         success: true,
-        message: 'Notification marked as read'
+        message: 'Account deleted successfully'
       });
     } catch (error) {
-      logger.error('Mark notification as read error:', error);
+      logger.error('Delete account error:', error);
       res.status(500).json({
         success: false,
-        error: 'Failed to mark notification as read',
-        code: 'SERVER_ERROR'
-      });
-    }
-  }
-
-  async getSearchHistory(req, res) {
-    try {
-      const result = await db.query(
-        `SELECT * FROM search_logs 
-         WHERE user_id = $1 
-         ORDER BY created_at DESC 
-         LIMIT 50`,
-        [req.user.userId]
-      );
-
-      res.json({
-        success: true,
-        history: result.rows
-      });
-    } catch (error) {
-      logger.error('Get search history error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get search history',
-        code: 'SERVER_ERROR'
-      });
-    }
-  }
-
-  async saveSearchHistory(req, res) {
-    try {
-      const { query, filters } = req.body;
-
-      await db.query(
-        `INSERT INTO search_logs (user_id, query, filters_applied, created_at)
-         VALUES ($1, $2, $3, NOW())`,
-        [req.user.userId, query, JSON.stringify(filters || {})]
-      );
-
-      res.json({
-        success: true,
-        message: 'Search history saved'
-      });
-    } catch (error) {
-      logger.error('Save search history error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to save search history',
+        error: 'Failed to delete account',
         code: 'SERVER_ERROR'
       });
     }

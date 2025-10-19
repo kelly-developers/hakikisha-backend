@@ -25,6 +25,17 @@ class User {
     }
   }
 
+  static async findByPhone(phone) {
+    const query = 'SELECT * FROM hakikisha.users WHERE phone = $1';
+    try {
+      const result = await db.query(query, [phone]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Error finding user by phone:', error);
+      throw error;
+    }
+  }
+
   static async findByEmailOrUsername(identifier) {
     const query = 'SELECT * FROM hakikisha.users WHERE email = $1 OR username = $1';
     try {
@@ -85,6 +96,8 @@ class User {
           throw new Error('Email already exists');
         } else if (error.constraint.includes('username')) {
           throw new Error('Username already exists');
+        } else if (error.constraint.includes('phone')) {
+          throw new Error('Phone number already exists');
         }
       }
       
@@ -161,7 +174,7 @@ class User {
     }
 
     if (registration_status) {
-      query += ` AND registration_status = $${paramCount}`;
+      query += ` AND registration_status = $$${paramCount}`;
       params.push(registration_status);
       paramCount++;
     }

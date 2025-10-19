@@ -65,38 +65,35 @@ class DatabaseInitializer {
     }
   }
 
-  static async createUsersTable() {
-    try {
-      const query = `
-        CREATE TABLE IF NOT EXISTS hakikisha.users (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          email VARCHAR(255) UNIQUE NOT NULL,
-          username VARCHAR(255) UNIQUE NOT NULL,
-          password_hash VARCHAR(255) NOT NULL,
-          phone VARCHAR(50),
-          role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('user', 'fact_checker', 'admin')),
-          profile_picture TEXT,
-          is_verified BOOLEAN DEFAULT FALSE,
-          registration_status VARCHAR(50) DEFAULT 'pending' CHECK (registration_status IN ('pending', 'approved', 'rejected')),
-          status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'inactive')),
-          two_factor_enabled BOOLEAN DEFAULT FALSE,
-          two_factor_secret VARCHAR(255),
-          login_count INTEGER DEFAULT 0,
-          last_login TIMESTAMP,
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
-        )
-      `;
-      await db.query(query);
-      console.log('✅ Users table created/verified');
-      
-      // Ensure all required columns exist (for existing tables)
-      await this.ensureRequiredColumns();
-    } catch (error) {
-      console.error('❌ Error creating users table:', error);
-      throw error;
-    }
+static async createUsersTable() {
+  try {
+    const query = `
+      CREATE TABLE IF NOT EXISTS hakikisha.users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        email VARCHAR(255) UNIQUE NOT NULL,
+        username VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        phone VARCHAR(50),
+        role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('user', 'fact_checker', 'admin')),
+        profile_picture TEXT,
+        is_verified BOOLEAN DEFAULT FALSE,
+        registration_status VARCHAR(50) DEFAULT 'pending' CHECK (registration_status IN ('pending', 'approved', 'rejected')),
+        status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'inactive')),
+        two_factor_enabled BOOLEAN DEFAULT FALSE,
+        two_factor_secret VARCHAR(255),
+        login_count INTEGER DEFAULT 0,
+        last_login TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `;
+    await db.query(query);
+    console.log('✅ Users table created/verified');
+  } catch (error) {
+    console.error('❌ Error creating users table:', error);
+    throw error;
   }
+}
 
   static async ensureUserColumns() {
     try {
