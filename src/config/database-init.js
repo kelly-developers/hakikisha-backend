@@ -65,42 +65,42 @@ class DatabaseInitializer {
     }
   }
 
-static async createUsersTable() {
-  try {
-    const query = `
-      CREATE TABLE IF NOT EXISTS hakikisha.users (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        email VARCHAR(255) UNIQUE NOT NULL,
-        username VARCHAR(255) UNIQUE NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        phone VARCHAR(50),
-        role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('user', 'fact_checker', 'admin')),
-        profile_picture TEXT,
-        is_verified BOOLEAN DEFAULT FALSE,
-        registration_status VARCHAR(50) DEFAULT 'pending' CHECK (registration_status IN ('pending', 'approved', 'rejected')),
-        status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'inactive')),
-        two_factor_enabled BOOLEAN DEFAULT FALSE,
-        two_factor_secret VARCHAR(255),
-        login_count INTEGER DEFAULT 0,
-        last_login TIMESTAMP,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      )
-    `;
-    await db.query(query);
-    console.log('✅ Users table created/verified');
-  } catch (error) {
-    console.error('❌ Error creating users table:', error);
-    throw error;
+  static async createUsersTable() {
+    try {
+      const query = `
+        CREATE TABLE IF NOT EXISTS hakikisha.users (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          email VARCHAR(255) UNIQUE NOT NULL,
+          username VARCHAR(255) UNIQUE,
+          password_hash VARCHAR(255) NOT NULL,
+          phone VARCHAR(50),
+          role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('user', 'fact_checker', 'admin')),
+          profile_picture TEXT,
+          is_verified BOOLEAN DEFAULT FALSE,
+          registration_status VARCHAR(50) DEFAULT 'pending' CHECK (registration_status IN ('pending', 'approved', 'rejected')),
+          status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'inactive')),
+          two_factor_enabled BOOLEAN DEFAULT FALSE,
+          two_factor_secret VARCHAR(255),
+          login_count INTEGER DEFAULT 0,
+          last_login TIMESTAMP,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await db.query(query);
+      console.log('✅ Users table created/verified');
+    } catch (error) {
+      console.error('❌ Error creating users table:', error);
+      throw error;
+    }
   }
-}
 
   static async ensureUserColumns() {
     try {
       console.log('🔍 Checking for missing columns in users table...');
       
       const requiredColumns = [
-        { name: 'username', type: 'VARCHAR(255)', defaultValue: "NULL", isUnique: true },
+        { name: 'username', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: true },
         { name: 'status', type: 'VARCHAR(50)', defaultValue: "'active'", isUnique: false },
         { name: 'registration_status', type: 'VARCHAR(50)', defaultValue: "'pending'", isUnique: false },
         { name: 'is_verified', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
@@ -734,6 +734,17 @@ static async createUsersTable() {
     try {
       console.log('🔧 Fixing existing database schema...');
       
+      // Make username nullable if it's currently NOT NULL
+      try {
+        await db.query(`
+          ALTER TABLE hakikisha.users 
+          ALTER COLUMN username DROP NOT NULL
+        `);
+        console.log('✅ Made username column nullable');
+      } catch (error) {
+        console.log('⚠️ Username column might already be nullable:', error.message);
+      }
+      
       // Ensure all required columns exist
       await this.ensureRequiredColumns();
       
@@ -749,6 +760,16 @@ static async createUsersTable() {
       console.log('✅ Existing database fixed successfully!');
     } catch (error) {
       console.error('❌ Error fixing existing database:', error);
+      throw error;
+    }
+  }
+
+  static async ensureRequiredColumns() {
+    try {
+      console.log('🔍 Ensuring all required columns exist...');
+      await this.ensureUserColumns();
+    } catch (error) {
+      console.error('❌ Error ensuring required columns:', error);
       throw error;
     }
   }

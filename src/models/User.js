@@ -71,8 +71,14 @@ class User {
     } = userData;
 
     // Validate required fields
-    if (!email || !username || !password_hash) {
-      throw new Error('Email, username, and password are required');
+    if (!email || !password_hash) {
+      throw new Error('Email and password are required');
+    }
+
+    // Generate username if not provided
+    let finalUsername = username;
+    if (!finalUsername) {
+      finalUsername = email.split('@')[0] + Math.floor(1000 + Math.random() * 9000);
     }
 
     const id = uuidv4();
@@ -84,7 +90,7 @@ class User {
 
     try {
       const result = await db.query(query, [
-        id, email, username, password_hash, phone, role, is_verified, status, registration_status
+        id, email, finalUsername, password_hash, phone, role, is_verified, status, registration_status
       ]);
       return result.rows[0];
     } catch (error) {
@@ -174,7 +180,7 @@ class User {
     }
 
     if (registration_status) {
-      query += ` AND registration_status = $$${paramCount}`;
+      query += ` AND registration_status = $${paramCount}`;
       params.push(registration_status);
       paramCount++;
     }

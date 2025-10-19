@@ -8,10 +8,20 @@ const emailService = require('../services/emailService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-fallback-secret-key-change-in-production';
 
+// Helper function to generate username from email
+function generateUsernameFromEmail(email) {
+  const baseUsername = email.split('@')[0];
+  // Remove special characters and ensure it's alphanumeric
+  const cleanUsername = baseUsername.replace(/[^a-zA-Z0-9]/g, '');
+  // Add random number to ensure uniqueness
+  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  return `${cleanUsername}${randomSuffix}`;
+}
+
 // Simple register endpoint
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, phone, role = 'user' } = req.body;
+    const { email, password, phone, role = 'user', username } = req.body;
 
     console.log('Registration attempt:', { email, role });
 
@@ -43,6 +53,29 @@ router.post('/register', async (req, res) => {
       });
     }
 
+    // Generate username if not provided
+    let finalUsername = username;
+    if (!finalUsername) {
+      finalUsername = generateUsernameFromEmail(email);
+      
+      // Ensure username is unique
+      let usernameExists = true;
+      let attempts = 0;
+      while (usernameExists && attempts < 5) {
+        const existingUsername = await db.query(
+          'SELECT id FROM hakikisha.users WHERE username = $1',
+          [finalUsername]
+        );
+        
+        if (existingUsername.rows.length === 0) {
+          usernameExists = false;
+        } else {
+          finalUsername = generateUsernameFromEmail(email);
+          attempts++;
+        }
+      }
+    }
+
     // Hash password
     const saltRounds = 12;
     const passwordHash = await bcrypt.hash(password, saltRounds);
@@ -54,10 +87,10 @@ router.post('/register', async (req, res) => {
     // Insert user
     const result = await db.query(
       `INSERT INTO hakikisha.users 
-       (email, password_hash, phone, role, registration_status, is_verified) 
-       VALUES ($1, $2, $3, $4, $5, $6) 
-       RETURNING id, email, role, registration_status, is_verified`,
-      [email, passwordHash, phone, role, registrationStatus, isVerified]
+       (email, username, password_hash, phone, role, registration_status, is_verified) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) 
+       RETURNING id, email, username, role, registration_status, is_verified`,
+      [email, finalUsername, passwordHash, phone, role, registrationStatus, isVerified]
     );
 
     const user = result.rows[0];
@@ -87,6 +120,7 @@ router.post('/register', async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         role: user.role,
         registration_status: user.registration_status,
         is_verified: user.is_verified
@@ -96,6 +130,27 @@ router.post('/register', async (req, res) => {
 
   } catch (error) {
     console.error('Registration error:', error);
+    
+    // Handle specific database errors
+    if (error.code === '23505') { // Unique constraint violation
+      if (error.constraint.includes('email')) {
+        return res.status(400).json({
+          success: false,
+          error: 'User with this email already exists'
+        });
+      } else if (error.constraint.includes('username')) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username already exists. Please try a different username.'
+        });
+      }
+    } else if (error.code === '23502') { // Not null constraint violation
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields. Please check your input.'
+      });
+    }
+    
     res.status(500).json({
       success: false,
       error: 'Internal server error during registration'
@@ -120,7 +175,7 @@ router.post('/login', async (req, res) => {
 
     // Find user by email
     const userResult = await db.query(
-      `SELECT id, email, password_hash, role, registration_status, is_verified, two_factor_enabled
+      `SELECT id, email, username, password_hash, role, registration_status, is_verified, two_factor_enabled
        FROM hakikisha.users WHERE email = $1`,
       [email]
     );
@@ -163,7 +218,7 @@ router.post('/login', async (req, res) => {
 
     if (requires2FA) {
       // Generate and send OTP for 2FA
-      await twoFactorService.generateAndSendOTP(user.id, user.email, user.email.split('@')[0]);
+      await twoFactorService.generateAndSendOTP(user.id, user.email, user.username || user.email.split('@')[0]);
 
       // Return temporary token for 2FA verification
       const tempToken = jwt.sign(
@@ -208,6 +263,7 @@ router.post('/login', async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         role: user.role,
         is_verified: user.is_verified,
         registration_status: user.registration_status,
@@ -271,7 +327,7 @@ router.post('/verify-2fa', async (req, res) => {
 
     // Get user details
     const userResult = await db.query(
-      `SELECT id, email, role, is_verified, registration_status, two_factor_enabled
+      `SELECT id, email, username, role, is_verified, registration_status, two_factor_enabled
        FROM hakikisha.users WHERE id = $1`,
       [targetUserId]
     );
@@ -314,6 +370,7 @@ router.post('/verify-2fa', async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         role: user.role,
         is_verified: user.is_verified,
         registration_status: user.registration_status,
@@ -367,7 +424,7 @@ router.post('/resend-2fa', async (req, res) => {
 
     // Get user email
     const userResult = await db.query(
-      'SELECT email FROM hakikisha.users WHERE id = $1',
+      'SELECT email, username FROM hakikisha.users WHERE id = $1',
       [targetUserId]
     );
 
@@ -378,10 +435,10 @@ router.post('/resend-2fa', async (req, res) => {
       });
     }
 
-    const userEmail = userResult.rows[0].email;
+    const user = userResult.rows[0];
 
     // Resend OTP
-    const result = await twoFactorService.resendOTP(targetUserId, userEmail, userEmail.split('@')[0]);
+    const result = await twoFactorService.resendOTP(targetUserId, user.email, user.username || user.email.split('@')[0]);
 
     res.json({
       success: true,
@@ -510,7 +567,7 @@ router.post('/forgot-password', async (req, res) => {
 
     // Check if user exists
     const userResult = await db.query(
-      'SELECT id, email FROM hakikisha.users WHERE email = $1',
+      'SELECT id, email, username FROM hakikisha.users WHERE email = $1',
       [email]
     );
 
@@ -532,6 +589,18 @@ router.post('/forgot-password', async (req, res) => {
     // Token expires in 1 hour
     const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000);
 
+    // Create password_reset_tokens table if it doesn't exist
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS hakikisha.password_reset_tokens (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES hakikisha.users(id),
+        token_hash VARCHAR(255) NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        used BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
     // Store reset token in database
     await db.query(
       `INSERT INTO hakikisha.password_reset_tokens 
@@ -541,7 +610,7 @@ router.post('/forgot-password', async (req, res) => {
     );
 
     // Send reset email
-    await emailService.sendPasswordResetEmail(user.email, resetToken, user.email.split('@')[0]);
+    await emailService.sendPasswordResetEmail(user.email, resetToken, user.username || user.email.split('@')[0]);
 
     console.log(`Password reset token sent to: ${user.email}`);
 
@@ -655,7 +724,7 @@ router.post('/verify-token', async (req, res) => {
     
     // Verify user still exists
     const userResult = await db.query(
-      'SELECT id, email, role, is_verified, registration_status, two_factor_enabled FROM hakikisha.users WHERE id = $1',
+      'SELECT id, email, username, role, is_verified, registration_status, two_factor_enabled FROM hakikisha.users WHERE id = $1',
       [decoded.userId]
     );
 
@@ -673,6 +742,7 @@ router.post('/verify-token', async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         role: user.role,
         is_verified: user.is_verified,
         registration_status: user.registration_status,
@@ -704,7 +774,7 @@ router.get('/profile', async (req, res) => {
     const decoded = jwt.verify(token, JWT_SECRET);
     
     const userResult = await db.query(
-      'SELECT id, email, role, phone, is_verified, registration_status, two_factor_enabled, created_at FROM hakikisha.users WHERE id = $1',
+      'SELECT id, email, username, role, phone, is_verified, registration_status, two_factor_enabled, created_at FROM hakikisha.users WHERE id = $1',
       [decoded.userId]
     );
 
