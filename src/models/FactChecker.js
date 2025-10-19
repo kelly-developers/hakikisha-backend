@@ -21,12 +21,43 @@ class FactChecker {
 
     try {
       const result = await db.query(query, [
-        id, user_id, credentials, JSON.stringify(areas_of_expertise), verification_status, is_active
+        id, 
+        user_id, 
+        credentials, 
+        JSON.stringify(areas_of_expertise), 
+        verification_status, 
+        is_active
       ]);
       return result.rows[0];
     } catch (error) {
       logger.error('Error creating fact checker:', error);
-      throw error;
+      
+      // If the error is about missing columns, try to fix the database schema
+      if (error.code === '42703' || error.message.includes('column') || error.message.includes('does not exist')) {
+        logger.info('Attempting to fix database schema...');
+        try {
+          // Import and run database fix
+          const DatabaseInitializer = require('./DatabaseInitializer');
+          await DatabaseInitializer.fixExistingDatabase();
+          
+          // Retry the operation
+          const retryResult = await db.query(query, [
+            id, 
+            user_id, 
+            credentials, 
+            JSON.stringify(areas_of_expertise), 
+            verification_status, 
+            is_active
+          ]);
+          logger.info('Successfully created fact checker after schema fix');
+          return retryResult.rows[0];
+        } catch (fixError) {
+          logger.error('Failed to fix database schema:', fixError);
+          throw error; // Throw the original error
+        }
+      } else {
+        throw error;
+      }
     }
   }
 
@@ -47,6 +78,23 @@ class FactChecker {
     }
   }
 
+  static async findById(id) {
+    const query = `
+      SELECT fc.*, u.email, u.username, u.phone, u.role, u.status as user_status
+      FROM hakikisha.fact_checkers fc
+      JOIN hakikisha.users u ON fc.user_id = u.id
+      WHERE fc.id = $1
+    `;
+
+    try {
+      const result = await db.query(query, [id]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Error finding fact checker by ID:', error);
+      throw error;
+    }
+  }
+
   static async countActive() {
     const query = `
       SELECT COUNT(*) as count 
@@ -60,6 +108,24 @@ class FactChecker {
     } catch (error) {
       logger.error('Error counting active fact checkers:', error);
       return 0;
+    }
+  }
+
+  static async getAllActive() {
+    const query = `
+      SELECT fc.*, u.email, u.username, u.phone
+      FROM hakikisha.fact_checkers fc
+      JOIN hakikisha.users u ON fc.user_id = u.id
+      WHERE fc.is_active = true AND fc.verification_status = 'approved'
+      ORDER BY u.username
+    `;
+
+    try {
+      const result = await db.query(query);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error getting active fact checkers:', error);
+      return [];
     }
   }
 
@@ -148,8 +214,14 @@ class FactChecker {
     let paramCount = 1;
 
     for (const [key, value] of Object.entries(updateData)) {
-      fields.push(`${key} = $${paramCount}`);
-      values.push(value);
+      // Handle JSON fields
+      if (key === 'areas_of_expertise' && Array.isArray(value)) {
+        fields.push(`${key} = $${paramCount}`);
+        values.push(JSON.stringify(value));
+      } else {
+        fields.push(`${key} = $${paramCount}`);
+        values.push(value);
+      }
       paramCount++;
     }
 
@@ -168,6 +240,74 @@ class FactChecker {
       return result.rows[0];
     } catch (error) {
       logger.error('Error updating fact checker:', error);
+      throw error;
+    }
+  }
+
+  static async updateByUserId(userId, updateData) {
+    const fields = [];
+    const values = [];
+    let paramCount = 1;
+
+    for (const [key, value] of Object.entries(updateData)) {
+      // Handle JSON fields
+      if (key === 'areas_of_expertise' && Array.isArray(value)) {
+        fields.push(`${key} = $${paramCount}`);
+        values.push(JSON.stringify(value));
+      } else {
+        fields.push(`${key} = $${paramCount}`);
+        values.push(value);
+      }
+      paramCount++;
+    }
+
+    fields.push('updated_at = NOW()');
+    values.push(userId);
+
+    const query = `
+      UPDATE hakikisha.fact_checkers 
+      SET ${fields.join(', ')}
+      WHERE user_id = $${paramCount}
+      RETURNING *
+    `;
+
+    try {
+      const result = await db.query(query, values);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error updating fact checker by user ID:', error);
+      throw error;
+    }
+  }
+
+  static async delete(factCheckerId) {
+    const query = `
+      DELETE FROM hakikisha.fact_checkers 
+      WHERE id = $1
+      RETURNING *
+    `;
+
+    try {
+      const result = await db.query(query, [factCheckerId]);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error deleting fact checker:', error);
+      throw error;
+    }
+  }
+
+  static async deleteByUserId(userId) {
+    const query = `
+      DELETE FROM hakikisha.fact_checkers 
+      WHERE user_id = $1
+      RETURNING *
+    `;
+
+    try {
+      const result = await db.query(query, [userId]);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error deleting fact checker by user ID:', error);
       throw error;
     }
   }
