@@ -66,15 +66,16 @@ const register = async (req, res) => {
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
     // Determine registration status based on role
+    // FIX: Regular users are auto-approved, fact_checkers need approval
     const registrationStatus = role === 'user' ? 'approved' : 'pending';
 
     // Create user
     const result = await db.query(
       `INSERT INTO hakikisha.users 
-       (id, email, password_hash, phone, role, registration_status, created_at, updated_at) 
-       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) 
+       (id, email, password_hash, phone, role, registration_status, is_verified, created_at, updated_at) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW()) 
        RETURNING id, email, role, is_verified, registration_status`,
-      [uuidv4(), email, passwordHash, phone, role, registrationStatus]
+      [uuidv4(), email, passwordHash, phone, role, registrationStatus, registrationStatus === 'approved']
     );
 
     const newUser = result.rows[0];
@@ -88,7 +89,8 @@ const register = async (req, res) => {
         id: newUser.id,
         email: newUser.email,
         role: newUser.role,
-        registration_status: newUser.registration_status
+        registration_status: newUser.registration_status,
+        is_verified: newUser.is_verified
       }
     });
   } catch (error) {
@@ -116,7 +118,7 @@ const login = async (req, res) => {
     // Find user with password_hash
     const userResult = await db.query(
       `SELECT id, email, password_hash, role, is_verified, phone, 
-              two_factor_enabled, registration_status
+              two_factor_enabled, registration_status, status
        FROM hakikisha.users 
        WHERE email = $1`,
       [email]
@@ -131,11 +133,27 @@ const login = async (req, res) => {
 
     const user = userResult.rows[0];
 
-    // Check registration status
-    if (user.registration_status !== 'approved') {
+    // FIX: Check if user account is active
+    if (user.status !== 'active') {
       return res.status(403).json({
         success: false,
-        error: 'Your account is pending admin approval'
+        error: 'Your account has been suspended or deactivated'
+      });
+    }
+
+    // FIX: Check registration status - only block if pending
+    if (user.registration_status === 'pending') {
+      return res.status(403).json({
+        success: false,
+        error: 'Your account is pending admin approval. Please wait for approval or contact administrator.'
+      });
+    }
+
+    // FIX: Also check if registration is rejected
+    if (user.registration_status === 'rejected') {
+      return res.status(403).json({
+        success: false,
+        error: 'Your account registration has been rejected. Please contact administrator.'
       });
     }
 
@@ -282,7 +300,7 @@ const getCurrentUser = async (req, res) => {
 
     const userResult = await db.query(
       `SELECT id, email, role, is_verified, phone, 
-              profile_picture, created_at, last_login
+              profile_picture, created_at, last_login, registration_status, status
        FROM hakikisha.users 
        WHERE id = $1`,
       [userId]

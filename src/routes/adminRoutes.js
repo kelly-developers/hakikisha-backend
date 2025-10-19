@@ -12,6 +12,7 @@ router.get('/users', adminController.getAllUsers);
 router.post('/users/register-fact-checker', adminController.registerFactChecker);
 router.post('/users/register-admin', adminController.registerAdmin);
 router.post('/users/action', adminController.userAction);
+router.post('/users/approve-pending-fact-checkers', adminController.approvePendingFactCheckers); // NEW
 
 // Dashboard & Analytics Routes
 router.get('/dashboard/stats', adminController.getDashboardStats);
@@ -22,7 +23,7 @@ router.get('/registrations', adminController.getRegistrationRequests);
 router.post('/registrations/:requestId/approve', adminController.approveRegistration);
 router.post('/registrations/:requestId/reject', adminController.rejectRegistration);
 
-// System Management Routes (Add these if needed)
+// System Management Routes
 router.get('/system/health', (req, res) => {
   res.json({
     status: 'healthy',

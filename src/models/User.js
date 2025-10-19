@@ -291,6 +291,117 @@ class User {
       throw error;
     }
   }
+
+  // Add to User model
+  static async countByRegistrationStatus(status) {
+    try {
+      const result = await db.query(
+        'SELECT COUNT(*) FROM hakikisha.users WHERE registration_status = $1',
+        [status]
+      );
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting users by registration status:', error);
+      return 0;
+    }
+  }
+
+  static async findByRegistrationStatus(status, limit = 20, offset = 0) {
+    try {
+      const result = await db.query(
+        `SELECT id, email, username, role, registration_status, status, created_at 
+         FROM hakikisha.users 
+         WHERE registration_status = $1 
+         ORDER BY created_at DESC 
+         LIMIT $2 OFFSET $3`,
+        [status, limit, offset]
+      );
+      return result.rows;
+    } catch (error) {
+      logger.error('Error finding users by registration status:', error);
+      return [];
+    }
+  }
+
+  // Additional useful methods for admin functionality
+  static async getPendingRegistrations(limit = 20, offset = 0) {
+    return this.findByRegistrationStatus('pending', limit, offset);
+  }
+
+  static async getApprovedRegistrations(limit = 20, offset = 0) {
+    return this.findByRegistrationStatus('approved', limit, offset);
+  }
+
+  static async getRejectedRegistrations(limit = 20, offset = 0) {
+    return this.findByRegistrationStatus('rejected', limit, offset);
+  }
+
+  static async bulkUpdateRegistrationStatus(userIds, newStatus, adminId = null) {
+    try {
+      const placeholders = userIds.map((_, index) => `$${index + 1}`).join(',');
+      const query = `
+        UPDATE hakikisha.users 
+        SET registration_status = $${userIds.length + 1}, 
+            updated_at = NOW(),
+            ${adminId ? 'verified_by = $' + (userIds.length + 2) + ',' : ''}
+            is_verified = $${userIds.length + (adminId ? 3 : 2)}
+        WHERE id IN (${placeholders})
+        RETURNING *
+      `;
+
+      const params = [...userIds, newStatus];
+      if (adminId) {
+        params.push(adminId);
+      }
+      params.push(newStatus === 'approved'); // Set is_verified based on status
+
+      const result = await db.query(query, params);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error bulk updating registration status:', error);
+      throw error;
+    }
+  }
+
+  static async getRegistrationStats() {
+    try {
+      const query = `
+        SELECT 
+          registration_status,
+          COUNT(*) as count,
+          ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM hakikisha.users), 2) as percentage
+        FROM hakikisha.users 
+        GROUP BY registration_status
+        ORDER BY count DESC
+      `;
+
+      const result = await db.query(query);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error getting registration stats:', error);
+      return [];
+    }
+  }
+
+  static async findPendingFactCheckers(limit = 20, offset = 0) {
+    try {
+      const result = await db.query(
+        `SELECT u.id, u.email, u.username, u.created_at, u.phone,
+                fc.credentials, fc.areas_of_expertise
+         FROM hakikisha.users u
+         LEFT JOIN hakikisha.fact_checkers fc ON u.id = fc.user_id
+         WHERE u.registration_status = 'pending' 
+           AND u.role = 'fact_checker'
+         ORDER BY u.created_at DESC 
+         LIMIT $1 OFFSET $2`,
+        [limit, offset]
+      );
+      return result.rows;
+    } catch (error) {
+      logger.error('Error finding pending fact checkers:', error);
+      return [];
+    }
+  }
 }
 
 module.exports = User;

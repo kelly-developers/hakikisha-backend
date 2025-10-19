@@ -32,7 +32,7 @@ exports.getAllUsers = async (req, res, next) => {
   }
 };
 
-// CORRECTED: Register new fact checker (creates new user)
+// FIXED: Register new fact checker - automatically approve since admin is creating
 exports.registerFactChecker = async (req, res, next) => {
   try {
     const { email, username, password, credentials, areasOfExpertise } = req.body;
@@ -54,13 +54,14 @@ exports.registerFactChecker = async (req, res, next) => {
       });
     }
 
-    // Create new user
+    // Create new user with APPROVED status
     const newUser = await User.create({
       email: email,
       username: username,
       password_hash: await authService.hashPassword(password),
       role: 'fact_checker',
       is_verified: true, // Auto-verify since admin is creating
+      registration_status: 'approved', // FIX: Set to approved immediately
       status: 'active'
     });
 
@@ -69,7 +70,7 @@ exports.registerFactChecker = async (req, res, next) => {
       user_id: newUser.id,
       credentials: credentials || '',
       areas_of_expertise: areasOfExpertise || [],
-      verification_status: 'approved',
+      verification_status: 'approved', // FIX: Auto-approve verification
       is_active: true
     });
 
@@ -82,20 +83,23 @@ exports.registerFactChecker = async (req, res, next) => {
       changes_made: { 
         fact_checker_id: factChecker.id,
         email: email,
-        username: username
+        username: username,
+        auto_approved: true
       }
     });
 
-    logger.info(`New fact checker registered: ${email} by admin ${req.user.userId}`);
+    logger.info(`New fact checker registered and auto-approved: ${email} by admin ${req.user.userId}`);
 
     res.json({
       success: true,
-      message: 'Fact checker registered successfully',
+      message: 'Fact checker registered and approved successfully',
       user: {
         id: newUser.id,
         email: newUser.email,
         username: newUser.username,
-        role: newUser.role
+        role: newUser.role,
+        registration_status: newUser.registration_status,
+        is_verified: newUser.is_verified
       },
       fact_checker: factChecker
     });
@@ -109,7 +113,7 @@ exports.registerFactChecker = async (req, res, next) => {
   }
 };
 
-// CORRECTED: Register admin user
+// FIXED: Register admin user - automatically approve
 exports.registerAdmin = async (req, res, next) => {
   try {
     const { email, username, password } = req.body;
@@ -131,13 +135,14 @@ exports.registerAdmin = async (req, res, next) => {
       });
     }
 
-    // Create new admin user
+    // Create new admin user with APPROVED status
     const newUser = await User.create({
       email: email,
       username: username,
       password_hash: await authService.hashPassword(password),
       role: 'admin',
       is_verified: true,
+      registration_status: 'approved', // FIX: Set to approved immediately
       status: 'active'
     });
 
@@ -149,20 +154,23 @@ exports.registerAdmin = async (req, res, next) => {
       target_user_id: newUser.id,
       changes_made: { 
         email: email,
-        username: username
+        username: username,
+        auto_approved: true
       }
     });
 
-    logger.info(`New admin registered: ${email} by admin ${req.user.userId}`);
+    logger.info(`New admin registered and auto-approved: ${email} by admin ${req.user.userId}`);
 
     res.json({
       success: true,
-      message: 'Admin registered successfully',
+      message: 'Admin registered and approved successfully',
       user: {
         id: newUser.id,
         email: newUser.email,
         username: newUser.username,
-        role: newUser.role
+        role: newUser.role,
+        registration_status: newUser.registration_status,
+        is_verified: newUser.is_verified
       }
     });
 
@@ -171,6 +179,80 @@ exports.registerAdmin = async (req, res, next) => {
     res.status(500).json({ 
       success: false,
       error: 'Failed to register admin: ' + error.message 
+    });
+  }
+};
+
+// NEW: Bulk approve existing pending fact checkers
+exports.approvePendingFactCheckers = async (req, res, next) => {
+  try {
+    const { userIds } = req.body;
+
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'User IDs array is required'
+      });
+    }
+
+    const results = [];
+    
+    for (const userId of userIds) {
+      try {
+        // Update user registration status to approved
+        await User.update(userId, {
+          registration_status: 'approved',
+          is_verified: true,
+          status: 'active'
+        });
+
+        // Update fact checker verification status
+        await FactChecker.updateByUserId(userId, {
+          verification_status: 'approved',
+          is_active: true
+        });
+
+        // Log admin activity
+        await AdminActivity.create({
+          admin_id: req.user.userId,
+          activity_type: 'bulk_fact_checker_approval',
+          description: `Approved pending fact checker: ${userId}`,
+          target_user_id: userId,
+          changes_made: { 
+            registration_status: 'approved',
+            verification_status: 'approved'
+          }
+        });
+
+        results.push({
+          user_id: userId,
+          status: 'approved',
+          success: true
+        });
+
+        logger.info(`Approved pending fact checker: ${userId} by admin ${req.user.userId}`);
+
+      } catch (userError) {
+        results.push({
+          user_id: userId,
+          status: 'failed',
+          success: false,
+          error: userError.message
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Processed ${userIds.length} fact checkers`,
+      results: results
+    });
+
+  } catch (error) {
+    logger.error('Bulk approve fact checkers error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to approve fact checkers: ' + error.message
     });
   }
 };
@@ -200,11 +282,27 @@ exports.userAction = async (req, res, next) => {
         updateData = { status: 'inactive' };
         description = `Deactivated user ${userId}`;
         break;
+      case 'approve': // NEW: Manual approval action
+        updateData = { 
+          registration_status: 'approved',
+          is_verified: true,
+          status: 'active'
+        };
+        description = `Approved user registration ${userId}`;
+        break;
       default:
         return res.status(400).json({ error: 'Invalid action' });
     }
 
     await User.update(userId, updateData);
+
+    // If approving a fact checker, also update their fact checker profile
+    if (action === 'approve' && user.role === 'fact_checker') {
+      await FactChecker.updateByUserId(userId, {
+        verification_status: 'approved',
+        is_active: true
+      });
+    }
 
     // Log admin activity
     await AdminActivity.create({
@@ -239,12 +337,14 @@ exports.getDashboardStats = async (req, res, next) => {
       totalUsers,
       totalClaims,
       pendingClaims,
-      activeFactCheckers
+      activeFactCheckers,
+      pendingRegistrations // NEW: Get pending registrations count
     ] = await Promise.all([
       User.countAll(),
       Claim.countAll(timeframe),
       Claim.countByStatus('pending'),
-      FactChecker.countActive()
+      FactChecker.countActive(),
+      User.countByRegistrationStatus('pending') // NEW
     ]);
 
     res.json({
@@ -252,7 +352,8 @@ exports.getDashboardStats = async (req, res, next) => {
         total_users: totalUsers,
         total_claims: totalClaims,
         pending_claims: pendingClaims,
-        active_fact_checkers: activeFactCheckers
+        active_fact_checkers: activeFactCheckers,
+        pending_registrations: pendingRegistrations // NEW
       },
       timeframe
     });
@@ -326,8 +427,12 @@ exports.approveRegistration = async (req, res, next) => {
     // Approve the request
     await RegistrationRequest.approve(requestId, req.user.userId, notes);
 
-    // Update user verification status
-    await User.update(request.user_id, { is_verified: true });
+    // Update user verification status and registration status
+    await User.update(request.user_id, { 
+      is_verified: true,
+      registration_status: 'approved', // FIX: Ensure registration_status is set to approved
+      status: 'active'
+    });
 
     // If it's a fact-checker registration, create fact-checker profile
     if (request.request_type === 'fact_checker') {
