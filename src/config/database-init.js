@@ -299,7 +299,7 @@ class DatabaseInitializer {
           category VARCHAR(100),
           media_type VARCHAR(50) DEFAULT 'text',
           media_url TEXT,
-          status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected')),
+          status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved')),
           priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
           submission_count INTEGER DEFAULT 1,
           is_trending BOOLEAN DEFAULT FALSE,
@@ -372,7 +372,7 @@ class DatabaseInitializer {
         CREATE TABLE IF NOT EXISTS hakikisha.ai_verdicts (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           claim_id UUID NOT NULL REFERENCES hakikisha.claims(id) ON DELETE CASCADE,
-          verdict VARCHAR(50) CHECK (verdict IN ('true', 'false', 'misleading', 'unverifiable')),
+          verdict VARCHAR(50) CHECK (verdict IN ('verified', 'false', 'misleading', 'needs_context', 'unverifiable')),
           confidence_score DECIMAL(3,2) CHECK (confidence_score >= 0 AND confidence_score <= 1),
           explanation TEXT,
           evidence_sources JSONB,
@@ -396,10 +396,11 @@ class DatabaseInitializer {
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           claim_id UUID NOT NULL REFERENCES hakikisha.claims(id) ON DELETE CASCADE,
           fact_checker_id UUID REFERENCES hakikisha.users(id),
-          verdict VARCHAR(50) NOT NULL CHECK (verdict IN ('true', 'false', 'misleading', 'unverifiable')),
+          verdict VARCHAR(50) NOT NULL CHECK (verdict IN ('verified', 'false', 'misleading', 'needs_context', 'unverifiable')),
           explanation TEXT NOT NULL,
           evidence_sources JSONB,
           ai_verdict_id UUID REFERENCES hakikisha.ai_verdicts(id),
+          is_final BOOLEAN DEFAULT TRUE,
           approval_status VARCHAR(50) DEFAULT 'approved' CHECK (approval_status IN ('pending', 'approved', 'rejected')),
           review_notes TEXT,
           time_spent INTEGER DEFAULT 0,
@@ -415,6 +416,29 @@ class DatabaseInitializer {
     }
   }
 
+  static async ensureVerdictsColumns() {
+    try {
+      console.log('🔍 Checking for missing columns in verdicts table...');
+      
+      const requiredColumns = [
+        { name: 'is_final', type: 'BOOLEAN', defaultValue: 'TRUE', isUnique: false },
+        { name: 'approval_status', type: 'VARCHAR(50)', defaultValue: "'approved'", isUnique: false },
+        { name: 'review_notes', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
+        { name: 'time_spent', type: 'INTEGER', defaultValue: '0', isUnique: false },
+        { name: 'ai_verdict_id', type: 'UUID', defaultValue: 'NULL', isUnique: false }
+      ];
+
+      for (const column of requiredColumns) {
+        await this.ensureColumnExists('verdicts', column);
+      }
+      
+      console.log('✅ All required columns verified in verdicts table');
+    } catch (error) {
+      console.error('❌ Error ensuring verdicts columns:', error);
+      throw error;
+    }
+  }
+
   static async createIndexes() {
     const essentialIndexes = [
       'CREATE INDEX IF NOT EXISTS idx_claims_user_id ON hakikisha.claims(user_id)',
@@ -425,6 +449,8 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_claims_created_at ON hakikisha.claims(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_claim_id ON hakikisha.ai_verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_id ON hakikisha.verdicts(claim_id)',
+      'CREATE INDEX IF NOT EXISTS idx_verdicts_fact_checker_id ON hakikisha.verdicts(fact_checker_id)',
+      'CREATE INDEX IF NOT EXISTS idx_verdicts_is_final ON hakikisha.verdicts(is_final)',
       'CREATE INDEX IF NOT EXISTS idx_users_email ON hakikisha.users(email)',
       'CREATE INDEX IF NOT EXISTS idx_users_username ON hakikisha.users(username)',
       'CREATE INDEX IF NOT EXISTS idx_users_role ON hakikisha.users(role)',
@@ -550,19 +576,19 @@ class DatabaseInitializer {
               title: 'Community Development Initiative Launched',
               description: 'A new community development program has been launched to improve local infrastructure and services.',
               category: 'Governance',
-              status: 'resolved',
-              is_trending: true,
-              trending_score: 85.5,
-              submission_count: 15
+              status: 'pending',
+              is_trending: false,
+              trending_score: 0,
+              submission_count: 1
             },
             {
               title: 'Civic Engagement Program Success',
               description: 'Recent civic engagement initiatives have shown significant increase in community participation.',
               category: 'Civic Processes', 
-              status: 'resolved',
-              is_trending: true,
-              trending_score: 72.3,
-              submission_count: 12
+              status: 'pending',
+              is_trending: false,
+              trending_score: 0,
+              submission_count: 1
             }
           ];
           
@@ -608,6 +634,22 @@ class DatabaseInitializer {
         }
       }
 
+      // Verify verdicts table has required columns
+      const verdictsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'verdicts'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`📋 Verdicts table columns: ${verdictsColumns.rows.length}`);
+      const hasIsFinal = verdictsColumns.rows.some(col => col.column_name === 'is_final');
+      console.log(`   - has is_final column: ${hasIsFinal}`);
+      
+      verdictsColumns.rows.forEach(col => {
+        console.log(`   - ${col.column_name} (${col.data_type})`);
+      });
+
       // Verify admin user and check all columns
       const adminCheck = await db.query(
         `SELECT email, username, role, status, registration_status, is_verified, 
@@ -628,32 +670,6 @@ class DatabaseInitializer {
       } else {
         console.log('❌ Admin user not found');
       }
-
-      // Verify fact_checkers table structure
-      const factCheckersColumns = await db.query(`
-        SELECT column_name, data_type, is_nullable, column_default
-        FROM information_schema.columns 
-        WHERE table_schema = 'hakikisha' AND table_name = 'fact_checkers'
-        ORDER BY ordinal_position
-      `);
-      
-      console.log(`📋 Fact checkers table columns: ${factCheckersColumns.rows.length}`);
-      factCheckersColumns.rows.forEach(col => {
-        console.log(`   - ${col.column_name} (${col.data_type})`);
-      });
-
-      // Verify admin_activities table structure
-      const adminActivitiesColumns = await db.query(`
-        SELECT column_name, data_type, is_nullable, column_default
-        FROM information_schema.columns 
-        WHERE table_schema = 'hakikisha' AND table_name = 'admin_activities'
-        ORDER BY ordinal_position
-      `);
-      
-      console.log(`📋 Admin activities table columns: ${adminActivitiesColumns.rows.length}`);
-      adminActivitiesColumns.rows.forEach(col => {
-        console.log(`   - ${col.column_name} (${col.data_type})`);
-      });
 
       // Verify all required columns exist and have data
       const columnCheck = await db.query(`
@@ -679,6 +695,7 @@ class DatabaseInitializer {
         tableCount: tables.rows.length,
         adminExists: adminCheck.rows.length > 0,
         adminHasPassword: adminCheck.rows.length > 0 ? adminCheck.rows[0].has_password : false,
+        verdictsHasIsFinal: hasIsFinal,
         allColumnsPresent: stats.users_with_username === stats.total_users && 
                           stats.users_with_status === stats.total_users
       };
@@ -748,6 +765,9 @@ class DatabaseInitializer {
       // Ensure all required columns exist
       await this.ensureRequiredColumns();
       
+      // Ensure verdicts columns exist (including is_final)
+      await this.ensureVerdictsColumns();
+      
       // Ensure fact_checkers columns exist
       await this.ensureFactCheckersColumns();
       
@@ -768,6 +788,7 @@ class DatabaseInitializer {
     try {
       console.log('🔍 Ensuring all required columns exist...');
       await this.ensureUserColumns();
+      await this.ensureVerdictsColumns();
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
       throw error;
