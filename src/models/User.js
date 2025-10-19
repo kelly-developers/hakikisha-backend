@@ -14,6 +14,28 @@ class User {
     }
   }
 
+  static async findByUsername(username) {
+    const query = 'SELECT * FROM hakikisha.users WHERE username = $1';
+    try {
+      const result = await db.query(query, [username]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Error finding user by username:', error);
+      throw error;
+    }
+  }
+
+  static async findByEmailOrUsername(identifier) {
+    const query = 'SELECT * FROM hakikisha.users WHERE email = $1 OR username = $1';
+    try {
+      const result = await db.query(query, [identifier]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Error finding user by email or username:', error);
+      throw error;
+    }
+  }
+
   static async findById(id) {
     const query = 'SELECT * FROM hakikisha.users WHERE id = $1';
     try {
@@ -33,23 +55,39 @@ class User {
       phone = null,
       role = 'user',
       is_verified = false,
-      status = 'active'
+      status = 'active',
+      registration_status = 'pending'
     } = userData;
+
+    // Validate required fields
+    if (!email || !username || !password_hash) {
+      throw new Error('Email, username, and password are required');
+    }
 
     const id = uuidv4();
     const query = `
-      INSERT INTO hakikisha.users (id, email, username, password_hash, phone, role, is_verified, status, created_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+      INSERT INTO hakikisha.users (id, email, username, password_hash, phone, role, is_verified, status, registration_status, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
       RETURNING *
     `;
 
     try {
       const result = await db.query(query, [
-        id, email, username, password_hash, phone, role, is_verified, status
+        id, email, username, password_hash, phone, role, is_verified, status, registration_status
       ]);
       return result.rows[0];
     } catch (error) {
       logger.error('Error creating user:', error);
+      
+      // Handle unique constraint violations
+      if (error.code === '23505') {
+        if (error.constraint.includes('email')) {
+          throw new Error('Email already exists');
+        } else if (error.constraint.includes('username')) {
+          throw new Error('Username already exists');
+        }
+      }
+      
       throw error;
     }
   }
@@ -84,8 +122,27 @@ class User {
     }
   }
 
+  static async updateLoginStats(userId, ipAddress = null) {
+    const query = `
+      UPDATE hakikisha.users 
+      SET last_login = NOW(), 
+          login_count = login_count + 1,
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `;
+
+    try {
+      const result = await db.query(query, [userId]);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error updating user login stats:', error);
+      throw error;
+    }
+  }
+
   static async findAll(options = {}) {
-    const { role, limit = 20, offset = 0 } = options;
+    const { role, status, registration_status, limit = 20, offset = 0 } = options;
     
     let query = 'SELECT * FROM hakikisha.users WHERE 1=1';
     const params = [];
@@ -94,6 +151,18 @@ class User {
     if (role) {
       query += ` AND role = $${paramCount}`;
       params.push(role);
+      paramCount++;
+    }
+
+    if (status) {
+      query += ` AND status = $${paramCount}`;
+      params.push(status);
+      paramCount++;
+    }
+
+    if (registration_status) {
+      query += ` AND registration_status = $${paramCount}`;
+      params.push(registration_status);
       paramCount++;
     }
 
@@ -110,7 +179,7 @@ class User {
   }
 
   static async countAll(options = {}) {
-    const { role } = options;
+    const { role, status, registration_status } = options;
     
     let query = 'SELECT COUNT(*) FROM hakikisha.users WHERE 1=1';
     const params = [];
@@ -119,6 +188,18 @@ class User {
     if (role) {
       query += ` AND role = $${paramCount}`;
       params.push(role);
+      paramCount++;
+    }
+
+    if (status) {
+      query += ` AND status = $${paramCount}`;
+      params.push(status);
+      paramCount++;
+    }
+
+    if (registration_status) {
+      query += ` AND registration_status = $${paramCount}`;
+      params.push(registration_status);
     }
 
     try {
@@ -159,6 +240,35 @@ class User {
       return parseInt(result.rows[0].count);
     } catch (error) {
       logger.error('Error counting active users:', error);
+      throw error;
+    }
+  }
+
+  static async searchUsers(searchTerm, limit = 20, offset = 0) {
+    const query = `
+      SELECT * FROM hakikisha.users 
+      WHERE email ILIKE $1 OR username ILIKE $1 OR phone ILIKE $1
+      ORDER BY created_at DESC 
+      LIMIT $2 OFFSET $3
+    `;
+
+    try {
+      const result = await db.query(query, [`%${searchTerm}%`, limit, offset]);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error searching users:', error);
+      throw error;
+    }
+  }
+
+  static async delete(userId) {
+    const query = 'DELETE FROM hakikisha.users WHERE id = $1 RETURNING *';
+    
+    try {
+      const result = await db.query(query, [userId]);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error deleting user:', error);
       throw error;
     }
   }

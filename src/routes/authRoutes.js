@@ -8,18 +8,36 @@ const emailService = require('../services/emailService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-fallback-secret-key-change-in-production';
 
-// Simple register endpoint
+// Simple register endpoint with username support
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, phone, role = 'user' } = req.body;
+    const { email, username, password, phone, role = 'user' } = req.body;
 
-    console.log('Registration attempt:', { email, role });
+    console.log('Registration attempt:', { email, username, role });
 
     // Validate input
-    if (!email || !password) {
+    if (!email || !username || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Email and password are required'
+        error: 'Email, username, and password are required'
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please provide a valid email address'
+      });
+    }
+
+    // Validate username format
+    const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+    if (!usernameRegex.test(username)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Username must be 3-20 characters and can only contain letters, numbers, underscores, and hyphens'
       });
     }
 
@@ -30,16 +48,29 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    // Check if user already exists
-    const existingUser = await db.query(
+    // Check if user already exists with email
+    const existingUserByEmail = await db.query(
       'SELECT id FROM hakikisha.users WHERE email = $1',
       [email]
     );
 
-    if (existingUser.rows.length > 0) {
-      return res.status(400).json({
+    if (existingUserByEmail.rows.length > 0) {
+      return res.status(409).json({
         success: false,
         error: 'User with this email already exists'
+      });
+    }
+
+    // Check if username is already taken
+    const existingUserByUsername = await db.query(
+      'SELECT id FROM hakikisha.users WHERE username = $1',
+      [username]
+    );
+
+    if (existingUserByUsername.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        error: 'Username already taken'
       });
     }
 
@@ -54,10 +85,10 @@ router.post('/register', async (req, res) => {
     // Insert user
     const result = await db.query(
       `INSERT INTO hakikisha.users 
-       (email, password_hash, phone, role, registration_status, is_verified) 
-       VALUES ($1, $2, $3, $4, $5, $6) 
-       RETURNING id, email, role, registration_status, is_verified`,
-      [email, passwordHash, phone, role, registrationStatus, isVerified]
+       (email, username, password_hash, phone, role, registration_status, is_verified) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) 
+       RETURNING id, email, username, role, registration_status, is_verified`,
+      [email, username, passwordHash, phone, role, registrationStatus, isVerified]
     );
 
     const user = result.rows[0];
@@ -72,7 +103,8 @@ router.post('/register', async (req, res) => {
     const token = jwt.sign(
       { 
         userId: user.id, 
-        email: user.email, 
+        email: user.email,
+        username: user.username,
         role: user.role 
       },
       JWT_SECRET,
@@ -87,6 +119,7 @@ router.post('/register', async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         role: user.role,
         registration_status: user.registration_status,
         is_verified: user.is_verified
@@ -96,6 +129,22 @@ router.post('/register', async (req, res) => {
 
   } catch (error) {
     console.error('Registration error:', error);
+    
+    // Handle unique constraint violations
+    if (error.code === '23505') {
+      if (error.constraint.includes('email')) {
+        return res.status(409).json({
+          success: false,
+          error: 'Email already registered'
+        });
+      } else if (error.constraint.includes('username')) {
+        return res.status(409).json({
+          success: false,
+          error: 'Username already taken'
+        });
+      }
+    }
+    
     res.status(500).json({
       success: false,
       error: 'Internal server error during registration'
@@ -103,36 +152,44 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Enhanced login with 2FA for admins
+// Enhanced login with username/email support and 2FA for admins
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { identifier, password } = req.body; // identifier can be email or username
 
-    console.log('Login attempt:', { email });
+    console.log('Login attempt:', { identifier });
 
     // Validate input
-    if (!email || !password) {
+    if (!identifier || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Email and password are required'
+        error: 'Email/username and password are required'
       });
     }
 
-    // Find user by email
+    // Find user by email or username
     const userResult = await db.query(
-      `SELECT id, email, password_hash, role, registration_status, is_verified, two_factor_enabled
-       FROM hakikisha.users WHERE email = $1`,
-      [email]
+      `SELECT id, email, username, password_hash, role, registration_status, is_verified, two_factor_enabled, status
+       FROM hakikisha.users WHERE email = $1 OR username = $1`,
+      [identifier]
     );
 
     if (userResult.rows.length === 0) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid email or password'
+        error: 'Invalid email/username or password'
       });
     }
 
     const user = userResult.rows[0];
+
+    // Check if user is active
+    if (user.status !== 'active') {
+      return res.status(401).json({
+        success: false,
+        error: 'Your account has been suspended. Please contact support.'
+      });
+    }
 
     // Check registration status
     if (user.registration_status === 'pending') {
@@ -154,7 +211,7 @@ router.post('/login', async (req, res) => {
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid email or password'
+        error: 'Invalid email/username or password'
       });
     }
 
@@ -163,13 +220,14 @@ router.post('/login', async (req, res) => {
 
     if (requires2FA) {
       // Generate and send OTP for 2FA
-      await twoFactorService.generateAndSendOTP(user.id, user.email, user.email.split('@')[0]);
+      await twoFactorService.generateAndSendOTP(user.id, user.email, user.username || user.email.split('@')[0]);
 
       // Return temporary token for 2FA verification
       const tempToken = jwt.sign(
         { 
           userId: user.id, 
           email: user.email,
+          username: user.username,
           temp: true // Mark as temporary token
         },
         JWT_SECRET,
@@ -194,7 +252,8 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign(
       { 
         userId: user.id, 
-        email: user.email, 
+        email: user.email,
+        username: user.username,
         role: user.role 
       },
       JWT_SECRET,
@@ -208,6 +267,7 @@ router.post('/login', async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         role: user.role,
         is_verified: user.is_verified,
         registration_status: user.registration_status,
@@ -221,6 +281,175 @@ router.post('/login', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Internal server error during login'
+    });
+  }
+});
+
+// Check availability endpoint
+router.get('/check-availability', async (req, res) => {
+  try {
+    const { email, username } = req.query;
+
+    if (!email && !username) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please provide either email or username to check'
+      });
+    }
+
+    const result = {
+      available: true,
+      message: 'Available'
+    };
+
+    if (email) {
+      const existingUser = await db.query(
+        'SELECT id FROM hakikisha.users WHERE email = $1',
+        [email]
+      );
+      if (existingUser.rows.length > 0) {
+        result.available = false;
+        result.message = 'Email already registered';
+      }
+    }
+
+    if (username && result.available) {
+      const existingUser = await db.query(
+        'SELECT id FROM hakikisha.users WHERE username = $1',
+        [username]
+      );
+      if (existingUser.rows.length > 0) {
+        result.available = false;
+        result.message = 'Username already taken';
+      }
+    }
+
+    res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (error) {
+    console.error('Check availability error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Update profile endpoint
+router.put('/profile', async (req, res) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: 'No token provided'
+      });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const { username, phone, profile_picture } = req.body;
+
+    // Check if username is being updated and if it's available
+    if (username) {
+      const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+      if (!usernameRegex.test(username)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username must be 3-20 characters and can only contain letters, numbers, underscores, and hyphens'
+        });
+      }
+
+      const existingUser = await db.query(
+        'SELECT id FROM hakikisha.users WHERE username = $1 AND id != $2',
+        [username, decoded.userId]
+      );
+      if (existingUser.rows.length > 0) {
+        return res.status(409).json({
+          success: false,
+          error: 'Username already taken'
+        });
+      }
+    }
+
+    const updateFields = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (username) {
+      updateFields.push(`username = $${paramCount}`);
+      values.push(username);
+      paramCount++;
+    }
+
+    if (phone !== undefined) {
+      updateFields.push(`phone = $${paramCount}`);
+      values.push(phone);
+      paramCount++;
+    }
+
+    if (profile_picture !== undefined) {
+      updateFields.push(`profile_picture = $${paramCount}`);
+      values.push(profile_picture);
+      paramCount++;
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No fields to update'
+      });
+    }
+
+    updateFields.push('updated_at = NOW()');
+    values.push(decoded.userId);
+
+    const query = `
+      UPDATE hakikisha.users 
+      SET ${updateFields.join(', ')}
+      WHERE id = $${paramCount}
+      RETURNING id, email, username, phone, profile_picture, role, is_verified, registration_status, status, created_at, updated_at
+    `;
+
+    const result = await db.query(query, values);
+    const updatedUser = result.rows[0];
+
+    // Generate new token if username changed
+    let newToken = token;
+    if (username) {
+      newToken = jwt.sign(
+        { 
+          userId: updatedUser.id, 
+          email: updatedUser.email,
+          username: updatedUser.username,
+          role: updatedUser.role 
+        },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: updatedUser,
+      token: newToken
+    });
+
+  } catch (error) {
+    console.error('Update profile error:', error);
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid token'
+      });
+    }
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update profile'
     });
   }
 });
@@ -271,7 +500,7 @@ router.post('/verify-2fa', async (req, res) => {
 
     // Get user details
     const userResult = await db.query(
-      `SELECT id, email, role, is_verified, registration_status, two_factor_enabled
+      `SELECT id, email, username, role, is_verified, registration_status, two_factor_enabled
        FROM hakikisha.users WHERE id = $1`,
       [targetUserId]
     );
@@ -301,7 +530,8 @@ router.post('/verify-2fa', async (req, res) => {
     const finalToken = jwt.sign(
       { 
         userId: user.id, 
-        email: user.email, 
+        email: user.email,
+        username: user.username,
         role: user.role 
       },
       JWT_SECRET,
@@ -314,6 +544,7 @@ router.post('/verify-2fa', async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         role: user.role,
         is_verified: user.is_verified,
         registration_status: user.registration_status,
@@ -365,9 +596,9 @@ router.post('/resend-2fa', async (req, res) => {
       }
     }
 
-    // Get user email
+    // Get user email and username
     const userResult = await db.query(
-      'SELECT email FROM hakikisha.users WHERE id = $1',
+      'SELECT email, username FROM hakikisha.users WHERE id = $1',
       [targetUserId]
     );
 
@@ -378,10 +609,10 @@ router.post('/resend-2fa', async (req, res) => {
       });
     }
 
-    const userEmail = userResult.rows[0].email;
+    const user = userResult.rows[0];
 
     // Resend OTP
-    const result = await twoFactorService.resendOTP(targetUserId, userEmail, userEmail.split('@')[0]);
+    const result = await twoFactorService.resendOTP(targetUserId, user.email, user.username || user.email.split('@')[0]);
 
     res.json({
       success: true,
@@ -402,12 +633,21 @@ router.post('/resend-2fa', async (req, res) => {
 router.post('/enable-2fa', async (req, res) => {
   try {
     const { userId } = req.body;
-    const currentUser = req.user; // From auth middleware
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: 'No token provided'
+      });
+    }
 
+    const decoded = jwt.verify(token, JWT_SECRET);
+    
     // Users can only enable their own 2FA, or admins can enable for others
-    const targetUserId = userId || currentUser.userId;
+    const targetUserId = userId || decoded.userId;
 
-    if (targetUserId !== currentUser.userId && currentUser.role !== 'admin') {
+    if (targetUserId !== decoded.userId && decoded.role !== 'admin') {
       return res.status(403).json({
         success: false,
         error: 'Insufficient permissions'
@@ -434,12 +674,21 @@ router.post('/enable-2fa', async (req, res) => {
 router.post('/disable-2fa', async (req, res) => {
   try {
     const { userId } = req.body;
-    const currentUser = req.user; // From auth middleware
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: 'No token provided'
+      });
+    }
 
+    const decoded = jwt.verify(token, JWT_SECRET);
+    
     // Users can only disable their own 2FA, or admins can disable for others
-    const targetUserId = userId || currentUser.userId;
+    const targetUserId = userId || decoded.userId;
 
-    if (targetUserId !== currentUser.userId && currentUser.role !== 'admin') {
+    if (targetUserId !== decoded.userId && decoded.role !== 'admin') {
       return res.status(403).json({
         success: false,
         error: 'Insufficient permissions'
@@ -466,12 +715,21 @@ router.post('/disable-2fa', async (req, res) => {
 router.get('/2fa-status', async (req, res) => {
   try {
     const { userId } = req.query;
-    const currentUser = req.user; // From auth middleware
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: 'No token provided'
+      });
+    }
 
+    const decoded = jwt.verify(token, JWT_SECRET);
+    
     // Users can only check their own 2FA status, or admins can check for others
-    const targetUserId = userId || currentUser.userId;
+    const targetUserId = userId || decoded.userId;
 
-    if (targetUserId !== currentUser.userId && currentUser.role !== 'admin') {
+    if (targetUserId !== decoded.userId && decoded.role !== 'admin') {
       return res.status(403).json({
         success: false,
         error: 'Insufficient permissions'
@@ -510,7 +768,7 @@ router.post('/forgot-password', async (req, res) => {
 
     // Check if user exists
     const userResult = await db.query(
-      'SELECT id, email FROM hakikisha.users WHERE email = $1',
+      'SELECT id, email, username FROM hakikisha.users WHERE email = $1',
       [email]
     );
 
@@ -541,7 +799,7 @@ router.post('/forgot-password', async (req, res) => {
     );
 
     // Send reset email
-    await emailService.sendPasswordResetEmail(user.email, resetToken, user.email.split('@')[0]);
+    await emailService.sendPasswordResetEmail(user.email, resetToken, user.username || user.email.split('@')[0]);
 
     console.log(`Password reset token sent to: ${user.email}`);
 
@@ -655,7 +913,7 @@ router.post('/verify-token', async (req, res) => {
     
     // Verify user still exists
     const userResult = await db.query(
-      'SELECT id, email, role, is_verified, registration_status, two_factor_enabled FROM hakikisha.users WHERE id = $1',
+      'SELECT id, email, username, role, is_verified, registration_status, two_factor_enabled FROM hakikisha.users WHERE id = $1',
       [decoded.userId]
     );
 
@@ -673,6 +931,7 @@ router.post('/verify-token', async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         role: user.role,
         is_verified: user.is_verified,
         registration_status: user.registration_status,
@@ -704,7 +963,7 @@ router.get('/profile', async (req, res) => {
     const decoded = jwt.verify(token, JWT_SECRET);
     
     const userResult = await db.query(
-      'SELECT id, email, role, phone, is_verified, registration_status, two_factor_enabled, created_at FROM hakikisha.users WHERE id = $1',
+      'SELECT id, email, username, role, phone, is_verified, registration_status, two_factor_enabled, created_at FROM hakikisha.users WHERE id = $1',
       [decoded.userId]
     );
 

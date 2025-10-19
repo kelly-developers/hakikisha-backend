@@ -98,12 +98,12 @@ class DatabaseInitializer {
     }
   }
 
-  static async ensureRequiredColumns() {
+  static async ensureUserColumns() {
     try {
       console.log('🔍 Checking for missing columns in users table...');
       
       const requiredColumns = [
-        { name: 'username', type: 'VARCHAR(255)', defaultValue: "'user_' || substr(md5(random()::text), 1, 8)", isUnique: true },
+        { name: 'username', type: 'VARCHAR(255)', defaultValue: "NULL", isUnique: true },
         { name: 'status', type: 'VARCHAR(50)', defaultValue: "'active'", isUnique: false },
         { name: 'registration_status', type: 'VARCHAR(50)', defaultValue: "'pending'", isUnique: false },
         { name: 'is_verified', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
@@ -122,7 +122,7 @@ class DatabaseInitializer {
       
       console.log('✅ All required columns verified in users table');
     } catch (error) {
-      console.error('❌ Error ensuring required columns:', error);
+      console.error('❌ Error ensuring user columns:', error);
       throw error;
     }
   }
