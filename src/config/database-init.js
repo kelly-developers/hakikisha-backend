@@ -53,6 +53,7 @@ class DatabaseInitializer {
 
       // Create tables in correct order with dependencies
       await this.createUsersTable();
+      await this.createBlogTables(); // ADD THIS LINE
       await this.createAdminTables();
       await this.createClaimsTable();
       await this.createAIVerdictsTable();
@@ -65,6 +66,92 @@ class DatabaseInitializer {
     }
   }
 
+  // ADD THIS NEW METHOD FOR BLOG TABLES
+  static async createBlogTables() {
+    try {
+      console.log('📝 Creating blog tables...');
+
+      // Blog Categories Table
+      const blogCategoriesQuery = `
+        CREATE TABLE IF NOT EXISTS hakikisha.blog_categories (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          name VARCHAR(100) NOT NULL UNIQUE,
+          description TEXT,
+          color VARCHAR(7) DEFAULT '#0A864D',
+          is_active BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await db.query(blogCategoriesQuery);
+      console.log('✅ Blog categories table created/verified');
+
+      // Blog Articles Table
+      const blogArticlesQuery = `
+        CREATE TABLE IF NOT EXISTS hakikisha.blog_articles (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          title VARCHAR(500) NOT NULL,
+          content TEXT NOT NULL,
+          excerpt TEXT,
+          author_id UUID NOT NULL REFERENCES hakikisha.users(id),
+          author_type VARCHAR(50) DEFAULT 'human' CHECK (author_type IN ('human', 'ai')),
+          category VARCHAR(100) DEFAULT 'fact_check',
+          featured_image TEXT,
+          read_time INTEGER DEFAULT 5,
+          view_count INTEGER DEFAULT 0,
+          like_count INTEGER DEFAULT 0,
+          share_count INTEGER DEFAULT 0,
+          status VARCHAR(50) DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived', 'pending_review')),
+          source_claim_ids JSONB DEFAULT '[]',
+          trending_topic_id UUID,
+          meta_title VARCHAR(500),
+          meta_description TEXT,
+          slug VARCHAR(500) UNIQUE,
+          published_at TIMESTAMP,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await db.query(blogArticlesQuery);
+      console.log('✅ Blog articles table created/verified');
+
+      // Blog Comments Table
+      const blogCommentsQuery = `
+        CREATE TABLE IF NOT EXISTS hakikisha.blog_comments (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          blog_id UUID NOT NULL REFERENCES hakikisha.blog_articles(id) ON DELETE CASCADE,
+          user_id UUID NOT NULL REFERENCES hakikisha.users(id),
+          parent_comment_id UUID REFERENCES hakikisha.blog_comments(id),
+          content TEXT NOT NULL,
+          likes INTEGER DEFAULT 0,
+          status VARCHAR(50) DEFAULT 'approved' CHECK (status IN ('pending', 'approved', 'rejected', 'spam')),
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await db.query(blogCommentsQuery);
+      console.log('✅ Blog comments table created/verified');
+
+      // Blog Likes Table
+      const blogLikesQuery = `
+        CREATE TABLE IF NOT EXISTS hakikisha.blog_likes (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          blog_id UUID NOT NULL REFERENCES hakikisha.blog_articles(id) ON DELETE CASCADE,
+          user_id UUID NOT NULL REFERENCES hakikisha.users(id),
+          created_at TIMESTAMP DEFAULT NOW(),
+          UNIQUE(blog_id, user_id)
+        )
+      `;
+      await db.query(blogLikesQuery);
+      console.log('✅ Blog likes table created/verified');
+
+    } catch (error) {
+      console.error('❌ Error creating blog tables:', error);
+      throw error;
+    }
+  }
+
+  // Rest of your existing methods remain the same...
   static async createUsersTable() {
     try {
       const query = `
@@ -121,47 +208,6 @@ class DatabaseInitializer {
     } catch (error) {
       console.error('❌ Error ensuring user columns:', error);
       throw error;
-    }
-  }
-
-  static async ensureColumnExists(tableName, column) {
-    try {
-      const checkQuery = `
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_schema = 'hakikisha' 
-        AND table_name = $1 
-        AND column_name = $2
-      `;
-      const result = await db.query(checkQuery, [tableName, column.name]);
-      
-      if (result.rows.length === 0) {
-        console.log(`🔄 Adding missing column ${column.name} to ${tableName} table...`);
-        
-        let alterQuery = `ALTER TABLE hakikisha.${tableName} ADD COLUMN ${column.name} ${column.type}`;
-        
-        if (column.isUnique) {
-          alterQuery += ` UNIQUE`;
-        }
-        
-        if (column.defaultValue !== 'NULL') {
-          alterQuery += ` DEFAULT ${column.defaultValue}`;
-        }
-        
-        await db.query(alterQuery);
-        console.log(`✅ Column ${column.name} added to ${tableName} table`);
-        
-        // Update existing records if needed
-        if (column.defaultValue !== 'NULL' && !column.defaultValue.includes('random()')) {
-          const updateQuery = `UPDATE hakikisha.${tableName} SET ${column.name} = ${column.defaultValue} WHERE ${column.name} IS NULL`;
-          await db.query(updateQuery);
-          console.log(`✅ Existing records updated with default ${column.name}`);
-        }
-      } else {
-        console.log(`✅ Column ${column.name} already exists in ${tableName} table`);
-      }
-    } catch (error) {
-      console.error(`❌ Error ensuring column ${column.name}:`, error.message);
     }
   }
 
@@ -441,6 +487,7 @@ class DatabaseInitializer {
 
   static async createIndexes() {
     const essentialIndexes = [
+      // Existing indexes...
       'CREATE INDEX IF NOT EXISTS idx_claims_user_id ON hakikisha.claims(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_claims_status ON hakikisha.claims(status)',
       'CREATE INDEX IF NOT EXISTS idx_claims_category ON hakikisha.claims(category)',
@@ -461,7 +508,20 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_registration_requests_user_id ON hakikisha.registration_requests(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checkers_user_id ON hakikisha.fact_checkers(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checkers_status ON hakikisha.fact_checkers(verification_status)',
-      'CREATE INDEX IF NOT EXISTS idx_fact_checkers_active ON hakikisha.fact_checkers(is_active)'
+      'CREATE INDEX IF NOT EXISTS idx_fact_checkers_active ON hakikisha.fact_checkers(is_active)',
+      
+      // NEW BLOG INDEXES
+      'CREATE INDEX IF NOT EXISTS idx_blog_articles_author_id ON hakikisha.blog_articles(author_id)',
+      'CREATE INDEX IF NOT EXISTS idx_blog_articles_status ON hakikisha.blog_articles(status)',
+      'CREATE INDEX IF NOT EXISTS idx_blog_articles_category ON hakikisha.blog_articles(category)',
+      'CREATE INDEX IF NOT EXISTS idx_blog_articles_published_at ON hakikisha.blog_articles(published_at)',
+      'CREATE INDEX IF NOT EXISTS idx_blog_articles_created_at ON hakikisha.blog_articles(created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_blog_articles_view_count ON hakikisha.blog_articles(view_count)',
+      'CREATE INDEX IF NOT EXISTS idx_blog_articles_slug ON hakikisha.blog_articles(slug)',
+      'CREATE INDEX IF NOT EXISTS idx_blog_comments_blog_id ON hakikisha.blog_comments(blog_id)',
+      'CREATE INDEX IF NOT EXISTS idx_blog_comments_user_id ON hakikisha.blog_comments(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_blog_likes_blog_id ON hakikisha.blog_likes(blog_id)',
+      'CREATE INDEX IF NOT EXISTS idx_blog_likes_user_id ON hakikisha.blog_likes(user_id)'
     ];
 
     for (const indexQuery of essentialIndexes) {
@@ -604,9 +664,83 @@ class DatabaseInitializer {
           console.log('✅ Sample claims added');
         }
       }
+
+      // ADD SAMPLE BLOG DATA
+      await this.addSampleBlogs();
       
     } catch (error) {
       console.log('⚠️ Could not add sample data:', error.message);
+    }
+  }
+
+  // ADD THIS NEW METHOD FOR SAMPLE BLOGS
+  static async addSampleBlogs() {
+    try {
+      console.log('📝 Adding sample blogs...');
+      
+      const blogCount = await db.query('SELECT COUNT(*) FROM hakikisha.blog_articles');
+      if (parseInt(blogCount.rows[0].count) === 0) {
+        console.log('Adding sample blogs...');
+        
+        // Get admin and fact checker user IDs
+        const admin = await db.query('SELECT id FROM hakikisha.users WHERE email = $1', ['kellynyachiro@gmail.com']);
+        const factChecker = await db.query('SELECT id FROM hakikisha.users WHERE email = $1', ['nyachiro@gmail.com']);
+        
+        if (admin.rows.length > 0) {
+          const sampleBlogs = [
+            {
+              title: 'Welcome to Hakikisha Fact-Checking Platform',
+              content: 'This is a comprehensive guide to using our fact-checking platform. Learn how to submit claims, verify information, and contribute to a more informed community.',
+              excerpt: 'A comprehensive guide to using our fact-checking platform and contributing to a more informed community.',
+              category: 'platform_guide',
+              status: 'published',
+              read_time: 5,
+              featured_image: null
+            },
+            {
+              title: 'How to Identify Misinformation Online',
+              content: 'In this digital age, misinformation spreads rapidly. Learn the key techniques to identify false information and protect yourself from being misled.',
+              excerpt: 'Learn key techniques to identify false information and protect yourself from being misled in the digital age.',
+              category: 'education',
+              status: 'published',
+              read_time: 7,
+              featured_image: null
+            },
+            {
+              title: 'The Importance of Fact-Checking in Democracy',
+              content: 'Fact-checking plays a crucial role in maintaining healthy democratic processes. Discover how verified information strengthens civic engagement and informed decision-making.',
+              excerpt: 'Discover how verified information strengthens civic engagement and informed decision-making in democratic processes.',
+              category: 'civic_education',
+              status: 'published', 
+              read_time: 6,
+              featured_image: null
+            }
+          ];
+          
+          for (const blog of sampleBlogs) {
+            // Use admin as author for sample blogs
+            await db.query(
+              `INSERT INTO hakikisha.blog_articles 
+               (id, title, content, excerpt, author_id, category, status, read_time, featured_image, published_at, created_at)
+               VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())`,
+              [
+                blog.title, 
+                blog.content, 
+                blog.excerpt,
+                admin.rows[0].id,
+                blog.category,
+                blog.status,
+                blog.read_time,
+                blog.featured_image
+              ]
+            );
+          }
+          
+          console.log('✅ Sample blogs added');
+        }
+      }
+    } catch (error) {
+      console.log('⚠️ Could not add sample blogs:', error.message);
     }
   }
 
@@ -623,8 +757,20 @@ class DatabaseInitializer {
       
       console.log(`📊 Found ${tables.rows.length} tables in hakikisha schema`);
       
-      // Check each essential table
-      const essentialTables = ['users', 'claims', 'ai_verdicts', 'verdicts', 'admin_activities', 'registration_requests', 'fact_checkers'];
+      // Check each essential table (ADD BLOG TABLES)
+      const essentialTables = [
+        'users', 
+        'blog_articles', // ADD THIS
+        'blog_comments', // ADD THIS  
+        'blog_likes',    // ADD THIS
+        'claims', 
+        'ai_verdicts', 
+        'verdicts', 
+        'admin_activities', 
+        'registration_requests', 
+        'fact_checkers'
+      ];
+      
       for (const tableName of essentialTables) {
         try {
           const count = await db.query(`SELECT COUNT(*) FROM hakikisha.${tableName}`);
@@ -634,7 +780,21 @@ class DatabaseInitializer {
         }
       }
 
-      // Verify verdicts table has required columns
+      // Verify blog articles table has required columns
+      const blogColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'blog_articles'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`📋 Blog articles table columns: ${blogColumns.rows.length}`);
+      const hasRequiredColumns = blogColumns.rows.some(col => col.column_name === 'title') &&
+                               blogColumns.rows.some(col => col.column_name === 'content') &&
+                               blogColumns.rows.some(col => col.column_name === 'author_id');
+      console.log(`   - has required columns: ${hasRequiredColumns}`);
+
+      // Rest of your existing verification code...
       const verdictsColumns = await db.query(`
         SELECT column_name, data_type, is_nullable, column_default
         FROM information_schema.columns 
@@ -645,10 +805,6 @@ class DatabaseInitializer {
       console.log(`📋 Verdicts table columns: ${verdictsColumns.rows.length}`);
       const hasIsFinal = verdictsColumns.rows.some(col => col.column_name === 'is_final');
       console.log(`   - has is_final column: ${hasIsFinal}`);
-      
-      verdictsColumns.rows.forEach(col => {
-        console.log(`   - ${col.column_name} (${col.data_type})`);
-      });
 
       // Verify admin user and check all columns
       const adminCheck = await db.query(
@@ -696,6 +852,7 @@ class DatabaseInitializer {
         adminExists: adminCheck.rows.length > 0,
         adminHasPassword: adminCheck.rows.length > 0 ? adminCheck.rows[0].has_password : false,
         verdictsHasIsFinal: hasIsFinal,
+        blogTablesExist: hasRequiredColumns,
         allColumnsPresent: stats.users_with_username === stats.total_users && 
                           stats.users_with_status === stats.total_users
       };
@@ -710,6 +867,9 @@ class DatabaseInitializer {
       console.log('🔄 Resetting database...');
       
       const tables = [
+        'blog_likes',      // ADD THESE
+        'blog_comments',   // ADD THESE
+        'blog_articles',   // ADD THESE
         'verdicts',
         'ai_verdicts', 
         'claims',
@@ -765,6 +925,9 @@ class DatabaseInitializer {
       // Ensure all required columns exist
       await this.ensureRequiredColumns();
       
+      // Create blog tables if they don't exist
+      await this.createBlogTables();
+      
       // Ensure verdicts columns exist (including is_final)
       await this.ensureVerdictsColumns();
       
@@ -792,6 +955,47 @@ class DatabaseInitializer {
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
       throw error;
+    }
+  }
+
+  static async ensureColumnExists(tableName, column) {
+    try {
+      const checkQuery = `
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' 
+        AND table_name = $1 
+        AND column_name = $2
+      `;
+      const result = await db.query(checkQuery, [tableName, column.name]);
+      
+      if (result.rows.length === 0) {
+        console.log(`🔄 Adding missing column ${column.name} to ${tableName} table...`);
+        
+        let alterQuery = `ALTER TABLE hakikisha.${tableName} ADD COLUMN ${column.name} ${column.type}`;
+        
+        if (column.isUnique) {
+          alterQuery += ` UNIQUE`;
+        }
+        
+        if (column.defaultValue !== 'NULL') {
+          alterQuery += ` DEFAULT ${column.defaultValue}`;
+        }
+        
+        await db.query(alterQuery);
+        console.log(`✅ Column ${column.name} added to ${tableName} table`);
+        
+        // Update existing records if needed
+        if (column.defaultValue !== 'NULL' && !column.defaultValue.includes('random()')) {
+          const updateQuery = `UPDATE hakikisha.${tableName} SET ${column.name} = ${column.defaultValue} WHERE ${column.name} IS NULL`;
+          await db.query(updateQuery);
+          console.log(`✅ Existing records updated with default ${column.name}`);
+        }
+      } else {
+        console.log(`✅ Column ${column.name} already exists in ${tableName} table`);
+      }
+    } catch (error) {
+      console.error(`❌ Error ensuring column ${column.name}:`, error.message);
     }
   }
 

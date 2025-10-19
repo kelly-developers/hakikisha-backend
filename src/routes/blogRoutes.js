@@ -14,5 +14,6 @@ router.post('/', authMiddleware, requireRole(['fact_checker', 'admin']), blogCon
 router.put('/:id', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.updateBlog);
 router.delete('/:id', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.deleteBlog);
 router.post('/generate-ai', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.generateAIBlog);
+router.get('/user/my-blogs', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.getMyBlogs);
 
 module.exports = router;

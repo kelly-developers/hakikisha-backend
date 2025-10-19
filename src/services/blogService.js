@@ -7,25 +7,19 @@ class BlogService {
    */
   async getBlogs(options = {}) {
     try {
-      const { category, limit = 10, offset = 0 } = options;
+      const { category, limit = 10, offset = 0, author } = options;
+      
+      if (author === 'current') {
+        // This would require the user ID from the request
+        throw new Error('Author filtering requires authentication');
+      }
       
       if (category) {
         return await Blog.findByCategory(category, limit, offset);
       }
       
       // Default: get all published blogs
-      const query = `
-        SELECT ba.*, u.email as author_email, u.profile_picture as author_avatar
-        FROM hakikisha.blog_articles ba
-        LEFT JOIN hakikisha.users u ON ba.author_id = u.id
-        WHERE ba.status = 'published'
-        ORDER BY ba.created_at DESC
-        LIMIT $1 OFFSET $2
-      `;
-      
-      const db = require('../config/database');
-      const result = await db.query(query, [limit, offset]);
-      return result.rows;
+      return await Blog.getAll(limit, offset);
     } catch (error) {
       logger.error('BlogService - Get blogs error:', error);
       throw error;
@@ -73,37 +67,7 @@ class BlogService {
    */
   async updateBlog(id, updateData) {
     try {
-      const db = require('../config/database');
-      
-      // Build dynamic update query
-      const fields = [];
-      const values = [];
-      let paramCount = 1;
-
-      Object.keys(updateData).forEach(key => {
-        if (updateData[key] !== undefined) {
-          fields.push(`${key} = $${paramCount}`);
-          values.push(updateData[key]);
-          paramCount++;
-        }
-      });
-
-      if (fields.length === 0) {
-        throw new Error('No fields to update');
-      }
-
-      fields.push('updated_at = NOW()');
-      values.push(id);
-
-      const query = `
-        UPDATE hakikisha.blog_articles 
-        SET ${fields.join(', ')}
-        WHERE id = $${paramCount}
-        RETURNING *
-      `;
-
-      const result = await db.query(query, values);
-      return result.rows[0] || null;
+      return await Blog.update(id, updateData);
     } catch (error) {
       logger.error('BlogService - Update blog error:', error);
       throw error;
@@ -115,10 +79,7 @@ class BlogService {
    */
   async deleteBlog(id) {
     try {
-      const db = require('../config/database');
-      const query = 'DELETE FROM hakikisha.blog_articles WHERE id = $1 RETURNING *';
-      const result = await db.query(query, [id]);
-      return result.rows[0] || null;
+      return await Blog.delete(id);
     } catch (error) {
       logger.error('BlogService - Delete blog error:', error);
       throw error;
@@ -184,7 +145,7 @@ class BlogService {
         author_id: author_id,
         author_type: 'ai',
         category: 'fact_check',
-        source_claim_ids: claims,
+        source_claim_ids: claims || [],
         status: 'draft'
       };
 
@@ -234,23 +195,36 @@ class BlogService {
       const totalQuery = 'SELECT COUNT(*) as total FROM hakikisha.blog_articles WHERE status = $1';
       const publishedQuery = 'SELECT COUNT(*) as published FROM hakikisha.blog_articles WHERE status = $1';
       const viewsQuery = 'SELECT SUM(COALESCE(view_count, 0)) as total_views FROM hakikisha.blog_articles';
-      const trendingQuery = 'SELECT COUNT(*) as trending FROM hakikisha.blog_articles WHERE trending_topic_id IS NOT NULL';
+      const authorsQuery = 'SELECT COUNT(DISTINCT author_id) as total_authors FROM hakikisha.blog_articles';
 
-      const [totalResult, publishedResult, viewsResult, trendingResult] = await Promise.all([
+      const [totalResult, publishedResult, viewsResult, authorsResult] = await Promise.all([
         db.query(totalQuery, ['published']),
         db.query(publishedQuery, ['published']),
         db.query(viewsQuery),
-        db.query(trendingQuery)
+        db.query(authorsQuery)
       ]);
 
       return {
         total: parseInt(totalResult.rows[0].total),
         published: parseInt(publishedResult.rows[0].published),
         total_views: parseInt(viewsResult.rows[0].total_views) || 0,
-        trending: parseInt(trendingResult.rows[0].trending)
+        total_authors: parseInt(authorsResult.rows[0].total_authors)
       };
     } catch (error) {
       logger.error('BlogService - Get blog stats error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get blogs by author
+   */
+  async getBlogsByAuthor(authorId, options = {}) {
+    try {
+      const { limit = 10, offset = 0 } = options;
+      return await Blog.getByAuthor(authorId, limit, offset);
+    } catch (error) {
+      logger.error('BlogService - Get blogs by author error:', error);
       throw error;
     }
   }
