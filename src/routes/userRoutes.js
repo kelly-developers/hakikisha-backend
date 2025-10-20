@@ -28,13 +28,13 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// Get user profile (protected) - FIXED ENDPOINT
+// Get user profile (protected) - FIXED: Using username instead of full_name
 router.get('/profile', verifyToken, async (req, res) => {
   try {
     console.log('Get profile request for user:', req.user.userId);
     
     const userResult = await db.query(
-      `SELECT id, email, full_name, phone_number, role, is_verified, registration_status, 
+      `SELECT id, email, username, phone, role, is_verified, registration_status, 
               profile_picture, login_count, last_login, created_at, updated_at
        FROM hakikisha.users WHERE id = $1`,
       [req.user.userId]
@@ -55,11 +55,14 @@ router.get('/profile', verifyToken, async (req, res) => {
       data: {
         id: user.id,
         email: user.email,
-        full_name: user.full_name,
-        phone_number: user.phone_number,
+        username: user.username, // Changed from full_name to username
+        full_name: user.username, // Keep full_name for frontend compatibility
+        phone_number: user.phone, // Changed from phone to phone_number for frontend
+        phone: user.phone, // Keep phone for backward compatibility
         role: user.role,
         is_verified: user.is_verified,
         profile_picture: user.profile_picture,
+        registration_status: user.registration_status,
         created_at: user.created_at,
         updated_at: user.updated_at
       }
@@ -74,14 +77,20 @@ router.get('/profile', verifyToken, async (req, res) => {
   }
 });
 
-// Update user profile (protected)
+// Update user profile (protected) - FIXED: Using username instead of full_name
 router.put('/profile', verifyToken, async (req, res) => {
   try {
-    const { full_name, phone_number, profile_picture } = req.body;
+    const { full_name, username, phone_number, phone, profile_picture } = req.body;
     const updates = {};
     
-    if (full_name !== undefined) updates.full_name = full_name;
-    if (phone_number !== undefined) updates.phone_number = phone_number;
+    // Support both full_name and username for frontend compatibility
+    if (full_name !== undefined) updates.username = full_name;
+    if (username !== undefined) updates.username = username;
+    
+    // Support both phone_number and phone for frontend compatibility
+    if (phone_number !== undefined) updates.phone = phone_number;
+    if (phone !== undefined) updates.phone = phone;
+    
     if (profile_picture !== undefined) updates.profile_picture = profile_picture;
 
     if (Object.keys(updates).length === 0) {
@@ -99,7 +108,7 @@ router.put('/profile', verifyToken, async (req, res) => {
       `UPDATE hakikisha.users 
        SET ${setClause}, updated_at = NOW()
        WHERE id = $${values.length}
-       RETURNING id, email, full_name, phone_number, role, profile_picture, is_verified, registration_status, created_at, updated_at`,
+       RETURNING id, email, username, phone, role, profile_picture, is_verified, registration_status, created_at, updated_at`,
       values
     );
 
@@ -110,10 +119,24 @@ router.put('/profile', verifyToken, async (req, res) => {
       });
     }
 
+    const user = result.rows[0];
+
     res.json({
       success: true,
       message: 'Profile updated successfully',
-      data: result.rows[0]
+      data: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        full_name: user.username, // Map username to full_name for frontend
+        phone_number: user.phone, // Map phone to phone_number for frontend
+        role: user.role,
+        profile_picture: user.profile_picture,
+        is_verified: user.is_verified,
+        registration_status: user.registration_status,
+        created_at: user.created_at,
+        updated_at: user.updated_at
+      }
     });
 
   } catch (error) {
@@ -169,7 +192,7 @@ router.get('/', verifyToken, async (req, res) => {
     const offset = (page - 1) * limit;
 
     const usersResult = await db.query(
-      `SELECT id, email, full_name, phone_number, role, is_verified, registration_status, 
+      `SELECT id, email, username, phone, role, is_verified, registration_status, 
               login_count, last_login, created_at
        FROM hakikisha.users 
        ORDER BY created_at DESC
