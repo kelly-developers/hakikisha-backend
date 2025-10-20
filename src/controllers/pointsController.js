@@ -34,12 +34,6 @@ const getPointsHistory = async (req, res) => {
     const history = await PointsService.getPointsHistory(userId, parseInt(limit));
 
     res.json({
-      success: true,
-      data: history
-    });
-  } catch (error) {
-    logger.error('Get points history error:', error);
-    res.status(500).json({
       success: false,
       error: 'Failed to get points history'
     });

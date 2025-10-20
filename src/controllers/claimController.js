@@ -57,34 +57,48 @@ class ClaimController {
 
       console.log('Claim inserted successfully:', result.rows[0]);
 
+      // Check if this is user's first claim
+      const claimCountResult = await db.query(
+        'SELECT COUNT(*) FROM hakikisha.claims WHERE user_id = $1',
+        [req.user.userId]
+      );
+      
+      const isFirstClaim = parseInt(claimCountResult.rows[0].count) === 1;
+      console.log('Is first claim:', isFirstClaim);
+
+      // Award points for claim submission
       try {
-        const claimCount = await db.query(
-          'SELECT COUNT(*) FROM hakikisha.claims WHERE user_id = $1',
-          [req.user.userId]
-        );
-
-        const isFirstClaim = parseInt(claimCount.rows[0].count) === 1;
-        console.log('Is first claim:', isFirstClaim);
-
-        const pointsAwarded = await PointsService.awardPoints(
-          req.user.userId,
-          isFirstClaim ? POINTS.FIRST_CLAIM : POINTS.CLAIM_SUBMISSION,
-          'CLAIM_SUBMISSION',
-          isFirstClaim ? 'First claim submitted' : 'Claim submitted'
-        );
+        let pointsResult;
+        
+        if (isFirstClaim) {
+          // Award bonus points for first claim
+          pointsResult = await PointsService.awardPoints(
+            req.user.userId, 
+            POINTS.FIRST_CLAIM + POINTS.CLAIM_SUBMISSION, 
+            'FIRST_CLAIM_SUBMISSION', 
+            `First claim submitted: ${claimId}`
+          );
+        } else {
+          // Regular claim submission points
+          pointsResult = await PointsService.awardPointsForClaimSubmission(req.user.userId, claimId);
+        }
+        
+        console.log('Points awarded:', pointsResult);
 
         res.status(201).json({
           success: true,
           message: 'Claim submitted successfully',
           claim: result.rows[0],
-          pointsAwarded: pointsAwarded?.pointsAwarded
+          pointsAwarded: pointsResult?.pointsAwarded,
+          isFirstClaim: isFirstClaim
         });
       } catch (pointsError) {
         console.log('Points service error, continuing without points:', pointsError.message);
         res.status(201).json({
           success: true,
           message: 'Claim submitted successfully',
-          claim: result.rows[0]
+          claim: result.rows[0],
+          isFirstClaim: isFirstClaim
         });
       }
 
@@ -611,6 +625,41 @@ class ClaimController {
         error: 'Failed to get trending claims: ' + error.message,
         code: 'SERVER_ERROR'
       });
+    }
+  }
+
+  // New method to handle verdict points awarding
+  async awardPointsForVerdict(userId, claimId, verdictType) {
+    try {
+      if (verdictType === 'human_approved' || verdictType === 'ai_approved') {
+        const pointsResult = await PointsService.awardPointsForVerdictReceived(userId, claimId);
+        console.log(`Awarded ${pointsResult.pointsAwarded} points for verdict on claim ${claimId}`);
+        return pointsResult;
+      }
+    } catch (pointsError) {
+      console.error('Error awarding verdict points:', pointsError);
+      throw pointsError;
+    }
+  }
+
+  // Method to handle claim status updates and award points accordingly
+  async updateClaimStatus(claimId, newStatus, userId = null) {
+    try {
+      // Update claim status
+      await db.query(
+        'UPDATE hakikisha.claims SET status = $1, updated_at = NOW() WHERE id = $2',
+        [newStatus, claimId]
+      );
+
+      // If user ID is provided and status indicates completion, award points
+      if (userId && (newStatus === 'human_approved' || newStatus === 'ai_approved')) {
+        await this.awardPointsForVerdict(userId, claimId, newStatus);
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating claim status:', error);
+      throw error;
     }
   }
 }

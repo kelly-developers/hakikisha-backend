@@ -50,6 +50,7 @@ class DatabaseInitializer {
 
       // Create tables in correct order with dependencies
       await this.createUsersTable();
+      await this.createPointsTables(); // Add points tables
       await this.createBlogTables();
       await this.createAdminTables();
       await this.createClaimsTable();
@@ -59,6 +60,46 @@ class DatabaseInitializer {
       console.log(' Essential tables created/verified successfully!');
     } catch (error) {
       console.error(' Error creating essential tables:', error);
+      throw error;
+    }
+  }
+
+  static async createPointsTables() {
+    try {
+      console.log(' Creating points system tables...');
+
+      // User Points Table
+      const userPointsQuery = `
+        CREATE TABLE IF NOT EXISTS hakikisha.user_points (
+          user_id UUID PRIMARY KEY REFERENCES hakikisha.users(id) ON DELETE CASCADE,
+          total_points INTEGER DEFAULT 0,
+          current_streak_days INTEGER DEFAULT 0,
+          longest_streak_days INTEGER DEFAULT 0,
+          last_activity_date DATE,
+          points_reset_date DATE,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await db.query(userPointsQuery);
+      console.log('User points table created/verified');
+
+      // Points History Table
+      const pointsHistoryQuery = `
+        CREATE TABLE IF NOT EXISTS hakikisha.points_history (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
+          points_awarded INTEGER NOT NULL,
+          action_type VARCHAR(100) NOT NULL,
+          description TEXT,
+          created_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await db.query(pointsHistoryQuery);
+      console.log('Points history table created/verified');
+
+    } catch (error) {
+      console.error(' Error creating points tables:', error);
       throw error;
     }
   }
@@ -504,6 +545,14 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_fact_checkers_status ON hakikisha.fact_checkers(verification_status)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checkers_active ON hakikisha.fact_checkers(is_active)',
       
+      // POINTS SYSTEM INDEXES
+      'CREATE INDEX IF NOT EXISTS idx_user_points_user_id ON hakikisha.user_points(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_user_points_total ON hakikisha.user_points(total_points)',
+      'CREATE INDEX IF NOT EXISTS idx_user_points_streak ON hakikisha.user_points(current_streak_days)',
+      'CREATE INDEX IF NOT EXISTS idx_points_history_user_id ON hakikisha.points_history(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_points_history_created_at ON hakikisha.points_history(created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_points_history_action_type ON hakikisha.points_history(action_type)',
+      
       // BLOG INDEXES
       'CREATE INDEX IF NOT EXISTS idx_blog_articles_author_id ON hakikisha.blog_articles(author_id)',
       'CREATE INDEX IF NOT EXISTS idx_blog_articles_status ON hakikisha.blog_articles(status)',
@@ -628,6 +677,8 @@ class DatabaseInitializer {
       // Check each essential table
       const essentialTables = [
         'users', 
+        'user_points',
+        'points_history',
         'blog_articles',
         'blog_comments',  
         'blog_likes',
@@ -647,6 +698,19 @@ class DatabaseInitializer {
           console.log(`${tableName}: Table not accessible - ${error.message}`);
         }
       }
+
+      // Verify points tables exist
+      const pointsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'user_points'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`User points table columns: ${pointsColumns.rows.length}`);
+      const hasPointsColumns = pointsColumns.rows.some(col => col.column_name === 'total_points') &&
+                              pointsColumns.rows.some(col => col.column_name === 'current_streak_days');
+      console.log(`   - has required columns: ${hasPointsColumns}`);
 
       // Verify blog articles table has required columns
       const blogColumns = await db.query(`
@@ -721,6 +785,7 @@ class DatabaseInitializer {
         adminHasPassword: adminCheck.rows.length > 0 ? adminCheck.rows[0].has_password : false,
         verdictsHasIsFinal: hasIsFinal,
         blogTablesExist: hasRequiredColumns,
+        pointsTablesExist: hasPointsColumns,
         allColumnsPresent: stats.users_with_username === stats.total_users && 
                           stats.users_with_status === stats.total_users
       };
@@ -735,6 +800,8 @@ class DatabaseInitializer {
       console.log('Resetting database...');
       
       const tables = [
+        'points_history',
+        'user_points',
         'blog_likes',
         'blog_comments',
         'blog_articles',
@@ -792,6 +859,9 @@ class DatabaseInitializer {
       
       // Ensure all required columns exist
       await this.ensureRequiredColumns();
+      
+      // Create points tables if they don't exist
+      await this.createPointsTables();
       
       // Create blog tables if they don't exist
       await this.createBlogTables();
