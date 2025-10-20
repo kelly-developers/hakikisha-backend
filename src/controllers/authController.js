@@ -776,10 +776,29 @@ const getCurrentUser = async (req, res) => {
       });
     }
 
+    // First, ensure user points are initialized
+    try {
+      await PointsService.initializeUserPoints(req.user.userId);
+      console.log('User points initialized/verified in getCurrentUser');
+    } catch (initError) {
+      console.log('Points initialization check in getCurrentUser:', initError.message);
+    }
+
+    // Use the SAME JOIN query as UserController
     const result = await db.query(
-      `SELECT id, email, username, phone, role, profile_picture, is_verified, 
-              registration_status, created_at, last_login, login_count
-       FROM hakikisha.users WHERE id = $1`,
+      `SELECT 
+        u.id, u.email, u.username, u.phone, u.profile_picture, 
+        u.is_verified, u.role, u.registration_status, 
+        u.created_at, u.last_login, u.login_count, u.updated_at,
+        COALESCE(up.total_points, 0) as points,
+        COALESCE(up.current_streak, 0) as current_streak,
+        COALESCE(up.longest_streak, 0) as longest_streak,
+        COALESCE(up.current_streak_days, 0) as current_streak_days,
+        COALESCE(up.longest_streak_days, 0) as longest_streak_days,
+        up.last_activity_date
+       FROM hakikisha.users u
+       LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
+       WHERE u.id = $1`,
       [req.user.userId]
     );
 
@@ -791,54 +810,37 @@ const getCurrentUser = async (req, res) => {
       });
     }
 
-    // Get user points information
-    let pointsInfo = {
-      total_points: 0,
-      current_streak: 0,
-      longest_streak: 0,
-      current_streak_days: 0,
-      longest_streak_days: 0,
-      last_activity_date: null
-    };
-
-    try {
-      pointsInfo = await PointsService.getUserPoints(req.user.userId);
-      console.log('Current user points:', pointsInfo);
-    } catch (pointsError) {
-      console.log('Could not fetch points info for current user:', pointsError.message);
-      // Initialize points if they don't exist
-      try {
-        await PointsService.initializeUserPoints(req.user.userId);
-        pointsInfo = await PointsService.getUserPoints(req.user.userId);
-      } catch (initError) {
-        console.log('Could not initialize points:', initError.message);
-      }
-    }
-
-    const user = result.rows[0];
+    const userData = result.rows[0];
     
-    const points = Number(pointsInfo.total_points) || 0;
-    const currentStreak = Number(pointsInfo.current_streak) || Number(pointsInfo.current_streak_days) || 0;
-    const longestStreak = Number(pointsInfo.longest_streak) || Number(pointsInfo.longest_streak_days) || 0;
+    // Use the correct column names (try both variations)
+    const points = Number(userData.points) || 0;
+    const currentStreak = Number(userData.current_streak) || Number(userData.current_streak_days) || 0;
+    const longestStreak = Number(userData.longest_streak) || Number(userData.longest_streak_days) || 0;
     
+    console.log('Current user data with points:', {
+      points: points,
+      current_streak: currentStreak,
+      longest_streak: longestStreak
+    });
+
     res.json({
       success: true,
       user: {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        phone: user.phone,
-        role: user.role,
-        profile_picture: user.profile_picture,
-        is_verified: user.is_verified,
-        registration_status: user.registration_status,
-        created_at: user.created_at,
-        last_login: user.last_login,
-        login_count: user.login_count,
+        id: userData.id,
+        email: userData.email,
+        username: userData.username,
+        phone: userData.phone,
+        role: userData.role,
+        profile_picture: userData.profile_picture,
+        is_verified: userData.is_verified,
+        registration_status: userData.registration_status,
+        created_at: userData.created_at,
+        last_login: userData.last_login,
+        login_count: userData.login_count,
         points: points,
         current_streak: currentStreak,
         longest_streak: longestStreak,
-        last_activity_date: pointsInfo.last_activity_date
+        last_activity_date: userData.last_activity_date
       }
     });
   } catch (error) {
@@ -864,8 +866,16 @@ const checkAuth = async (req, res) => {
       });
     }
 
+    // Use the JOIN query here too
     const result = await db.query(
-      'SELECT id, email, username, role, is_verified, registration_status FROM hakikisha.users WHERE id = $1',
+      `SELECT 
+        u.id, u.email, u.username, u.role, u.is_verified, u.registration_status,
+        COALESCE(up.total_points, 0) as points,
+        COALESCE(up.current_streak, 0) as current_streak,
+        COALESCE(up.longest_streak, 0) as longest_streak
+       FROM hakikisha.users u
+       LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
+       WHERE u.id = $1`,
       [req.user.userId]
     );
 
@@ -878,6 +888,10 @@ const checkAuth = async (req, res) => {
     }
 
     const user = result.rows[0];
+    
+    const points = Number(user.points) || 0;
+    const currentStreak = Number(user.current_streak) || 0;
+    const longestStreak = Number(user.longest_streak) || 0;
 
     res.json({
       success: true,
@@ -887,7 +901,10 @@ const checkAuth = async (req, res) => {
         username: user.username,
         role: user.role,
         is_verified: user.is_verified,
-        registration_status: user.registration_status
+        registration_status: user.registration_status,
+        points: points,
+        current_streak: currentStreak,
+        longest_streak: longestStreak
       }
     });
   } catch (error) {
