@@ -23,7 +23,7 @@ class UserController {
         });
       }
 
-      // Get user points information - with better error handling
+      // Get user points information - with proper error handling and initialization
       let pointsInfo = {
         total_points: 0,
         current_streak_days: 0,
@@ -34,6 +34,14 @@ class UserController {
       try {
         pointsInfo = await PointsService.getUserPoints(req.user.userId);
         console.log('Points info retrieved:', pointsInfo);
+        
+        // If points record doesn't exist or is empty, initialize it
+        if (!pointsInfo || Object.keys(pointsInfo).length === 0 || pointsInfo.total_points === undefined) {
+          console.log('Points record not found or empty, initializing...');
+          await PointsService.initializeUserPoints(req.user.userId);
+          pointsInfo = await PointsService.getUserPoints(req.user.userId);
+          console.log('Points after initialization:', pointsInfo);
+        }
       } catch (pointsError) {
         console.log('Could not fetch points info, initializing:', pointsError.message);
         try {
@@ -41,34 +49,50 @@ class UserController {
           pointsInfo = await PointsService.getUserPoints(req.user.userId);
         } catch (initError) {
           console.log('Could not initialize points:', initError.message);
+          // Use default values
+          pointsInfo = {
+            total_points: 0,
+            current_streak_days: 0,
+            longest_streak_days: 0,
+            last_activity_date: null
+          };
         }
       }
 
       const user = result.rows[0];
       
+      // Ensure points data is properly formatted
+      const responseData = {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        full_name: user.username, // Map username to full_name for frontend
+        phone: user.phone,
+        phone_number: user.phone, // Map phone to phone_number for frontend
+        role: user.role,
+        profile_picture: user.profile_picture,
+        is_verified: user.is_verified,
+        registration_status: user.registration_status,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+        last_login: user.last_login,
+        login_count: user.login_count,
+        // Points data - ensure proper values
+        points: Number(pointsInfo.total_points) || 0,
+        current_streak: Number(pointsInfo.current_streak_days) || 0,
+        longest_streak: Number(pointsInfo.longest_streak_days) || 0,
+        last_activity_date: pointsInfo.last_activity_date
+      };
+
+      console.log('Sending profile response with points:', {
+        points: responseData.points,
+        current_streak: responseData.current_streak,
+        longest_streak: responseData.longest_streak
+      });
+      
       res.json({
         success: true,
-        data: {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          full_name: user.username, // Map username to full_name for frontend
-          phone: user.phone,
-          phone_number: user.phone, // Map phone to phone_number for frontend
-          role: user.role,
-          profile_picture: user.profile_picture,
-          is_verified: user.is_verified,
-          registration_status: user.registration_status,
-          created_at: user.created_at,
-          updated_at: user.updated_at,
-          last_login: user.last_login,
-          login_count: user.login_count,
-          // Points data
-          points: pointsInfo.total_points || 0,
-          current_streak: pointsInfo.current_streak_days || 0,
-          longest_streak: pointsInfo.longest_streak_days || 0,
-          last_activity_date: pointsInfo.last_activity_date
-        }
+        data: responseData
       });
     } catch (error) {
       console.error('Get profile error:', error);
@@ -186,32 +210,46 @@ class UserController {
       }
 
       // Get updated points info
-      let pointsInfo = {};
+      let pointsInfo = {
+        total_points: 0,
+        current_streak_days: 0,
+        longest_streak_days: 0
+      };
+      
       try {
         pointsInfo = await PointsService.getUserPoints(req.user.userId);
+        console.log('Updated points info:', pointsInfo);
       } catch (pointsError) {
         console.log('Could not fetch updated points info:', pointsError.message);
       }
 
       const updatedUser = result.rows[0];
 
+      const responseData = {
+        id: updatedUser.id,
+        email: updatedUser.email,
+        username: updatedUser.username,
+        full_name: updatedUser.username,
+        phone: updatedUser.phone,
+        phone_number: updatedUser.phone,
+        profile_picture: updatedUser.profile_picture,
+        created_at: updatedUser.created_at,
+        updated_at: updatedUser.updated_at,
+        points: Number(pointsInfo.total_points) || 0,
+        current_streak: Number(pointsInfo.current_streak_days) || 0,
+        longest_streak: Number(pointsInfo.longest_streak_days) || 0
+      };
+
+      console.log('Sending updated profile with points:', {
+        points: responseData.points,
+        current_streak: responseData.current_streak,
+        longest_streak: responseData.longest_streak
+      });
+
       res.json({
         success: true,
         message: 'Profile updated successfully',
-        data: {
-          id: updatedUser.id,
-          email: updatedUser.email,
-          username: updatedUser.username,
-          full_name: updatedUser.username,
-          phone: updatedUser.phone,
-          phone_number: updatedUser.phone,
-          profile_picture: updatedUser.profile_picture,
-          created_at: updatedUser.created_at,
-          updated_at: updatedUser.updated_at,
-          points: pointsInfo.total_points || 0,
-          current_streak: pointsInfo.current_streak_days || 0,
-          longest_streak: pointsInfo.longest_streak_days || 0
-        }
+        data: responseData
       });
     } catch (error) {
       console.error('Update profile error:', error);
@@ -251,6 +289,7 @@ class UserController {
           'PROFILE_PICTURE', 
           'Added profile picture'
         );
+        console.log('Points awarded for profile picture');
       } catch (pointsError) {
         console.log('Could not award points for profile picture:', pointsError.message);
       }
@@ -432,6 +471,61 @@ class UserController {
       res.status(500).json({
         success: false,
         error: 'Failed to delete account',
+        code: 'SERVER_ERROR'
+      });
+    }
+  }
+
+  // New endpoint to get points specifically
+  async getPoints(req, res) {
+    try {
+      console.log('Get Points Request for user:', req.user.userId);
+      
+      let pointsInfo = {
+        total_points: 0,
+        current_streak_days: 0,
+        longest_streak_days: 0,
+        last_activity_date: null
+      };
+
+      try {
+        pointsInfo = await PointsService.getUserPoints(req.user.userId);
+        
+        // If points record doesn't exist, initialize it
+        if (!pointsInfo || Object.keys(pointsInfo).length === 0 || pointsInfo.total_points === undefined) {
+          console.log('Points record not found, initializing...');
+          await PointsService.initializeUserPoints(req.user.userId);
+          pointsInfo = await PointsService.getUserPoints(req.user.userId);
+        }
+      } catch (pointsError) {
+        console.log('Could not fetch points info:', pointsError.message);
+        try {
+          await PointsService.initializeUserPoints(req.user.userId);
+          pointsInfo = await PointsService.getUserPoints(req.user.userId);
+        } catch (initError) {
+          console.log('Could not initialize points:', initError.message);
+        }
+      }
+
+      const responseData = {
+        points: Number(pointsInfo.total_points) || 0,
+        current_streak: Number(pointsInfo.current_streak_days) || 0,
+        longest_streak: Number(pointsInfo.longest_streak_days) || 0,
+        last_activity_date: pointsInfo.last_activity_date
+      };
+
+      console.log('Sending points response:', responseData);
+
+      res.json({
+        success: true,
+        data: responseData
+      });
+    } catch (error) {
+      console.error('Get points error:', error);
+      logger.error('Get points error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get points',
         code: 'SERVER_ERROR'
       });
     }
