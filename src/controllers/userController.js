@@ -8,10 +8,19 @@ class UserController {
     try {
       console.log('Get Profile Request for user:', req.user.userId);
       
+      // Get user basic info AND points in a single query with JOIN
       const result = await db.query(
-        `SELECT id, email, username, phone, profile_picture, is_verified, role, status, registration_status, 
-                created_at, last_login, login_count, updated_at
-         FROM hakikisha.users WHERE id = $1`,
+        `SELECT 
+          u.id, u.email, u.username, u.phone, u.profile_picture, 
+          u.is_verified, u.role, u.status, u.registration_status, 
+          u.created_at, u.last_login, u.login_count, u.updated_at,
+          COALESCE(up.total_points, 0) as points,
+          COALESCE(up.current_streak_days, 0) as current_streak,
+          COALESCE(up.longest_streak_days, 0) as longest_streak,
+          up.last_activity_date
+         FROM hakikisha.users u
+         LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
+         WHERE u.id = $1`,
         [req.user.userId]
       );
 
@@ -23,73 +32,36 @@ class UserController {
         });
       }
 
-      // Get user points information - with proper error handling and initialization
-      let pointsInfo = {
-        total_points: 0,
-        current_streak_days: 0,
-        longest_streak_days: 0,
-        last_activity_date: null
-      };
-
-      try {
-        pointsInfo = await PointsService.getUserPoints(req.user.userId);
-        console.log('Points info retrieved:', pointsInfo);
-        
-        // If points record doesn't exist or is empty, initialize it
-        if (!pointsInfo || Object.keys(pointsInfo).length === 0 || pointsInfo.total_points === undefined) {
-          console.log('Points record not found or empty, initializing...');
-          await PointsService.initializeUserPoints(req.user.userId);
-          pointsInfo = await PointsService.getUserPoints(req.user.userId);
-          console.log('Points after initialization:', pointsInfo);
-        }
-      } catch (pointsError) {
-        console.log('Could not fetch points info, initializing:', pointsError.message);
-        try {
-          await PointsService.initializeUserPoints(req.user.userId);
-          pointsInfo = await PointsService.getUserPoints(req.user.userId);
-        } catch (initError) {
-          console.log('Could not initialize points:', initError.message);
-          // Use default values
-          pointsInfo = {
-            total_points: 0,
-            current_streak_days: 0,
-            longest_streak_days: 0,
-            last_activity_date: null
-          };
-        }
-      }
-
-      const user = result.rows[0];
+      const userData = result.rows[0];
       
-      // Ensure points data is properly formatted
-      const responseData = {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        full_name: user.username, // Map username to full_name for frontend
-        phone: user.phone,
-        phone_number: user.phone, // Map phone to phone_number for frontend
-        role: user.role,
-        profile_picture: user.profile_picture,
-        is_verified: user.is_verified,
-        registration_status: user.registration_status,
-        created_at: user.created_at,
-        updated_at: user.updated_at,
-        last_login: user.last_login,
-        login_count: user.login_count,
-        // Points data - ensure proper values
-        points: Number(pointsInfo.total_points) || 0,
-        current_streak: Number(pointsInfo.current_streak_days) || 0,
-        longest_streak: Number(pointsInfo.longest_streak_days) || 0,
-        last_activity_date: pointsInfo.last_activity_date
-      };
-
-      console.log('Sending profile response with points:', {
-        points: responseData.points,
-        current_streak: responseData.current_streak,
-        longest_streak: responseData.longest_streak
+      console.log('User profile data with points:', {
+        points: userData.points,
+        current_streak: userData.current_streak,
+        longest_streak: userData.longest_streak
       });
-      
+
+      const responseData = {
+        id: userData.id,
+        email: userData.email,
+        username: userData.username,
+        full_name: userData.username,
+        phone: userData.phone,
+        phone_number: userData.phone,
+        role: userData.role,
+        profile_picture: userData.profile_picture,
+        is_verified: userData.is_verified,
+        registration_status: userData.registration_status,
+        created_at: userData.created_at,
+        updated_at: userData.updated_at,
+        last_login: userData.last_login,
+        login_count: userData.login_count,
+        // Points data - directly from the joined query
+        points: Number(userData.points) || 0,
+        current_streak: Number(userData.current_streak) || 0,
+        longest_streak: Number(userData.longest_streak) || 0,
+        last_activity_date: userData.last_activity_date
+      };
+
       res.json({
         success: true,
         data: responseData
@@ -209,35 +181,35 @@ class UserController {
         console.log('Could not award points for profile update:', pointsError.message);
       }
 
-      // Get updated points info
-      let pointsInfo = {
-        total_points: 0,
-        current_streak_days: 0,
-        longest_streak_days: 0
-      };
-      
-      try {
-        pointsInfo = await PointsService.getUserPoints(req.user.userId);
-        console.log('Updated points info:', pointsInfo);
-      } catch (pointsError) {
-        console.log('Could not fetch updated points info:', pointsError.message);
-      }
+      // Get updated profile with points
+      const updatedProfileResult = await db.query(
+        `SELECT 
+          u.id, u.email, u.username, u.phone, u.profile_picture, 
+          u.created_at, u.updated_at,
+          COALESCE(up.total_points, 0) as points,
+          COALESCE(up.current_streak_days, 0) as current_streak,
+          COALESCE(up.longest_streak_days, 0) as longest_streak
+         FROM hakikisha.users u
+         LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
+         WHERE u.id = $1`,
+        [req.user.userId]
+      );
 
-      const updatedUser = result.rows[0];
+      const updatedUserData = updatedProfileResult.rows[0];
 
       const responseData = {
-        id: updatedUser.id,
-        email: updatedUser.email,
-        username: updatedUser.username,
-        full_name: updatedUser.username,
-        phone: updatedUser.phone,
-        phone_number: updatedUser.phone,
-        profile_picture: updatedUser.profile_picture,
-        created_at: updatedUser.created_at,
-        updated_at: updatedUser.updated_at,
-        points: Number(pointsInfo.total_points) || 0,
-        current_streak: Number(pointsInfo.current_streak_days) || 0,
-        longest_streak: Number(pointsInfo.longest_streak_days) || 0
+        id: updatedUserData.id,
+        email: updatedUserData.email,
+        username: updatedUserData.username,
+        full_name: updatedUserData.username,
+        phone: updatedUserData.phone,
+        phone_number: updatedUserData.phone,
+        profile_picture: updatedUserData.profile_picture,
+        created_at: updatedUserData.created_at,
+        updated_at: updatedUserData.updated_at,
+        points: Number(updatedUserData.points) || 0,
+        current_streak: Number(updatedUserData.current_streak) || 0,
+        longest_streak: Number(updatedUserData.longest_streak) || 0
       };
 
       console.log('Sending updated profile with points:', {
@@ -481,44 +453,38 @@ class UserController {
     try {
       console.log('Get Points Request for user:', req.user.userId);
       
-      let pointsInfo = {
-        total_points: 0,
-        current_streak_days: 0,
-        longest_streak_days: 0,
+      const result = await db.query(
+        `SELECT 
+          COALESCE(up.total_points, 0) as points,
+          COALESCE(up.current_streak_days, 0) as current_streak,
+          COALESCE(up.longest_streak_days, 0) as longest_streak,
+          up.last_activity_date
+         FROM hakikisha.user_points up
+         WHERE up.user_id = $1`,
+        [req.user.userId]
+      );
+
+      let pointsData = {
+        points: 0,
+        current_streak: 0,
+        longest_streak: 0,
         last_activity_date: null
       };
 
-      try {
-        pointsInfo = await PointsService.getUserPoints(req.user.userId);
-        
-        // If points record doesn't exist, initialize it
-        if (!pointsInfo || Object.keys(pointsInfo).length === 0 || pointsInfo.total_points === undefined) {
-          console.log('Points record not found, initializing...');
-          await PointsService.initializeUserPoints(req.user.userId);
-          pointsInfo = await PointsService.getUserPoints(req.user.userId);
-        }
-      } catch (pointsError) {
-        console.log('Could not fetch points info:', pointsError.message);
-        try {
-          await PointsService.initializeUserPoints(req.user.userId);
-          pointsInfo = await PointsService.getUserPoints(req.user.userId);
-        } catch (initError) {
-          console.log('Could not initialize points:', initError.message);
-        }
+      if (result.rows.length > 0) {
+        pointsData = {
+          points: Number(result.rows[0].points) || 0,
+          current_streak: Number(result.rows[0].current_streak) || 0,
+          longest_streak: Number(result.rows[0].longest_streak) || 0,
+          last_activity_date: result.rows[0].last_activity_date
+        };
       }
 
-      const responseData = {
-        points: Number(pointsInfo.total_points) || 0,
-        current_streak: Number(pointsInfo.current_streak_days) || 0,
-        longest_streak: Number(pointsInfo.longest_streak_days) || 0,
-        last_activity_date: pointsInfo.last_activity_date
-      };
-
-      console.log('Sending points response:', responseData);
+      console.log('Sending points response:', pointsData);
 
       res.json({
         success: true,
-        data: responseData
+        data: pointsData
       });
     } catch (error) {
       console.error('Get points error:', error);
