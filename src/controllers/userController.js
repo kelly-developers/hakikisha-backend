@@ -9,7 +9,8 @@ class UserController {
       console.log('Get Profile Request for user:', req.user.userId);
       
       const result = await db.query(
-        `SELECT id, email, username, phone, profile_picture, is_verified, role, status, registration_status, created_at, last_login, login_count
+        `SELECT id, email, username, phone, profile_picture, is_verified, role, status, registration_status, 
+                created_at, last_login, login_count, updated_at
          FROM hakikisha.users WHERE id = $1`,
         [req.user.userId]
       );
@@ -22,22 +23,22 @@ class UserController {
         });
       }
 
-      // Get user points information
-      let pointsInfo = {};
+      // Get user points information - with better error handling
+      let pointsInfo = {
+        total_points: 0,
+        current_streak_days: 0,
+        longest_streak_days: 0,
+        last_activity_date: null
+      };
+
       try {
         pointsInfo = await PointsService.getUserPoints(req.user.userId);
         console.log('Points info retrieved:', pointsInfo);
       } catch (pointsError) {
-        console.log('Could not fetch points info:', pointsError.message);
-        // Initialize points if they don't exist
+        console.log('Could not fetch points info, initializing:', pointsError.message);
         try {
           await PointsService.initializeUserPoints(req.user.userId);
-          pointsInfo = {
-            total_points: 0,
-            current_streak_days: 0,
-            longest_streak_days: 0,
-            last_activity_date: null
-          };
+          pointsInfo = await PointsService.getUserPoints(req.user.userId);
         } catch (initError) {
           console.log('Could not initialize points:', initError.message);
         }
@@ -171,6 +172,19 @@ class UserController {
         params
       );
 
+      // Award points for profile completion/update
+      try {
+        await PointsService.awardPoints(
+          req.user.userId, 
+          5, 
+          'PROFILE_UPDATE', 
+          'Updated profile information'
+        );
+        console.log('Points awarded for profile update');
+      } catch (pointsError) {
+        console.log('Could not award points for profile update:', pointsError.message);
+      }
+
       // Get updated points info
       let pointsInfo = {};
       try {
@@ -228,6 +242,18 @@ class UserController {
         'UPDATE hakikisha.users SET profile_picture = $1, updated_at = NOW() WHERE id = $2',
         [imageUrl, req.user.userId]
       );
+
+      // Award points for adding profile picture
+      try {
+        await PointsService.awardPoints(
+          req.user.userId, 
+          10, 
+          'PROFILE_PICTURE', 
+          'Added profile picture'
+        );
+      } catch (pointsError) {
+        console.log('Could not award points for profile picture:', pointsError.message);
+      }
 
       res.json({
         success: true,

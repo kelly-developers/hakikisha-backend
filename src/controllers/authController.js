@@ -37,6 +37,26 @@ const register = async (req, res) => {
       });
     }
 
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid email format',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Validate password strength
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password must be at least 6 characters long',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Check if user already exists
     const existingUser = await db.query(
       'SELECT id FROM hakikisha.users WHERE email = $1',
       [email]
@@ -45,9 +65,25 @@ const register = async (req, res) => {
     if (existingUser.rows.length > 0) {
       return res.status(400).json({
         success: false,
-        error: 'User already exists',
+        error: 'User already exists with this email',
         code: 'USER_EXISTS'
       });
+    }
+
+    // Check if username is taken
+    if (username) {
+      const existingUsername = await db.query(
+        'SELECT id FROM hakikisha.users WHERE username = $1',
+        [username]
+      );
+
+      if (existingUsername.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username already taken',
+          code: 'USERNAME_EXISTS'
+        });
+      }
     }
 
     const password_hash = await bcrypt.hash(password, 12);
@@ -65,19 +101,39 @@ const register = async (req, res) => {
 
     const user = result.rows[0];
 
-    // Initialize points for new user
+    // Initialize points for new user and award registration points
     try {
       await PointsService.initializeUserPoints(user.id);
-      console.log('User points initialized');
+      console.log('User points initialized for new user');
+      
+      // Award points for registration and profile completion
+      const pointsResult = await PointsService.awardPoints(
+        user.id,
+        POINTS.COMPLETE_PROFILE,
+        'REGISTRATION',
+        'Completed registration and profile setup'
+      );
+      console.log('Registration points awarded:', pointsResult.pointsAwarded);
     } catch (pointsError) {
-      console.log('Points initialization skipped:', pointsError.message);
+      console.log('Points initialization or award failed:', pointsError.message);
+      // Don't fail registration if points system fails
     }
+
+    // Send welcome email
+    try {
+      await emailService.sendWelcomeEmail(user.email, user.username);
+    } catch (emailError) {
+      console.error('Failed to send welcome email:', emailError);
+      // Don't fail registration if email fails
+    }
+
+    logger.info(`New user registered: ${user.email} with ID: ${user.id}`);
 
     res.status(201).json({
       success: true,
       message: role === 'fact_checker' 
         ? 'Registration submitted for approval. You will be notified once reviewed.'
-        : 'Registration successful',
+        : 'Registration successful! You can now login to your account.',
       user: {
         id: user.id,
         email: user.email,
@@ -92,7 +148,7 @@ const register = async (req, res) => {
     logger.error('Register error:', error);
     res.status(500).json({
       success: false,
-      error: 'Registration failed',
+      error: 'Registration failed. Please try again.',
       code: 'SERVER_ERROR'
     });
   }
@@ -112,49 +168,64 @@ const login = async (req, res) => {
     }
 
     const userResult = await db.query(
-      'SELECT id, email, username, password_hash, role, is_verified, registration_status, two_factor_enabled, status FROM hakikisha.users WHERE email = $1',
+      `SELECT id, email, username, password_hash, role, is_verified, registration_status, 
+              two_factor_enabled, status, login_count, last_login
+       FROM hakikisha.users WHERE email = $1`,
       [email]
     );
 
     if (userResult.rows.length === 0) {
+      logger.warn(`Failed login attempt for non-existent email: ${email}`);
       return res.status(401).json({
         success: false,
-        error: 'Invalid credentials',
+        error: 'Invalid email or password',
         code: 'AUTH_INVALID'
       });
     }
 
     const user = userResult.rows[0];
 
+    // Check if account is active
     if (user.status !== 'active') {
       return res.status(403).json({
         success: false,
-        error: 'Your account has been suspended or deactivated',
+        error: 'Your account has been suspended or deactivated. Please contact support.',
         code: 'ACCOUNT_SUSPENDED'
       });
     }
 
+    // Verify password
     const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
+      logger.warn(`Failed login attempt for user: ${user.email} - Invalid password`);
       return res.status(401).json({
         success: false,
-        error: 'Invalid credentials',
+        error: 'Invalid email or password',
         code: 'AUTH_INVALID'
       });
     }
 
+    // Check registration status
     if (user.registration_status !== 'approved') {
       return res.status(403).json({
         success: false,
-        error: 'Account pending approval',
+        error: 'Your account is pending approval. You will be notified once approved.',
         code: 'ACCOUNT_PENDING'
       });
     }
 
+    // Handle 2FA for admin users or users with 2FA enabled
     if (user.role === 'admin' || user.two_factor_enabled) {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
+      // Clear any existing OTP codes for this user
+      await db.query(
+        'DELETE FROM hakikisha.otp_codes WHERE user_id = $1 AND type = $2',
+        [user.id, '2fa']
+      );
+
+      // Insert new OTP code
       await db.query(
         'INSERT INTO hakikisha.otp_codes (user_id, code, type, expires_at) VALUES ($1, $2, $3, $4)',
         [user.id, otp, '2fa', expiresAt]
@@ -162,43 +233,54 @@ const login = async (req, res) => {
 
       try {
         await emailService.send2FACode(user.email, otp, user.username);
+        logger.info(`2FA code sent to user: ${user.email}`);
       } catch (emailError) {
         console.error('Failed to send 2FA email:', emailError);
+        logger.error(`Failed to send 2FA email to user: ${user.email}`, emailError);
       }
 
       return res.json({
         success: true,
         requires2FA: true,
         userId: user.id,
-        message: '2FA code sent to your email'
+        message: 'Verification code sent to your email'
       });
     }
 
-    // Update login stats but don't award points yet
+    // Update login stats
     await db.query(
-      'UPDATE hakikisha.users SET last_login = NOW(), login_count = COALESCE(login_count, 0) + 1 WHERE id = $1',
+      'UPDATE hakikisha.users SET last_login = NOW(), login_count = COALESCE(login_count, 0) + 1, updated_at = NOW() WHERE id = $1',
       [user.id]
     );
 
-    // Note: Points are NOT awarded here - only when user actually engages with content
+    // Award points for daily login engagement
+    try {
+      const pointsResult = await PointsService.awardPointsForDailyLogin(user.id);
+      console.log('Daily login points awarded:', pointsResult.pointsAwarded);
+    } catch (pointsError) {
+      console.log('Could not award login points:', pointsError.message);
+      // Don't fail login if points system fails
+    }
 
+    // Generate tokens
     const token = generateJWTToken(user);
-
     const refreshToken = jwt.sign(
       { userId: user.id, email: user.email, type: 'refresh' },
       JWT_SECRET,
       { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
     );
 
+    // Create or update session
     const sessionId = uuidv4();
     await db.query(
       `INSERT INTO hakikisha.user_sessions (id, user_id, token, refresh_token, expires_at, created_at, last_accessed)
-       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '24 hours', NOW(), NOW())`,
+       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '24 hours', NOW(), NOW())
+       ON CONFLICT (user_id) 
+       DO UPDATE SET token = $3, refresh_token = $4, expires_at = NOW() + INTERVAL '24 hours', last_accessed = NOW()`,
       [sessionId, user.id, token, refreshToken]
     );
 
-    console.log('Login successful for user:', user.email);
-    console.log('JWT Token generated');
+    logger.info(`User logged in successfully: ${user.email}`);
 
     res.json({
       success: true,
@@ -210,7 +292,8 @@ const login = async (req, res) => {
         email: user.email,
         username: user.username,
         role: user.role,
-        is_verified: user.is_verified
+        is_verified: user.is_verified,
+        registration_status: user.registration_status
       }
     });
   } catch (error) {
@@ -218,7 +301,7 @@ const login = async (req, res) => {
     logger.error('Login error:', error);
     res.status(500).json({
       success: false,
-      error: 'Login failed',
+      error: 'Login failed. Please try again.',
       code: 'SERVER_ERROR'
     });
   }
@@ -232,7 +315,16 @@ const verify2FA = async (req, res) => {
     if (!userId || !code) {
       return res.status(400).json({
         success: false,
-        error: 'User ID and 2FA code are required',
+        error: 'User ID and verification code are required',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Validate code format
+    if (!/^\d{6}$/.test(code)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Verification code must be 6 digits',
         code: 'VALIDATION_ERROR'
       });
     }
@@ -245,46 +337,65 @@ const verify2FA = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid or expired 2FA code',
+        error: 'Invalid or expired verification code',
         code: 'AUTH_INVALID'
       });
     }
 
+    // Mark OTP as used
     await db.query(
-      'UPDATE hakikisha.otp_codes SET used = true WHERE id = $1',
+      'UPDATE hakikisha.otp_codes SET used = true, used_at = NOW() WHERE id = $1',
       [result.rows[0].id]
     );
 
     const userResult = await db.query(
-      'SELECT id, email, username, role, is_verified FROM hakikisha.users WHERE id = $1',
+      'SELECT id, email, username, role, is_verified, registration_status FROM hakikisha.users WHERE id = $1',
       [userId]
     );
 
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+        code: 'NOT_FOUND'
+      });
+    }
+
     const user = userResult.rows[0];
 
+    // Update login stats
     await db.query(
-      'UPDATE hakikisha.users SET last_login = NOW(), login_count = COALESCE(login_count, 0) + 1 WHERE id = $1',
+      'UPDATE hakikisha.users SET last_login = NOW(), login_count = COALESCE(login_count, 0) + 1, updated_at = NOW() WHERE id = $1',
       [user.id]
     );
 
-    // Note: Points are NOT awarded for 2FA verification either
+    // Award points for 2FA verification (considered as engagement)
+    try {
+      const pointsResult = await PointsService.awardPointsForDailyLogin(user.id);
+      console.log('2FA login points awarded:', pointsResult.pointsAwarded);
+    } catch (pointsError) {
+      console.log('Could not award 2FA login points:', pointsError.message);
+    }
 
+    // Generate tokens
     const token = generateJWTToken(user);
-
     const refreshToken = jwt.sign(
       { userId: user.id, email: user.email, type: 'refresh' },
       JWT_SECRET,
       { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
     );
 
+    // Create or update session
     const sessionId = uuidv4();
     await db.query(
       `INSERT INTO hakikisha.user_sessions (id, user_id, token, refresh_token, expires_at, created_at, last_accessed)
-       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '24 hours', NOW(), NOW())`,
+       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '24 hours', NOW(), NOW())
+       ON CONFLICT (user_id) 
+       DO UPDATE SET token = $3, refresh_token = $4, expires_at = NOW() + INTERVAL '24 hours', last_accessed = NOW()`,
       [sessionId, user.id, token, refreshToken]
     );
 
-    console.log('2FA verification successful for user:', user.email);
+    logger.info(`2FA verification successful for user: ${user.email}`);
 
     res.json({
       success: true,
@@ -296,7 +407,8 @@ const verify2FA = async (req, res) => {
         email: user.email,
         username: user.username,
         role: user.role,
-        is_verified: user.is_verified
+        is_verified: user.is_verified,
+        registration_status: user.registration_status
       }
     });
   } catch (error) {
@@ -304,7 +416,7 @@ const verify2FA = async (req, res) => {
     logger.error('Verify 2FA error:', error);
     res.status(500).json({
       success: false,
-      error: 'Verification failed',
+      error: 'Verification failed. Please try again.',
       code: 'SERVER_ERROR'
     });
   }
@@ -323,12 +435,24 @@ const forgotPassword = async (req, res) => {
       });
     }
 
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid email format',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
     const userResult = await db.query(
-      'SELECT id, email, username FROM hakikisha.users WHERE email = $1',
-      [email]
+      'SELECT id, email, username FROM hakikisha.users WHERE email = $1 AND status = $2',
+      [email, 'active']
     );
 
+    // Always return success to prevent email enumeration
     if (userResult.rows.length === 0) {
+      logger.info(`Password reset requested for non-existent email: ${email}`);
       return res.json({
         success: true,
         message: 'If the email exists, a password reset code has been sent'
@@ -337,8 +461,15 @@ const forgotPassword = async (req, res) => {
 
     const user = userResult.rows[0];
     const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
+    // Clear any existing reset codes for this user
+    await db.query(
+      'DELETE FROM hakikisha.otp_codes WHERE user_id = $1 AND type = $2',
+      [user.id, 'password_reset']
+    );
+
+    // Insert new reset code
     await db.query(
       'INSERT INTO hakikisha.otp_codes (user_id, code, type, expires_at) VALUES ($1, $2, $3, $4)',
       [user.id, resetCode, 'password_reset', expiresAt]
@@ -346,20 +477,28 @@ const forgotPassword = async (req, res) => {
 
     try {
       await emailService.sendPasswordResetCode(user.email, resetCode, user.username);
+      logger.info(`Password reset code sent to user: ${user.email}`);
     } catch (emailError) {
       console.error('Failed to send password reset email:', emailError);
+      logger.error(`Failed to send password reset email to user: ${user.email}`, emailError);
+      
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to send reset code. Please try again.',
+        code: 'EMAIL_ERROR'
+      });
     }
 
     res.json({
       success: true,
-      message: 'Password reset code sent to email'
+      message: 'Password reset code sent to your email'
     });
   } catch (error) {
     console.error('Forgot password error:', error);
     logger.error('Forgot password error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to process request',
+      error: 'Failed to process request. Please try again.',
       code: 'SERVER_ERROR'
     });
   }
@@ -378,23 +517,33 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    if (newPassword.length < 8) {
+    // Validate password strength
+    if (newPassword.length < 6) {
       return res.status(400).json({
         success: false,
-        error: 'Password must be at least 8 characters',
+        error: 'Password must be at least 6 characters long',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Validate reset code format
+    if (!/^\d{6}$/.test(resetCode)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Reset code must be 6 digits',
         code: 'VALIDATION_ERROR'
       });
     }
 
     const userResult = await db.query(
-      'SELECT id FROM hakikisha.users WHERE email = $1',
-      [email]
+      'SELECT id FROM hakikisha.users WHERE email = $1 AND status = $2',
+      [email, 'active']
     );
 
     if (userResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        error: 'User not found',
+        error: 'User not found or account is inactive',
         code: 'NOT_FOUND'
       });
     }
@@ -414,35 +563,39 @@ const resetPassword = async (req, res) => {
       });
     }
 
+    // Hash new password
     const newPasswordHash = await bcrypt.hash(newPassword, 12);
 
+    // Update password
     await db.query(
       'UPDATE hakikisha.users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
       [newPasswordHash, userId]
     );
 
+    // Mark reset code as used
     await db.query(
-      'UPDATE hakikisha.otp_codes SET used = true WHERE id = $1',
+      'UPDATE hakikisha.otp_codes SET used = true, used_at = NOW() WHERE id = $1',
       [otpResult.rows[0].id]
     );
 
+    // Clear all user sessions for security
     await db.query(
       'DELETE FROM hakikisha.user_sessions WHERE user_id = $1',
       [userId]
     );
 
-    console.log('Password reset successful for user:', userId);
+    logger.info(`Password reset successful for user: ${userId}`);
 
     res.json({
       success: true,
-      message: 'Password reset successful'
+      message: 'Password reset successfully. You can now login with your new password.'
     });
   } catch (error) {
     console.error('Reset password error:', error);
     logger.error('Reset password error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to reset password',
+      error: 'Failed to reset password. Please try again.',
       code: 'SERVER_ERROR'
     });
   }
@@ -461,7 +614,16 @@ const refreshToken = async (req, res) => {
       });
     }
 
-    const decoded = jwt.verify(refreshToken, JWT_SECRET);
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshToken, JWT_SECRET);
+    } catch (jwtError) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid or expired refresh token',
+        code: 'AUTH_INVALID'
+      });
+    }
 
     if (decoded.type !== 'refresh') {
       return res.status(401).json({
@@ -485,7 +647,7 @@ const refreshToken = async (req, res) => {
     }
 
     const userResult = await db.query(
-      'SELECT id, email, role FROM hakikisha.users WHERE id = $1',
+      'SELECT id, email, role, status FROM hakikisha.users WHERE id = $1',
       [decoded.userId]
     );
 
@@ -498,6 +660,14 @@ const refreshToken = async (req, res) => {
     }
 
     const user = userResult.rows[0];
+
+    if (user.status !== 'active') {
+      return res.status(403).json({
+        success: false,
+        error: 'Account is inactive',
+        code: 'ACCOUNT_SUSPENDED'
+      });
+    }
 
     const newToken = generateJWTToken(user);
 
@@ -513,6 +683,8 @@ const refreshToken = async (req, res) => {
        WHERE refresh_token = $3`,
       [newToken, newRefreshToken, refreshToken]
     );
+
+    logger.info(`Token refreshed for user: ${user.email}`);
 
     res.json({
       success: true,
@@ -540,6 +712,7 @@ const logout = async (req, res) => {
         'DELETE FROM hakikisha.user_sessions WHERE user_id = $1 AND token = $2',
         [req.user.userId, token]
       );
+      logger.info(`User logged out: ${req.user.userId}`);
     }
 
     res.json({
@@ -552,6 +725,40 @@ const logout = async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Logout failed',
+      code: 'SERVER_ERROR'
+    });
+  }
+};
+
+const logoutAllDevices = async (req, res) => {
+  try {
+    console.log('Logout All Devices Request');
+    
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Not authenticated',
+        code: 'AUTH_REQUIRED'
+      });
+    }
+
+    await db.query(
+      'DELETE FROM hakikisha.user_sessions WHERE user_id = $1',
+      [req.user.userId]
+    );
+
+    logger.info(`All devices logged out for user: ${req.user.userId}`);
+
+    res.json({
+      success: true,
+      message: 'Logged out from all devices successfully'
+    });
+  } catch (error) {
+    console.error('Logout all devices error:', error);
+    logger.error('Logout all devices error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to logout from all devices',
       code: 'SERVER_ERROR'
     });
   }
@@ -570,7 +777,9 @@ const getCurrentUser = async (req, res) => {
     }
 
     const result = await db.query(
-      'SELECT id, email, username, phone, role, profile_picture, is_verified, registration_status, created_at FROM hakikisha.users WHERE id = $1',
+      `SELECT id, email, username, phone, role, profile_picture, is_verified, 
+              registration_status, created_at, last_login, login_count
+       FROM hakikisha.users WHERE id = $1`,
       [req.user.userId]
     );
 
@@ -583,11 +792,25 @@ const getCurrentUser = async (req, res) => {
     }
 
     // Get user points information
-    let pointsInfo = {};
+    let pointsInfo = {
+      total_points: 0,
+      current_streak_days: 0,
+      longest_streak_days: 0,
+      last_activity_date: null
+    };
+
     try {
       pointsInfo = await PointsService.getUserPoints(req.user.userId);
+      console.log('Current user points:', pointsInfo);
     } catch (pointsError) {
-      console.log('Could not fetch points info:', pointsError.message);
+      console.log('Could not fetch points info for current user:', pointsError.message);
+      // Initialize points if they don't exist
+      try {
+        await PointsService.initializeUserPoints(req.user.userId);
+        pointsInfo = await PointsService.getUserPoints(req.user.userId);
+      } catch (initError) {
+        console.log('Could not initialize points:', initError.message);
+      }
     }
 
     const user = result.rows[0];
@@ -595,10 +818,21 @@ const getCurrentUser = async (req, res) => {
     res.json({
       success: true,
       user: {
-        ...user,
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        phone: user.phone,
+        role: user.role,
+        profile_picture: user.profile_picture,
+        is_verified: user.is_verified,
+        registration_status: user.registration_status,
+        created_at: user.created_at,
+        last_login: user.last_login,
+        login_count: user.login_count,
         points: pointsInfo.total_points || 0,
         current_streak: pointsInfo.current_streak_days || 0,
-        longest_streak: pointsInfo.longest_streak_days || 0
+        longest_streak: pointsInfo.longest_streak_days || 0,
+        last_activity_date: pointsInfo.last_activity_date
       }
     });
   } catch (error) {
@@ -606,7 +840,56 @@ const getCurrentUser = async (req, res) => {
     logger.error('Get current user error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to get user',
+      error: 'Failed to get user information',
+      code: 'SERVER_ERROR'
+    });
+  }
+};
+
+const checkAuth = async (req, res) => {
+  try {
+    console.log('Check Auth Request');
+    
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Not authenticated',
+        code: 'AUTH_REQUIRED'
+      });
+    }
+
+    const result = await db.query(
+      'SELECT id, email, username, role, is_verified, registration_status FROM hakikisha.users WHERE id = $1',
+      [req.user.userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+        code: 'NOT_FOUND'
+      });
+    }
+
+    const user = result.rows[0];
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        role: user.role,
+        is_verified: user.is_verified,
+        registration_status: user.registration_status
+      }
+    });
+  } catch (error) {
+    console.error('Check auth error:', error);
+    logger.error('Check auth error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to verify authentication',
       code: 'SERVER_ERROR'
     });
   }
@@ -620,5 +903,7 @@ module.exports = {
   resetPassword,
   refreshToken,
   logout,
-  getCurrentUser
+  logoutAllDevices,
+  getCurrentUser,
+  checkAuth
 };
