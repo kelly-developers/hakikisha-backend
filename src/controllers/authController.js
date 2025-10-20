@@ -65,6 +65,7 @@ const register = async (req, res) => {
 
     const user = result.rows[0];
 
+    // Initialize points for new user
     try {
       await PointsService.initializeUserPoints(user.id);
       console.log('User points initialized');
@@ -173,16 +174,13 @@ const login = async (req, res) => {
       });
     }
 
+    // Update login stats but don't award points yet
     await db.query(
       'UPDATE hakikisha.users SET last_login = NOW(), login_count = COALESCE(login_count, 0) + 1 WHERE id = $1',
       [user.id]
     );
 
-    try {
-      await PointsService.awardPoints(user.id, POINTS.DAILY_LOGIN, 'DAILY_LOGIN', 'Daily login');
-    } catch (pointsError) {
-      console.log('Points award skipped:', pointsError.message);
-    }
+    // Note: Points are NOT awarded here - only when user actually engages with content
 
     const token = generateJWTToken(user);
 
@@ -269,11 +267,7 @@ const verify2FA = async (req, res) => {
       [user.id]
     );
 
-    try {
-      await PointsService.awardPoints(user.id, POINTS.DAILY_LOGIN, 'DAILY_LOGIN', 'Daily login');
-    } catch (pointsError) {
-      console.log('Points award skipped:', pointsError.message);
-    }
+    // Note: Points are NOT awarded for 2FA verification either
 
     const token = generateJWTToken(user);
 
@@ -588,9 +582,24 @@ const getCurrentUser = async (req, res) => {
       });
     }
 
+    // Get user points information
+    let pointsInfo = {};
+    try {
+      pointsInfo = await PointsService.getUserPoints(req.user.userId);
+    } catch (pointsError) {
+      console.log('Could not fetch points info:', pointsError.message);
+    }
+
+    const user = result.rows[0];
+    
     res.json({
       success: true,
-      user: result.rows[0]
+      user: {
+        ...user,
+        points: pointsInfo.total_points || 0,
+        current_streak: pointsInfo.current_streak_days || 0,
+        longest_streak: pointsInfo.longest_streak_days || 0
+      }
     });
   } catch (error) {
     console.error('Get current user error:', error);
