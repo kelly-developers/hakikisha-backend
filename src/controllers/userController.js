@@ -55,7 +55,7 @@ class UserController {
         updated_at: userData.updated_at,
         last_login: userData.last_login,
         login_count: userData.login_count,
-        // Points data - directly from the joined query
+        // Points data - directly from joined query
         points: Number(userData.points) || 0,
         current_streak: Number(userData.current_streak) || 0,
         longest_streak: Number(userData.longest_streak) || 0,
