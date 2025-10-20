@@ -68,14 +68,16 @@ class DatabaseInitializer {
     try {
       console.log(' Creating points system tables...');
 
-      // User Points Table
+      // User Points Table - Updated with both column name variations
       const userPointsQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.user_points (
           user_id UUID PRIMARY KEY REFERENCES hakikisha.users(id) ON DELETE CASCADE,
           total_points INTEGER DEFAULT 0,
+          current_streak INTEGER DEFAULT 0,
+          longest_streak INTEGER DEFAULT 0,
           current_streak_days INTEGER DEFAULT 0,
           longest_streak_days INTEGER DEFAULT 0,
-          last_activity_date DATE,
+          last_activity_date TIMESTAMP WITH TIME ZONE,
           points_reset_date DATE,
           created_at TIMESTAMP DEFAULT NOW(),
           updated_at TIMESTAMP DEFAULT NOW()
@@ -89,8 +91,8 @@ class DatabaseInitializer {
         CREATE TABLE IF NOT EXISTS hakikisha.points_history (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
-          points_awarded INTEGER NOT NULL,
-          action_type VARCHAR(100) NOT NULL,
+          points INTEGER NOT NULL,
+          activity_type VARCHAR(100) NOT NULL,
           description TEXT,
           created_at TIMESTAMP DEFAULT NOW()
         )
@@ -548,10 +550,11 @@ class DatabaseInitializer {
       // POINTS SYSTEM INDEXES
       'CREATE INDEX IF NOT EXISTS idx_user_points_user_id ON hakikisha.user_points(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_user_points_total ON hakikisha.user_points(total_points)',
-      'CREATE INDEX IF NOT EXISTS idx_user_points_streak ON hakikisha.user_points(current_streak_days)',
+      'CREATE INDEX IF NOT EXISTS idx_user_points_streak ON hakikisha.user_points(current_streak)',
+      'CREATE INDEX IF NOT EXISTS idx_user_points_streak_days ON hakikisha.user_points(current_streak_days)',
       'CREATE INDEX IF NOT EXISTS idx_points_history_user_id ON hakikisha.points_history(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_points_history_created_at ON hakikisha.points_history(created_at)',
-      'CREATE INDEX IF NOT EXISTS idx_points_history_action_type ON hakikisha.points_history(action_type)',
+      'CREATE INDEX IF NOT EXISTS idx_points_history_activity_type ON hakikisha.points_history(activity_type)',
       
       // BLOG INDEXES
       'CREATE INDEX IF NOT EXISTS idx_blog_articles_author_id ON hakikisha.blog_articles(author_id)',
@@ -709,7 +712,8 @@ class DatabaseInitializer {
       
       console.log(`User points table columns: ${pointsColumns.rows.length}`);
       const hasPointsColumns = pointsColumns.rows.some(col => col.column_name === 'total_points') &&
-                              pointsColumns.rows.some(col => col.column_name === 'current_streak_days');
+                              (pointsColumns.rows.some(col => col.column_name === 'current_streak') ||
+                               pointsColumns.rows.some(col => col.column_name === 'current_streak_days'));
       console.log(`   - has required columns: ${hasPointsColumns}`);
 
       // Verify blog articles table has required columns

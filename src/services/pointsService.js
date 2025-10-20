@@ -1,224 +1,207 @@
 const db = require('../config/database');
 const logger = require('../utils/logger');
 
-/**
- * Points awarded for different actions
- */
+// Points configuration
 const POINTS = {
-  CLAIM_SUBMISSION: 10,
-  CLAIM_VERIFIED: 20,
-  DAILY_LOGIN: 5,
-  SHARE_CLAIM: 3,
-  REPORT_MISINFORMATION: 15,
-  COMPLETE_PROFILE: 25,
-  FIRST_CLAIM: 50,
-  STREAK_BONUS_3_DAYS: 10,
-  STREAK_BONUS_7_DAYS: 25,
-  STREAK_BONUS_30_DAYS: 100,
-  COMMENT_ON_BLOG: 8,
-  LIKE_BLOG: 2,
-  SHARE_BLOG: 5,
-  READ_BLOG_ARTICLE: 3,
-  VERDICT_RECEIVED: 15,
+  REGISTRATION: 100,
+  DAILY_LOGIN: 10,
+  PROFILE_COMPLETION: 50,
+  CLAIM_SUBMISSION: 20,
+  CLAIM_VERIFIED: 30,
+  SOCIAL_SHARE: 5,
+  STREAK_BONUS: 25,
   PROFILE_UPDATE: 5,
-  PROFILE_PICTURE: 10,
-  DAILY_ENGAGEMENT: 2
+  PROFILE_PICTURE: 10
 };
 
 class PointsService {
-  /**
-   * Initialize points record for new user
-   */
+  // Initialize user points record if it doesn't exist
   static async initializeUserPoints(userId) {
     try {
-      const result = await db.query(
-        `INSERT INTO hakikisha.user_points (user_id, total_points, current_streak_days, longest_streak_days, last_activity_date, created_at)
-         VALUES ($1, 0, 0, 0, CURRENT_DATE, NOW())
-         ON CONFLICT (user_id) DO NOTHING
-         RETURNING *`,
+      console.log('Initializing points for user:', userId);
+      
+      // Check if user points record exists
+      const existing = await db.query(
+        'SELECT user_id FROM hakikisha.user_points WHERE user_id = $1',
         [userId]
       );
-      
-      if (result.rows.length > 0) {
-        logger.info(`Points initialized for user: ${userId}`);
+
+      if (existing.rows.length === 0) {
+        // Create initial points record
+        await db.query(
+          `INSERT INTO hakikisha.user_points 
+           (user_id, total_points, current_streak, longest_streak, current_streak_days, longest_streak_days, last_activity_date, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), NOW())`,
+          [userId, POINTS.REGISTRATION, 0, 0, 0, 0]
+        );
+        
+        // Log registration points
+        await db.query(
+          `INSERT INTO hakikisha.points_history 
+           (user_id, points, activity_type, description, created_at)
+           VALUES ($1, $2, $3, $4, NOW())`,
+          [userId, POINTS.REGISTRATION, 'REGISTRATION', 'Points for account registration']
+        );
+        
+        console.log('Initial points record created for user:', userId, 'with', POINTS.REGISTRATION, 'points');
       }
       
-      return result.rows[0];
+      return true;
     } catch (error) {
-      logger.error('Error initializing user points:', error);
+      console.error('Error initializing user points:', error);
       throw error;
     }
   }
 
-  /**
-   * Award points to user and update their record with streak management
-   */
-  static async awardPoints(userId, points, actionType, description = '') {
+  // Award points to user
+  static async awardPoints(userId, points, activityType, description = '') {
     try {
-      console.log(`Awarding ${points} points to user ${userId} for ${actionType}`);
+      // Ensure points record exists
+      await this.initializeUserPoints(userId);
 
-      // Don't award points for actions that don't involve engagement
-      if (this.shouldSkipPointsAward(actionType)) {
-        logger.info(`Skipping points award for action: ${actionType}`);
-        return {
-          pointsAwarded: 0,
-          totalPoints: 0,
-          currentStreak: 0,
-          wasReset: false,
-          message: 'No points awarded for this action type'
-        };
-      }
+      // Update points
+      const result = await db.query(
+        `UPDATE hakikisha.user_points 
+         SET total_points = total_points + $1,
+             updated_at = NOW()
+         WHERE user_id = $2
+         RETURNING total_points, current_streak, longest_streak`,
+        [points, userId]
+      );
 
-      // Get current user points record
-      const userPointsResult = await db.query(
+      // Log points activity
+      await db.query(
+        `INSERT INTO hakikisha.points_history 
+         (user_id, points, activity_type, description, created_at)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [userId, points, activityType, description]
+      );
+
+      console.log(`Awarded ${points} points to user ${userId} for ${activityType}`);
+
+      return {
+        pointsAwarded: points,
+        newTotal: result.rows[0]?.total_points || 0,
+        activityType: activityType
+      };
+    } catch (error) {
+      console.error('Error awarding points:', error);
+      throw error;
+    }
+  }
+
+  // Award points for daily login and manage streaks
+  static async awardPointsForDailyLogin(userId) {
+    try {
+      await this.initializeUserPoints(userId);
+
+      const today = new Date().toDateString();
+      
+      // Get user's current points and last activity
+      const userPoints = await db.query(
         'SELECT * FROM hakikisha.user_points WHERE user_id = $1',
         [userId]
       );
 
-      let userPoints = userPointsResult.rows[0];
-
-      // Initialize if doesn't exist
-      if (!userPoints) {
-        userPoints = await this.initializeUserPoints(userId);
-        if (!userPoints) {
-          throw new Error('Failed to initialize user points');
-        }
+      if (userPoints.rows.length === 0) {
+        throw new Error('User points record not found');
       }
 
-      const today = new Date().toISOString().split('T')[0];
-      const lastActivityDate = userPoints.last_activity_date 
-        ? new Date(userPoints.last_activity_date).toISOString().split('T')[0]
+      const currentData = userPoints.rows[0];
+      const lastActivity = currentData.last_activity_date 
+        ? new Date(currentData.last_activity_date).toDateString() 
         : null;
 
-      let newStreak = userPoints.current_streak_days || 0;
-      let shouldResetPoints = false;
+      let pointsToAward = POINTS.DAILY_LOGIN;
+      let newStreak = 1;
+      let newLongestStreak = currentData.longest_streak || 0;
 
-      // Check streak logic
-      if (lastActivityDate) {
-        const lastDate = new Date(lastActivityDate);
-        const todayDate = new Date(today);
-        const daysDifference = Math.floor((todayDate - lastDate) / (1000 * 60 * 60 * 24));
+      // Check if this is consecutive day login
+      if (lastActivity === today) {
+        // Already logged in today, no points
+        return { pointsAwarded: 0, streakMaintained: true };
+      }
 
-        if (daysDifference === 1) {
-          // Consecutive day - increment streak
-          newStreak += 1;
-          console.log(`Streak continued: ${newStreak} days`);
-        } else if (daysDifference > 1) {
-          // Skipped day(s) - reset streak but keep points
-          shouldResetPoints = true;
-          newStreak = 1;
-          console.log(`Streak broken after ${daysDifference - 1} day(s) gap. Reset to 1 day.`);
-        } else if (daysDifference === 0) {
-          // Same day - maintain current streak
-          console.log(`Same day activity, streak remains: ${newStreak} days`);
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toDateString();
+
+      if (lastActivity === yesterdayStr) {
+        // Consecutive day - increment streak
+        newStreak = (currentData.current_streak || 0) + 1;
+        if (newStreak > newLongestStreak) {
+          newLongestStreak = newStreak;
         }
-      } else {
-        // First activity
+        
+        // Add streak bonus for every 7 days
+        if (newStreak % 7 === 0) {
+          pointsToAward += POINTS.STREAK_BONUS;
+        }
+      } else if (lastActivity && lastActivity !== today && lastActivity !== yesterdayStr) {
+        // Streak broken - reset to 1
         newStreak = 1;
-        console.log(`First activity, streak started: ${newStreak} day`);
       }
 
-      // Award streak bonuses only for consecutive days
-      let streakBonus = 0;
-      if (!shouldResetPoints && newStreak > 1) {
-        if (newStreak === 3) {
-          streakBonus = POINTS.STREAK_BONUS_3_DAYS;
-          console.log(`3-day streak bonus: ${streakBonus} points`);
-        } else if (newStreak === 7) {
-          streakBonus = POINTS.STREAK_BONUS_7_DAYS;
-          console.log(`7-day streak bonus: ${streakBonus} points`);
-        } else if (newStreak === 30) {
-          streakBonus = POINTS.STREAK_BONUS_30_DAYS;
-          console.log(`30-day streak bonus: ${streakBonus} points`);
-        }
-      }
-
-      const totalPointsAwarded = shouldResetPoints ? points : points + streakBonus;
-      const newTotalPoints = shouldResetPoints ? points : (userPoints.total_points + totalPointsAwarded);
-      const longestStreak = Math.max(newStreak, userPoints.longest_streak_days || 0);
-
-      console.log(`Total points awarded: ${totalPointsAwarded} (base: ${points}, bonus: ${streakBonus})`);
-      console.log(`New total points: ${newTotalPoints}, Streak: ${newStreak} days`);
-
-      // Update user points
-      const updateResult = await db.query(
-        `UPDATE hakikisha.user_points
-         SET total_points = $1,
+      // Update points and streak
+      const result = await db.query(
+        `UPDATE hakikisha.user_points 
+         SET total_points = total_points + $1,
+             current_streak = $2,
+             longest_streak = $3,
              current_streak_days = $2,
              longest_streak_days = $3,
-             last_activity_date = CURRENT_DATE,
+             last_activity_date = NOW(),
              updated_at = NOW()
          WHERE user_id = $4
-         RETURNING *`,
-        [newTotalPoints, newStreak, longestStreak, userId]
+         RETURNING total_points, current_streak, longest_streak`,
+        [pointsToAward, newStreak, newLongestStreak, userId]
       );
 
-      if (updateResult.rows.length === 0) {
-        throw new Error('Failed to update user points');
-      }
-
-      // Record points history
+      // Log the activity
       await db.query(
-        `INSERT INTO hakikisha.points_history (user_id, points_awarded, action_type, description, created_at)
+        `INSERT INTO hakikisha.points_history 
+         (user_id, points, activity_type, description, created_at)
          VALUES ($1, $2, $3, $4, NOW())`,
-        [userId, totalPointsAwarded, actionType, description]
+        [userId, pointsToAward, 'DAILY_LOGIN', `Daily login - Streak: ${newStreak}`]
       );
 
-      // If streak was reset, log the reset
-      if (shouldResetPoints && userPoints.current_streak_days > 0) {
-        await db.query(
-          `INSERT INTO hakikisha.points_history (user_id, points_awarded, action_type, description, created_at)
-           VALUES ($1, $2, 'STREAK_RESET', 'Streak reset after inactivity', NOW())`,
-          [userId, -userPoints.current_streak_days]
-        );
-      }
-
-      logger.info(`Awarded ${totalPointsAwarded} points to user ${userId} for ${actionType}. Total: ${newTotalPoints}, Streak: ${newStreak} days`);
+      console.log(`Daily login: Awarded ${pointsToAward} points to user ${userId}, streak: ${newStreak}`);
 
       return {
-        pointsAwarded: totalPointsAwarded,
-        totalPoints: newTotalPoints,
-        currentStreak: newStreak,
-        longestStreak,
-        streakBonus,
-        wasReset: shouldResetPoints
+        pointsAwarded: pointsToAward,
+        newStreak: newStreak,
+        newLongestStreak: newLongestStreak,
+        activityType: 'DAILY_LOGIN'
       };
     } catch (error) {
-      logger.error('Error awarding points:', error);
-      console.error('Points award error details:', error);
+      console.error('Error awarding daily login points:', error);
       throw error;
     }
   }
 
-  /**
-   * Determine if points should be skipped for certain actions
-   */
-  static shouldSkipPointsAward(actionType) {
-    const skipActions = [
-      'LOGIN_ONLY', // User logged in but did nothing
-      'PASSIVE_ACTION', // Any passive action that doesn't involve engagement
-      'PROFILE_VIEW' // Just viewing profile
-    ];
-    
-    return skipActions.includes(actionType);
-  }
-
-  /**
-   * Get user's current points and streaks
-   */
+  // Get user points
   static async getUserPoints(userId) {
     try {
+      await this.initializeUserPoints(userId);
+
       const result = await db.query(
-        `SELECT total_points, current_streak_days, longest_streak_days, last_activity_date
-         FROM hakikisha.user_points WHERE user_id = $1`,
+        `SELECT 
+          total_points,
+          COALESCE(current_streak, 0) as current_streak,
+          COALESCE(longest_streak, 0) as longest_streak,
+          COALESCE(current_streak_days, 0) as current_streak_days,
+          COALESCE(longest_streak_days, 0) as longest_streak_days,
+          last_activity_date
+         FROM hakikisha.user_points 
+         WHERE user_id = $1`,
         [userId]
       );
 
       if (result.rows.length === 0) {
-        // Initialize and return default points
-        await this.initializeUserPoints(userId);
         return {
           total_points: 0,
+          current_streak: 0,
+          longest_streak: 0,
           current_streak_days: 0,
           longest_streak_days: 0,
           last_activity_date: null
@@ -227,170 +210,132 @@ class PointsService {
 
       return result.rows[0];
     } catch (error) {
-      logger.error('Error getting user points:', error);
-      // Return default points instead of throwing error
-      return {
-        total_points: 0,
-        current_streak_days: 0,
-        longest_streak_days: 0,
-        last_activity_date: null
-      };
+      console.error('Error getting user points:', error);
+      throw error;
     }
   }
 
-  /**
-   * Get user's points history
-   */
-  static async getPointsHistory(userId, limit = 50) {
+  // Get points history
+  static async getPointsHistory(userId, limit = 20) {
     try {
       const result = await db.query(
-        `SELECT points_awarded, action_type, description, created_at
-         FROM hakikisha.points_history
-         WHERE user_id = $1
-         ORDER BY created_at DESC
+        `SELECT points, activity_type, description, created_at
+         FROM hakikisha.points_history 
+         WHERE user_id = $1 
+         ORDER BY created_at DESC 
          LIMIT $2`,
         [userId, limit]
       );
 
       return result.rows;
     } catch (error) {
-      logger.error('Error getting points history:', error);
+      console.error('Error getting points history:', error);
       throw error;
     }
   }
 
-  /**
-   * Award points for daily engagement (call this when user performs any meaningful action)
-   */
-  static async awardDailyEngagement(userId, actionDescription = 'Daily engagement') {
-    return await this.awardPoints(
-      userId, 
-      POINTS.DAILY_ENGAGEMENT, 
-      'DAILY_ENGAGEMENT', 
-      actionDescription
-    );
-  }
-
-  /**
-   * Award points for specific engagement actions
-   */
-  static async awardPointsForClaimSubmission(userId, claimId) {
-    return await this.awardPoints(
-      userId, 
-      POINTS.CLAIM_SUBMISSION, 
-      'CLAIM_SUBMISSION', 
-      `Submitted claim: ${claimId}`
-    );
-  }
-
-  static async awardPointsForClaimVerified(userId, claimId) {
-    return await this.awardPoints(
-      userId, 
-      POINTS.CLAIM_VERIFIED, 
-      'CLAIM_VERIFIED', 
-      `Claim verified: ${claimId}`
-    );
-  }
-
-  static async awardPointsForDailyLogin(userId) {
-    // Award points for meaningful login (when user actually engages)
-    return await this.awardPoints(
-      userId, 
-      POINTS.DAILY_LOGIN, 
-      'DAILY_LOGIN', 
-      'Daily login with engagement'
-    );
-  }
-
-  static async awardPointsForBlogComment(userId, blogId) {
-    return await this.awardPoints(
-      userId, 
-      POINTS.COMMENT_ON_BLOG, 
-      'BLOG_COMMENT', 
-      `Commented on blog: ${blogId}`
-    );
-  }
-
-  static async awardPointsForBlogLike(userId, blogId) {
-    return await this.awardPoints(
-      userId, 
-      POINTS.LIKE_BLOG, 
-      'BLOG_LIKE', 
-      `Liked blog: ${blogId}`
-    );
-  }
-
-  static async awardPointsForBlogShare(userId, blogId) {
-    return await this.awardPoints(
-      userId, 
-      POINTS.SHARE_BLOG, 
-      'BLOG_SHARE', 
-      `Shared blog: ${blogId}`
-    );
-  }
-
-  static async awardPointsForBlogRead(userId, blogId) {
-    return await this.awardPoints(
-      userId, 
-      POINTS.READ_BLOG_ARTICLE, 
-      'BLOG_READ', 
-      `Read blog article: ${blogId}`
-    );
-  }
-
-  static async awardPointsForVerdictReceived(userId, claimId) {
-    return await this.awardPoints(
-      userId, 
-      POINTS.VERDICT_RECEIVED, 
-      'VERDICT_RECEIVED', 
-      `Received verdict for claim: ${claimId}`
-    );
-  }
-
-  /**
-   * Get leaderboard (top users by points)
-   */
+  // Get leaderboard
   static async getLeaderboard(limit = 100) {
     try {
       const result = await db.query(
-        `SELECT u.id, u.email, u.username, up.total_points, up.current_streak_days, up.longest_streak_days
+        `SELECT 
+          up.user_id,
+          u.username,
+          u.profile_picture,
+          up.total_points,
+          up.current_streak,
+          up.longest_streak,
+          up.last_activity_date
          FROM hakikisha.user_points up
          JOIN hakikisha.users u ON up.user_id = u.id
-         WHERE u.role = 'user' AND u.status = 'active'
-         ORDER BY up.total_points DESC, up.current_streak_days DESC
+         WHERE u.status = 'active'
+         ORDER BY up.total_points DESC, up.current_streak DESC
          LIMIT $1`,
         [limit]
       );
 
       return result.rows;
     } catch (error) {
-      logger.error('Error getting leaderboard:', error);
+      console.error('Error getting leaderboard:', error);
       throw error;
     }
   }
 
-  /**
-   * Get user's rank based on points
-   */
+  // Get user rank
   static async getUserRank(userId) {
     try {
       const result = await db.query(
-        `SELECT position FROM (
-          SELECT user_id, ROW_NUMBER() OVER (ORDER BY total_points DESC, current_streak_days DESC) as position
+        `SELECT rank FROM (
+          SELECT 
+            user_id,
+            RANK() OVER (ORDER BY total_points DESC, current_streak DESC) as rank
           FROM hakikisha.user_points
-          JOIN hakikisha.users ON user_points.user_id = users.id
-          WHERE users.role = 'user' AND users.status = 'active'
-        ) ranked_users
-        WHERE user_id = $1`,
+        ) ranked WHERE user_id = $1`,
         [userId]
       );
 
-      return result.rows[0] ? result.rows[0].position : null;
+      return result.rows[0]?.rank || 0;
     } catch (error) {
-      logger.error('Error getting user rank:', error);
+      console.error('Error getting user rank:', error);
+      return 0;
+    }
+  }
+
+  // Reset user points (admin function)
+  static async resetUserPoints(userId, reason = 'Admin reset') {
+    try {
+      await db.query(
+        `UPDATE hakikisha.user_points 
+         SET total_points = 0,
+             current_streak = 0,
+             longest_streak = 0,
+             current_streak_days = 0,
+             longest_streak_days = 0,
+             updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId]
+      );
+
+      // Log the reset
+      await db.query(
+        `INSERT INTO hakikisha.points_history 
+         (user_id, points, activity_type, description, created_at)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [userId, 0, 'RESET', `Points reset: ${reason}`]
+      );
+
+      console.log(`Points reset for user ${userId}: ${reason}`);
+
+      return { success: true, message: 'Points reset successfully' };
+    } catch (error) {
+      console.error('Error resetting user points:', error);
+      throw error;
+    }
+  }
+
+  // Get points statistics
+  static async getPointsStatistics() {
+    try {
+      const result = await db.query(
+        `SELECT 
+          COUNT(*) as total_users,
+          SUM(total_points) as total_points_awarded,
+          AVG(total_points) as average_points,
+          MAX(total_points) as max_points,
+          COUNT(CASE WHEN current_streak > 0 THEN 1 END) as users_with_streaks,
+          AVG(current_streak) as average_streak
+         FROM hakikisha.user_points`
+      );
+
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error getting points statistics:', error);
       throw error;
     }
   }
 }
 
-module.exports = { PointsService, POINTS };
+module.exports = {
+  PointsService,
+  POINTS
+};

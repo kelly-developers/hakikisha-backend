@@ -8,15 +8,25 @@ class UserController {
     try {
       console.log('Get Profile Request for user:', req.user.userId);
       
+      // First, ensure user points are initialized
+      try {
+        await PointsService.initializeUserPoints(req.user.userId);
+        console.log('User points initialized/verified');
+      } catch (initError) {
+        console.log('Points initialization check:', initError.message);
+      }
+
       // Get user basic info AND points in a single query with JOIN
       const result = await db.query(
         `SELECT 
           u.id, u.email, u.username, u.phone, u.profile_picture, 
-          u.is_verified, u.role, u.status, u.registration_status, 
+          u.is_verified, u.role, u.registration_status, 
           u.created_at, u.last_login, u.login_count, u.updated_at,
           COALESCE(up.total_points, 0) as points,
-          COALESCE(up.current_streak_days, 0) as current_streak,
-          COALESCE(up.longest_streak_days, 0) as longest_streak,
+          COALESCE(up.current_streak, 0) as current_streak,
+          COALESCE(up.longest_streak, 0) as longest_streak,
+          COALESCE(up.current_streak_days, 0) as current_streak_days,
+          COALESCE(up.longest_streak_days, 0) as longest_streak_days,
           up.last_activity_date
          FROM hakikisha.users u
          LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
@@ -34,10 +44,16 @@ class UserController {
 
       const userData = result.rows[0];
       
+      // Use the correct column names (try both variations)
+      const points = Number(userData.points) || 0;
+      const currentStreak = Number(userData.current_streak) || Number(userData.current_streak_days) || 0;
+      const longestStreak = Number(userData.longest_streak) || Number(userData.longest_streak_days) || 0;
+      
       console.log('User profile data with points:', {
-        points: userData.points,
-        current_streak: userData.current_streak,
-        longest_streak: userData.longest_streak
+        points: points,
+        current_streak: currentStreak,
+        longest_streak: longestStreak,
+        raw_data: userData
       });
 
       const responseData = {
@@ -56,9 +72,9 @@ class UserController {
         last_login: userData.last_login,
         login_count: userData.login_count,
         // Points data - directly from joined query
-        points: Number(userData.points) || 0,
-        current_streak: Number(userData.current_streak) || 0,
-        longest_streak: Number(userData.longest_streak) || 0,
+        points: points,
+        current_streak: currentStreak,
+        longest_streak: longestStreak,
         last_activity_date: userData.last_activity_date
       };
 
@@ -187,8 +203,10 @@ class UserController {
           u.id, u.email, u.username, u.phone, u.profile_picture, 
           u.created_at, u.updated_at,
           COALESCE(up.total_points, 0) as points,
-          COALESCE(up.current_streak_days, 0) as current_streak,
-          COALESCE(up.longest_streak_days, 0) as longest_streak
+          COALESCE(up.current_streak, 0) as current_streak,
+          COALESCE(up.longest_streak, 0) as longest_streak,
+          COALESCE(up.current_streak_days, 0) as current_streak_days,
+          COALESCE(up.longest_streak_days, 0) as longest_streak_days
          FROM hakikisha.users u
          LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
          WHERE u.id = $1`,
@@ -196,6 +214,10 @@ class UserController {
       );
 
       const updatedUserData = updatedProfileResult.rows[0];
+
+      const points = Number(updatedUserData.points) || 0;
+      const currentStreak = Number(updatedUserData.current_streak) || Number(updatedUserData.current_streak_days) || 0;
+      const longestStreak = Number(updatedUserData.longest_streak) || Number(updatedUserData.longest_streak_days) || 0;
 
       const responseData = {
         id: updatedUserData.id,
@@ -207,9 +229,9 @@ class UserController {
         profile_picture: updatedUserData.profile_picture,
         created_at: updatedUserData.created_at,
         updated_at: updatedUserData.updated_at,
-        points: Number(updatedUserData.points) || 0,
-        current_streak: Number(updatedUserData.current_streak) || 0,
-        longest_streak: Number(updatedUserData.longest_streak) || 0
+        points: points,
+        current_streak: currentStreak,
+        longest_streak: longestStreak
       };
 
       console.log('Sending updated profile with points:', {
@@ -453,11 +475,20 @@ class UserController {
     try {
       console.log('Get Points Request for user:', req.user.userId);
       
+      // Ensure points are initialized
+      try {
+        await PointsService.initializeUserPoints(req.user.userId);
+      } catch (initError) {
+        console.log('Points initialization check in getPoints:', initError.message);
+      }
+
       const result = await db.query(
         `SELECT 
           COALESCE(up.total_points, 0) as points,
-          COALESCE(up.current_streak_days, 0) as current_streak,
-          COALESCE(up.longest_streak_days, 0) as longest_streak,
+          COALESCE(up.current_streak, 0) as current_streak,
+          COALESCE(up.longest_streak, 0) as longest_streak,
+          COALESCE(up.current_streak_days, 0) as current_streak_days,
+          COALESCE(up.longest_streak_days, 0) as longest_streak_days,
           up.last_activity_date
          FROM hakikisha.user_points up
          WHERE up.user_id = $1`,
@@ -472,11 +503,12 @@ class UserController {
       };
 
       if (result.rows.length > 0) {
+        const row = result.rows[0];
         pointsData = {
-          points: Number(result.rows[0].points) || 0,
-          current_streak: Number(result.rows[0].current_streak) || 0,
-          longest_streak: Number(result.rows[0].longest_streak) || 0,
-          last_activity_date: result.rows[0].last_activity_date
+          points: Number(row.points) || 0,
+          current_streak: Number(row.current_streak) || Number(row.current_streak_days) || 0,
+          longest_streak: Number(row.longest_streak) || Number(row.longest_streak_days) || 0,
+          last_activity_date: row.last_activity_date
         };
       }
 

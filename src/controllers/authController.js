@@ -106,11 +106,11 @@ const register = async (req, res) => {
       await PointsService.initializeUserPoints(user.id);
       console.log('User points initialized for new user');
       
-      // Award points for registration and profile completion
+      // Award additional points for profile completion
       const pointsResult = await PointsService.awardPoints(
         user.id,
-        POINTS.COMPLETE_PROFILE,
-        'REGISTRATION',
+        POINTS.PROFILE_COMPLETION,
+        'PROFILE_COMPLETION',
         'Completed registration and profile setup'
       );
       console.log('Registration points awarded:', pointsResult.pointsAwarded);
@@ -256,7 +256,7 @@ const login = async (req, res) => {
     // Award points for daily login engagement
     try {
       const pointsResult = await PointsService.awardPointsForDailyLogin(user.id);
-      console.log('Daily login points awarded:', pointsResult.pointsAwarded);
+      console.log('Daily login points awarded:', pointsResult.pointsAwarded, 'Streak:', pointsResult.newStreak);
     } catch (pointsError) {
       console.log('Could not award login points:', pointsError.message);
       // Don't fail login if points system fails
@@ -372,7 +372,7 @@ const verify2FA = async (req, res) => {
     // Award points for 2FA verification (considered as engagement)
     try {
       const pointsResult = await PointsService.awardPointsForDailyLogin(user.id);
-      console.log('2FA login points awarded:', pointsResult.pointsAwarded);
+      console.log('2FA login points awarded:', pointsResult.pointsAwarded, 'Streak:', pointsResult.newStreak);
     } catch (pointsError) {
       console.log('Could not award 2FA login points:', pointsError.message);
     }
@@ -794,6 +794,8 @@ const getCurrentUser = async (req, res) => {
     // Get user points information
     let pointsInfo = {
       total_points: 0,
+      current_streak: 0,
+      longest_streak: 0,
       current_streak_days: 0,
       longest_streak_days: 0,
       last_activity_date: null
@@ -815,6 +817,10 @@ const getCurrentUser = async (req, res) => {
 
     const user = result.rows[0];
     
+    const points = Number(pointsInfo.total_points) || 0;
+    const currentStreak = Number(pointsInfo.current_streak) || Number(pointsInfo.current_streak_days) || 0;
+    const longestStreak = Number(pointsInfo.longest_streak) || Number(pointsInfo.longest_streak_days) || 0;
+    
     res.json({
       success: true,
       user: {
@@ -829,9 +835,9 @@ const getCurrentUser = async (req, res) => {
         created_at: user.created_at,
         last_login: user.last_login,
         login_count: user.login_count,
-        points: pointsInfo.total_points || 0,
-        current_streak: pointsInfo.current_streak_days || 0,
-        longest_streak: pointsInfo.longest_streak_days || 0,
+        points: points,
+        current_streak: currentStreak,
+        longest_streak: longestStreak,
         last_activity_date: pointsInfo.last_activity_date
       }
     });
