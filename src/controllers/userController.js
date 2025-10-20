@@ -4,94 +4,94 @@ const logger = require('../utils/logger');
 const { PointsService } = require('../services/pointsService');
 
 class UserController {
-  async getProfile(req, res) {
+async getProfile(req, res) {
+  try {
+    console.log('Get Profile Request for user:', req.user.userId);
+    
+    // First, ensure user points are initialized
     try {
-      console.log('Get Profile Request for user:', req.user.userId);
-      
-      // First, ensure user points are initialized
-      try {
-        await PointsService.initializeUserPoints(req.user.userId);
-        console.log('User points initialized/verified');
-      } catch (initError) {
-        console.log('Points initialization check:', initError.message);
-      }
+      await PointsService.initializeUserPoints(req.user.userId);
+      console.log('User points initialized/verified');
+    } catch (initError) {
+      console.log('Points initialization check:', initError.message);
+    }
 
-      // Get user basic info AND points in a single query with JOIN
-      const result = await db.query(
-        `SELECT 
-          u.id, u.email, u.username, u.phone, u.profile_picture, 
-          u.is_verified, u.role, u.registration_status, 
-          u.created_at, u.last_login, u.login_count, u.updated_at,
-          COALESCE(up.total_points, 0) as points,
-          COALESCE(up.current_streak, 0) as current_streak,
-          COALESCE(up.longest_streak, 0) as longest_streak,
-          COALESCE(up.current_streak_days, 0) as current_streak_days,
-          COALESCE(up.longest_streak_days, 0) as longest_streak_days,
-          up.last_activity_date
-         FROM hakikisha.users u
-         LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
-         WHERE u.id = $1`,
-        [req.user.userId]
-      );
+    // Get user basic info AND points in a single query with JOIN
+    const result = await db.query(
+      `SELECT 
+        u.id, u.email, u.username, u.phone, u.profile_picture, 
+        u.is_verified, u.role, u.registration_status, 
+        u.created_at, u.last_login, u.login_count, u.updated_at,
+        COALESCE(up.total_points, 0) as points,
+        COALESCE(up.current_streak, 0) as current_streak,
+        COALESCE(up.longest_streak, 0) as longest_streak,
+        COALESCE(up.current_streak_days, 0) as current_streak_days,
+        COALESCE(up.longest_streak_days, 0) as longest_streak_days,
+        up.last_activity_date
+       FROM hakikisha.users u
+       LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
+       WHERE u.id = $1`,
+      [req.user.userId]
+    );
 
-      if (result.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          error: 'User not found',
-          code: 'NOT_FOUND'
-        });
-      }
-
-      const userData = result.rows[0];
-      
-      // Use the correct column names (try both variations)
-      const points = Number(userData.points) || 0;
-      const currentStreak = Number(userData.current_streak) || Number(userData.current_streak_days) || 0;
-      const longestStreak = Number(userData.longest_streak) || Number(userData.longest_streak_days) || 0;
-      
-      console.log('User profile data with points:', {
-        points: points,
-        current_streak: currentStreak,
-        longest_streak: longestStreak,
-        raw_data: userData
-      });
-
-      const responseData = {
-        id: userData.id,
-        email: userData.email,
-        username: userData.username,
-        full_name: userData.username,
-        phone: userData.phone,
-        phone_number: userData.phone,
-        role: userData.role,
-        profile_picture: userData.profile_picture,
-        is_verified: userData.is_verified,
-        registration_status: userData.registration_status,
-        created_at: userData.created_at,
-        updated_at: userData.updated_at,
-        last_login: userData.last_login,
-        login_count: userData.login_count,
-        // Points data - directly from joined query
-        points: points,
-        current_streak: currentStreak,
-        longest_streak: longestStreak,
-        last_activity_date: userData.last_activity_date
-      };
-
-      res.json({
-        success: true,
-        data: responseData
-      });
-    } catch (error) {
-      console.error('Get profile error:', error);
-      logger.error('Get profile error:', error);
-      res.status(500).json({
+    if (result.rows.length === 0) {
+      return res.status(404).json({
         success: false,
-        error: 'Failed to get user profile',
-        code: 'SERVER_ERROR'
+        error: 'User not found',
+        code: 'NOT_FOUND'
       });
     }
+
+    const userData = result.rows[0];
+    
+    // Use the correct column names (try both variations)
+    const points = Number(userData.points) || 0;
+    const currentStreak = Number(userData.current_streak) || Number(userData.current_streak_days) || 0;
+    const longestStreak = Number(userData.longest_streak) || Number(userData.longest_streak_days) || 0;
+    
+    console.log('User profile data with points:', {
+      points: points,
+      current_streak: currentStreak,
+      longest_streak: longestStreak,
+      raw_data: userData
+    });
+
+    const responseData = {
+      id: userData.id,
+      email: userData.email,
+      username: userData.username,
+      full_name: userData.username,
+      phone: userData.phone,
+      phone_number: userData.phone,
+      role: userData.role,
+      profile_picture: userData.profile_picture,
+      is_verified: userData.is_verified,
+      registration_status: userData.registration_status,
+      created_at: userData.created_at,
+      updated_at: userData.updated_at,
+      last_login: userData.last_login,
+      login_count: userData.login_count,
+      // Points data - directly from joined query
+      points: points,
+      current_streak: currentStreak,
+      longest_streak: longestStreak,
+      last_activity_date: userData.last_activity_date
+    };
+
+    res.json({
+      success: true,
+      data: responseData
+    });
+  } catch (error) {
+    console.error('Get profile error:', error);
+    logger.error('Get profile error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get user profile',
+      code: 'SERVER_ERROR'
+    });
   }
+}
 
   async updateProfile(req, res) {
     try {
