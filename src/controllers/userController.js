@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const logger = require('../utils/logger');
+const { PointsService } = require('../services/pointsService');
 
 class UserController {
   async getProfile(req, res) {
@@ -21,9 +22,52 @@ class UserController {
         });
       }
 
+      // Get user points information
+      let pointsInfo = {};
+      try {
+        pointsInfo = await PointsService.getUserPoints(req.user.userId);
+        console.log('Points info retrieved:', pointsInfo);
+      } catch (pointsError) {
+        console.log('Could not fetch points info:', pointsError.message);
+        // Initialize points if they don't exist
+        try {
+          await PointsService.initializeUserPoints(req.user.userId);
+          pointsInfo = {
+            total_points: 0,
+            current_streak_days: 0,
+            longest_streak_days: 0,
+            last_activity_date: null
+          };
+        } catch (initError) {
+          console.log('Could not initialize points:', initError.message);
+        }
+      }
+
+      const user = result.rows[0];
+      
       res.json({
         success: true,
-        profile: result.rows[0]
+        data: {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          full_name: user.username, // Map username to full_name for frontend
+          phone: user.phone,
+          phone_number: user.phone, // Map phone to phone_number for frontend
+          role: user.role,
+          profile_picture: user.profile_picture,
+          is_verified: user.is_verified,
+          registration_status: user.registration_status,
+          created_at: user.created_at,
+          updated_at: user.updated_at,
+          last_login: user.last_login,
+          login_count: user.login_count,
+          // Points data
+          points: pointsInfo.total_points || 0,
+          current_streak: pointsInfo.current_streak_days || 0,
+          longest_streak: pointsInfo.longest_streak_days || 0,
+          last_activity_date: pointsInfo.last_activity_date
+        }
       });
     } catch (error) {
       console.error('Get profile error:', error);
@@ -39,16 +83,19 @@ class UserController {
   async updateProfile(req, res) {
     try {
       console.log('Update Profile Request for user:', req.user.userId);
-      const { username, phone, bio } = req.body;
+      const { username, phone, bio, full_name } = req.body;
       
       const updates = [];
       const params = [];
       let paramCount = 1;
 
-      if (username !== undefined) {
+      // Use full_name as username if provided, otherwise use username
+      const nameToUpdate = full_name || username;
+      
+      if (nameToUpdate !== undefined) {
         // Validate username format
         const usernameRegex = /^[a-zA-Z0-9_-]{3,30}$/;
-        if (!usernameRegex.test(username)) {
+        if (!usernameRegex.test(nameToUpdate)) {
           return res.status(400).json({
             success: false,
             error: 'Username must be 3-30 characters and contain only letters, numbers, underscores, and hyphens',
@@ -59,7 +106,7 @@ class UserController {
         // Check if username is already taken
         const existingUser = await db.query(
           'SELECT id FROM hakikisha.users WHERE username = $1 AND id != $2',
-          [username, req.user.userId]
+          [nameToUpdate, req.user.userId]
         );
         
         if (existingUser.rows.length > 0) {
@@ -71,7 +118,7 @@ class UserController {
         }
 
         updates.push(`username = $${paramCount}`);
-        params.push(username);
+        params.push(nameToUpdate);
         paramCount++;
       }
 
@@ -120,14 +167,37 @@ class UserController {
 
       const result = await db.query(
         `UPDATE hakikisha.users SET ${updates.join(', ')} WHERE id = $${paramCount} 
-         RETURNING id, email, username, phone, profile_picture, created_at`,
+         RETURNING id, email, username, phone, profile_picture, created_at, updated_at`,
         params
       );
+
+      // Get updated points info
+      let pointsInfo = {};
+      try {
+        pointsInfo = await PointsService.getUserPoints(req.user.userId);
+      } catch (pointsError) {
+        console.log('Could not fetch updated points info:', pointsError.message);
+      }
+
+      const updatedUser = result.rows[0];
 
       res.json({
         success: true,
         message: 'Profile updated successfully',
-        profile: result.rows[0]
+        data: {
+          id: updatedUser.id,
+          email: updatedUser.email,
+          username: updatedUser.username,
+          full_name: updatedUser.username,
+          phone: updatedUser.phone,
+          phone_number: updatedUser.phone,
+          profile_picture: updatedUser.profile_picture,
+          created_at: updatedUser.created_at,
+          updated_at: updatedUser.updated_at,
+          points: pointsInfo.total_points || 0,
+          current_streak: pointsInfo.current_streak_days || 0,
+          longest_streak: pointsInfo.longest_streak_days || 0
+        }
       });
     } catch (error) {
       console.error('Update profile error:', error);
