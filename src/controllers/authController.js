@@ -866,7 +866,7 @@ const checkAuth = async (req, res) => {
       });
     }
 
-    // Use the JOIN query here too
+    // Use the JOIN
     const result = await db.query(
       `SELECT 
         u.id, u.email, u.username, u.role, u.is_verified, u.registration_status,
