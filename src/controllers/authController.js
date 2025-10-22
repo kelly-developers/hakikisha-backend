@@ -37,7 +37,6 @@ const register = async (req, res) => {
       });
     }
 
-    // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({
@@ -47,7 +46,6 @@ const register = async (req, res) => {
       });
     }
 
-    // Validate password strength
     if (password.length < 6) {
       return res.status(400).json({
         success: false,
@@ -56,7 +54,6 @@ const register = async (req, res) => {
       });
     }
 
-    // Check if user already exists
     const existingUser = await db.query(
       'SELECT id FROM hakikisha.users WHERE email = $1',
       [email]
@@ -70,7 +67,6 @@ const register = async (req, res) => {
       });
     }
 
-    // Check if username is taken
     if (username) {
       const existingUsername = await db.query(
         'SELECT id FROM hakikisha.users WHERE username = $1',
@@ -101,12 +97,10 @@ const register = async (req, res) => {
 
     const user = result.rows[0];
 
-    // Initialize points for new user and award registration points
     try {
       await PointsService.initializeUserPoints(user.id);
       console.log('User points initialized for new user');
       
-      // Award additional points for profile completion
       const pointsResult = await PointsService.awardPoints(
         user.id,
         POINTS.PROFILE_COMPLETION,
@@ -116,15 +110,12 @@ const register = async (req, res) => {
       console.log('Registration points awarded:', pointsResult.pointsAwarded);
     } catch (pointsError) {
       console.log('Points initialization or award failed:', pointsError.message);
-      // Don't fail registration if points system fails
     }
 
-    // Send welcome email
     try {
       await emailService.sendWelcomeEmail(user.email, user.username);
     } catch (emailError) {
       console.error('Failed to send welcome email:', emailError);
-      // Don't fail registration if email fails
     }
 
     logger.info(`New user registered: ${user.email} with ID: ${user.id}`);
@@ -185,7 +176,6 @@ const login = async (req, res) => {
 
     const user = userResult.rows[0];
 
-    // Check if account is active
     if (user.status !== 'active') {
       return res.status(403).json({
         success: false,
@@ -194,7 +184,6 @@ const login = async (req, res) => {
       });
     }
 
-    // Verify password
     const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
       logger.warn(`Failed login attempt for user: ${user.email} - Invalid password`);
@@ -205,7 +194,6 @@ const login = async (req, res) => {
       });
     }
 
-    // Check registration status
     if (user.registration_status !== 'approved') {
       return res.status(403).json({
         success: false,
@@ -214,18 +202,15 @@ const login = async (req, res) => {
       });
     }
 
-    // Handle 2FA for admin users or users with 2FA enabled
     if (user.role === 'admin' || user.two_factor_enabled) {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-      // Clear any existing OTP codes for this user
       await db.query(
         'DELETE FROM hakikisha.otp_codes WHERE user_id = $1 AND type = $2',
         [user.id, '2fa']
       );
 
-      // Insert new OTP code
       await db.query(
         'INSERT INTO hakikisha.otp_codes (user_id, code, type, expires_at) VALUES ($1, $2, $3, $4)',
         [user.id, otp, '2fa', expiresAt]
@@ -247,22 +232,18 @@ const login = async (req, res) => {
       });
     }
 
-    // Update login stats
     await db.query(
       'UPDATE hakikisha.users SET last_login = NOW(), login_count = COALESCE(login_count, 0) + 1, updated_at = NOW() WHERE id = $1',
       [user.id]
     );
 
-    // Award points for daily login engagement
     try {
       const pointsResult = await PointsService.awardPointsForDailyLogin(user.id);
       console.log('Daily login points awarded:', pointsResult.pointsAwarded, 'Streak:', pointsResult.newStreak);
     } catch (pointsError) {
       console.log('Could not award login points:', pointsError.message);
-      // Don't fail login if points system fails
     }
 
-    // Generate tokens
     const token = generateJWTToken(user);
     const refreshToken = jwt.sign(
       { userId: user.id, email: user.email, type: 'refresh' },
@@ -270,7 +251,6 @@ const login = async (req, res) => {
       { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
     );
 
-    // Create or update session
     const sessionId = uuidv4();
     await db.query(
       `INSERT INTO hakikisha.user_sessions (id, user_id, token, refresh_token, expires_at, created_at, last_accessed)
@@ -320,7 +300,6 @@ const verify2FA = async (req, res) => {
       });
     }
 
-    // Validate code format
     if (!/^\d{6}$/.test(code)) {
       return res.status(400).json({
         success: false,
@@ -342,7 +321,6 @@ const verify2FA = async (req, res) => {
       });
     }
 
-    // Mark OTP as used
     await db.query(
       'UPDATE hakikisha.otp_codes SET used = true, used_at = NOW() WHERE id = $1',
       [result.rows[0].id]
@@ -363,13 +341,11 @@ const verify2FA = async (req, res) => {
 
     const user = userResult.rows[0];
 
-    // Update login stats
     await db.query(
       'UPDATE hakikisha.users SET last_login = NOW(), login_count = COALESCE(login_count, 0) + 1, updated_at = NOW() WHERE id = $1',
       [user.id]
     );
 
-    // Award points for 2FA verification (considered as engagement)
     try {
       const pointsResult = await PointsService.awardPointsForDailyLogin(user.id);
       console.log('2FA login points awarded:', pointsResult.pointsAwarded, 'Streak:', pointsResult.newStreak);
@@ -377,7 +353,6 @@ const verify2FA = async (req, res) => {
       console.log('Could not award 2FA login points:', pointsError.message);
     }
 
-    // Generate tokens
     const token = generateJWTToken(user);
     const refreshToken = jwt.sign(
       { userId: user.id, email: user.email, type: 'refresh' },
@@ -385,7 +360,6 @@ const verify2FA = async (req, res) => {
       { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
     );
 
-    // Create or update session
     const sessionId = uuidv4();
     await db.query(
       `INSERT INTO hakikisha.user_sessions (id, user_id, token, refresh_token, expires_at, created_at, last_accessed)
@@ -435,7 +409,6 @@ const forgotPassword = async (req, res) => {
       });
     }
 
-    // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({
@@ -450,7 +423,6 @@ const forgotPassword = async (req, res) => {
       [email, 'active']
     );
 
-    // Always return success to prevent email enumeration
     if (userResult.rows.length === 0) {
       logger.info(`Password reset requested for non-existent email: ${email}`);
       return res.json({
@@ -461,15 +433,13 @@ const forgotPassword = async (req, res) => {
 
     const user = userResult.rows[0];
     const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
-    // Clear any existing reset codes for this user
     await db.query(
       'DELETE FROM hakikisha.otp_codes WHERE user_id = $1 AND type = $2',
       [user.id, 'password_reset']
     );
 
-    // Insert new reset code
     await db.query(
       'INSERT INTO hakikisha.otp_codes (user_id, code, type, expires_at) VALUES ($1, $2, $3, $4)',
       [user.id, resetCode, 'password_reset', expiresAt]
@@ -517,7 +487,6 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    // Validate password strength
     if (newPassword.length < 6) {
       return res.status(400).json({
         success: false,
@@ -526,7 +495,6 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    // Validate reset code format
     if (!/^\d{6}$/.test(resetCode)) {
       return res.status(400).json({
         success: false,
@@ -563,22 +531,18 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    // Hash new password
     const newPasswordHash = await bcrypt.hash(newPassword, 12);
 
-    // Update password
     await db.query(
       'UPDATE hakikisha.users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
       [newPasswordHash, userId]
     );
 
-    // Mark reset code as used
     await db.query(
       'UPDATE hakikisha.otp_codes SET used = true, used_at = NOW() WHERE id = $1',
       [otpResult.rows[0].id]
     );
 
-    // Clear all user sessions for security
     await db.query(
       'DELETE FROM hakikisha.user_sessions WHERE user_id = $1',
       [userId]
@@ -776,7 +740,6 @@ const getCurrentUser = async (req, res) => {
       });
     }
 
-    // First, ensure user points are initialized
     try {
       await PointsService.initializeUserPoints(req.user.userId);
       console.log('User points initialized/verified in getCurrentUser');
@@ -784,7 +747,6 @@ const getCurrentUser = async (req, res) => {
       console.log('Points initialization check in getCurrentUser:', initError.message);
     }
 
-    // Use the SAME JOIN query as UserController
     const result = await db.query(
       `SELECT 
         u.id, u.email, u.username, u.phone, u.profile_picture, 
@@ -793,8 +755,6 @@ const getCurrentUser = async (req, res) => {
         COALESCE(up.total_points, 0) as points,
         COALESCE(up.current_streak, 0) as current_streak,
         COALESCE(up.longest_streak, 0) as longest_streak,
-        COALESCE(up.current_streak_days, 0) as current_streak_days,
-        COALESCE(up.longest_streak_days, 0) as longest_streak_days,
         up.last_activity_date
        FROM hakikisha.users u
        LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
@@ -812,10 +772,9 @@ const getCurrentUser = async (req, res) => {
 
     const userData = result.rows[0];
     
-    // Use the correct column names (try both variations)
     const points = Number(userData.points) || 0;
-    const currentStreak = Number(userData.current_streak) || Number(userData.current_streak_days) || 0;
-    const longestStreak = Number(userData.longest_streak) || Number(userData.longest_streak_days) || 0;
+    const currentStreak = Number(userData.current_streak) || 0;
+    const longestStreak = Number(userData.longest_streak) || 0;
     
     console.log('Current user data with points:', {
       points: points,
@@ -866,7 +825,6 @@ const checkAuth = async (req, res) => {
       });
     }
 
-    // Use the JOIN
     const result = await db.query(
       `SELECT 
         u.id, u.email, u.username, u.role, u.is_verified, u.registration_status,
