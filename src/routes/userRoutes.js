@@ -5,6 +5,7 @@ const db = require('../config/database');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const bcrypt = require('bcryptjs'); // ADD THIS IMPORT
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-fallback-secret-key-change-in-production';
 
@@ -302,7 +303,7 @@ router.put('/profile', verifyToken, async (req, res) => {
   }
 });
 
-// Change password
+// Change password - FIXED: Added bcrypt import
 router.post('/change-password', verifyToken, async (req, res) => {
   try {
     console.log('Change Password Request for user:', req.user.userId);
