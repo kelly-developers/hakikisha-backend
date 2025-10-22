@@ -728,6 +728,7 @@ const logoutAllDevices = async (req, res) => {
   }
 };
 
+// In your authController.js, update the getCurrentUser function:
 const getCurrentUser = async (req, res) => {
   try {
     console.log('Get Current User Request');
@@ -740,6 +741,7 @@ const getCurrentUser = async (req, res) => {
       });
     }
 
+    // Ensure points are initialized
     try {
       await PointsService.initializeUserPoints(req.user.userId);
       console.log('User points initialized/verified in getCurrentUser');
@@ -747,6 +749,7 @@ const getCurrentUser = async (req, res) => {
       console.log('Points initialization check in getCurrentUser:', initError.message);
     }
 
+    // FIXED: Use the JOIN query
     const result = await db.query(
       `SELECT 
         u.id, u.email, u.username, u.phone, u.profile_picture, 

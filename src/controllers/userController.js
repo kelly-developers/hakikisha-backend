@@ -63,12 +63,20 @@ const verifyToken = (req, res, next) => {
   }
 };
 
+// FIXED: This is the main profile endpoint that was missing the JOIN
 router.get('/profile', verifyToken, async (req, res) => {
   try {
     console.log('Get profile request for user:', req.user.userId);
     
-    await PointsService.initializeUserPoints(req.user.userId);
+    // First ensure user points are initialized
+    try {
+      await PointsService.initializeUserPoints(req.user.userId);
+      console.log('Points initialized for user:', req.user.userId);
+    } catch (initError) {
+      console.log('Points initialization error:', initError.message);
+    }
     
+    // FIXED: This query now properly joins with user_points table
     const userResult = await db.query(
       `SELECT 
         u.id, u.email, u.username, u.phone, u.role, u.is_verified, u.registration_status, 
@@ -92,6 +100,13 @@ router.get('/profile', verifyToken, async (req, res) => {
 
     const user = userResult.rows[0];
     
+    console.log('Raw user data from database:', {
+      points: user.points,
+      current_streak: user.current_streak,
+      longest_streak: user.longest_streak
+    });
+    
+    // Build profile picture URL if it exists
     let profilePictureUrl = null;
     if (user.profile_picture) {
       if (user.profile_picture.startsWith('http')) {
@@ -101,6 +116,7 @@ router.get('/profile', verifyToken, async (req, res) => {
       }
     }
     
+    // Format points data properly
     const pointsData = {
       points: Number(user.points) || 0,
       current_streak: Number(user.current_streak) || 0,
@@ -108,30 +124,34 @@ router.get('/profile', verifyToken, async (req, res) => {
       last_activity_date: user.last_activity_date
     };
 
-    console.log('Profile data with points:', pointsData);
+    console.log('Final profile data with points:', pointsData);
+
+    // Return the complete user profile with points
+    const responseData = {
+      id: user.id,
+      email: user.email,
+      username: user.username,
+      full_name: user.username,
+      phone_number: user.phone,
+      phone: user.phone,
+      role: user.role,
+      is_verified: user.is_verified,
+      profile_picture: profilePictureUrl,
+      registration_status: user.registration_status,
+      created_at: user.created_at,
+      updated_at: user.updated_at,
+      last_login: user.last_login,
+      login_count: user.login_count,
+      // Include points data directly in the response
+      points: pointsData.points,
+      current_streak: pointsData.current_streak,
+      longest_streak: pointsData.longest_streak,
+      last_activity_date: pointsData.last_activity_date
+    };
 
     res.json({
       success: true,
-      data: {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        full_name: user.username,
-        phone_number: user.phone,
-        phone: user.phone,
-        role: user.role,
-        is_verified: user.is_verified,
-        profile_picture: profilePictureUrl,
-        registration_status: user.registration_status,
-        created_at: user.created_at,
-        updated_at: user.updated_at,
-        last_login: user.last_login,
-        login_count: user.login_count,
-        points: pointsData.points,
-        current_streak: pointsData.current_streak,
-        longest_streak: pointsData.longest_streak,
-        last_activity_date: pointsData.last_activity_date
-      }
+      data: responseData
     });
 
   } catch (error) {
@@ -143,13 +163,14 @@ router.get('/profile', verifyToken, async (req, res) => {
   }
 });
 
+// Additional endpoint to get just points
 router.get('/points', verifyToken, async (req, res) => {
   try {
     console.log('Get Points Request for user:', req.user.userId);
     
     const pointsData = await PointsService.getUserPoints(req.user.userId);
 
-    console.log('Sending points response:', pointsData);
+    console.log('Points data:', pointsData);
 
     res.json({
       success: true,
@@ -165,50 +186,151 @@ router.get('/points', verifyToken, async (req, res) => {
   }
 });
 
-router.get('/points/history', verifyToken, async (req, res) => {
+// Update user profile - FIXED: Also return points data
+router.put('/profile', verifyToken, async (req, res) => {
   try {
-    const { limit = 20, offset = 0 } = req.query;
+    const { full_name, username, phone_number, phone, profile_picture } = req.body;
+    const updates = {};
     
-    const history = await PointsService.getPointsHistory(
-      req.user.userId, 
-      parseInt(limit), 
-      parseInt(offset)
+    if (full_name !== undefined) updates.username = full_name;
+    if (username !== undefined) updates.username = username;
+    if (phone_number !== undefined) updates.phone = phone_number;
+    if (phone !== undefined) updates.phone = phone;
+    if (profile_picture !== undefined) updates.profile_picture = profile_picture;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No valid fields to update'
+      });
+    }
+
+    const setClause = Object.keys(updates).map((key, index) => `${key} = $${index + 1}`).join(', ');
+    const values = Object.values(updates);
+    values.push(req.user.userId);
+
+    // Update user profile
+    const result = await db.query(
+      `UPDATE hakikisha.users 
+       SET ${setClause}, updated_at = NOW()
+       WHERE id = $${values.length}
+       RETURNING id, email, username, phone, role, profile_picture, is_verified, registration_status, created_at, updated_at`,
+      values
     );
 
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const user = result.rows[0];
+
+    // Get updated points data
+    const pointsData = await PointsService.getUserPoints(req.user.userId);
+
+    let profilePictureUrl = null;
+    if (user.profile_picture) {
+      if (user.profile_picture.startsWith('http')) {
+        profilePictureUrl = user.profile_picture;
+      } else {
+        profilePictureUrl = `${req.protocol}://${req.get('host')}/${user.profile_picture}`;
+      }
+    }
+
     res.json({
       success: true,
-      data: history
+      message: 'Profile updated successfully',
+      data: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        full_name: user.username,
+        phone_number: user.phone,
+        phone: user.phone,
+        role: user.role,
+        profile_picture: profilePictureUrl,
+        is_verified: user.is_verified,
+        registration_status: user.registration_status,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+        // Include points in the response
+        points: pointsData.points,
+        current_streak: pointsData.current_streak,
+        longest_streak: pointsData.longest_streak
+      }
     });
+
   } catch (error) {
-    console.error('Get points history error:', error);
+    console.error('Update profile error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to get points history',
-      code: 'SERVER_ERROR'
+      error: 'Internal server error'
     });
   }
 });
 
-router.get('/leaderboard', verifyToken, async (req, res) => {
+// FIXED: Also update the auth controller to include points
+router.get('/auth/profile', verifyToken, async (req, res) => {
   try {
-    const { limit = 50 } = req.query;
+    console.log('Get auth profile request for user:', req.user.userId);
     
-    const leaderboard = await PointsService.getLeaderboard(parseInt(limit));
+    // Ensure points are initialized
+    await PointsService.initializeUserPoints(req.user.userId);
+    
+    const result = await db.query(
+      `SELECT 
+        u.id, u.email, u.username, u.role, u.is_verified, u.registration_status,
+        COALESCE(up.total_points, 0) as points,
+        COALESCE(up.current_streak, 0) as current_streak,
+        COALESCE(up.longest_streak, 0) as longest_streak
+       FROM hakikisha.users u
+       LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
+       WHERE u.id = $1`,
+      [req.user.userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const user = result.rows[0];
+    
+    const points = Number(user.points) || 0;
+    const currentStreak = Number(user.current_streak) || 0;
+    const longestStreak = Number(user.longest_streak) || 0;
+
+    console.log('Auth profile with points:', { points, currentStreak, longestStreak });
 
     res.json({
       success: true,
-      data: leaderboard
+      user: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        role: user.role,
+        is_verified: user.is_verified,
+        registration_status: user.registration_status,
+        points: points,
+        current_streak: currentStreak,
+        longest_streak: longestStreak
+      }
     });
   } catch (error) {
-    console.error('Get leaderboard error:', error);
+    console.error('Get auth profile error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to get leaderboard',
+      error: 'Failed to get user profile',
       code: 'SERVER_ERROR'
     });
   }
 });
 
+// Rest of the endpoints remain the same...
 router.post('/profile-picture', verifyToken, upload.single('profile_picture'), async (req, res) => {
   try {
     console.log('Upload Profile Picture Request for user:', req.user.userId);
@@ -295,82 +417,6 @@ router.delete('/profile-picture', verifyToken, async (req, res) => {
   }
 });
 
-router.put('/profile', verifyToken, async (req, res) => {
-  try {
-    const { full_name, username, phone_number, phone, profile_picture } = req.body;
-    const updates = {};
-    
-    if (full_name !== undefined) updates.username = full_name;
-    if (username !== undefined) updates.username = username;
-    if (phone_number !== undefined) updates.phone = phone_number;
-    if (phone !== undefined) updates.phone = phone;
-    if (profile_picture !== undefined) updates.profile_picture = profile_picture;
-
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'No valid fields to update'
-      });
-    }
-
-    const setClause = Object.keys(updates).map((key, index) => `${key} = $${index + 1}`).join(', ');
-    const values = Object.values(updates);
-    values.push(req.user.userId);
-
-    const result = await db.query(
-      `UPDATE hakikisha.users 
-       SET ${setClause}, updated_at = NOW()
-       WHERE id = $${values.length}
-       RETURNING id, email, username, phone, role, profile_picture, is_verified, registration_status, created_at, updated_at`,
-      values
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'User not found'
-      });
-    }
-
-    const user = result.rows[0];
-
-    let profilePictureUrl = null;
-    if (user.profile_picture) {
-      if (user.profile_picture.startsWith('http')) {
-        profilePictureUrl = user.profile_picture;
-      } else {
-        profilePictureUrl = `${req.protocol}://${req.get('host')}/${user.profile_picture}`;
-      }
-    }
-
-    res.json({
-      success: true,
-      message: 'Profile updated successfully',
-      data: {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        full_name: user.username,
-        phone_number: user.phone,
-        phone: user.phone,
-        role: user.role,
-        profile_picture: profilePictureUrl,
-        is_verified: user.is_verified,
-        registration_status: user.registration_status,
-        created_at: user.created_at,
-        updated_at: user.updated_at
-      }
-    });
-
-  } catch (error) {
-    console.error('Update profile error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error'
-    });
-  }
-});
-
 router.post('/change-password', verifyToken, async (req, res) => {
   try {
     console.log('Change Password Request for user:', req.user.userId);
@@ -430,6 +476,50 @@ router.post('/change-password', verifyToken, async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to change password',
+      code: 'SERVER_ERROR'
+    });
+  }
+});
+
+router.get('/points/history', verifyToken, async (req, res) => {
+  try {
+    const { limit = 20, offset = 0 } = req.query;
+    
+    const history = await PointsService.getPointsHistory(
+      req.user.userId, 
+      parseInt(limit), 
+      parseInt(offset)
+    );
+
+    res.json({
+      success: true,
+      data: history
+    });
+  } catch (error) {
+    console.error('Get points history error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get points history',
+      code: 'SERVER_ERROR'
+    });
+  }
+});
+
+router.get('/leaderboard', verifyToken, async (req, res) => {
+  try {
+    const { limit = 50 } = req.query;
+    
+    const leaderboard = await PointsService.getLeaderboard(parseInt(limit));
+
+    res.json({
+      success: true,
+      data: leaderboard
+    });
+  } catch (error) {
+    console.error('Get leaderboard error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get leaderboard',
       code: 'SERVER_ERROR'
     });
   }
