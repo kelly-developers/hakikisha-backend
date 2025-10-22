@@ -339,7 +339,7 @@ class BlogController {
   async getMyBlogs(req, res) {
     try {
       const { status, limit = 10, offset = 0 } = req.query;
-
+      
       let blogs;
       if (status === 'draft') {
         blogs = await blogService.getDraftBlogs(req.user.userId);
