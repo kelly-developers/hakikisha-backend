@@ -8,6 +8,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
+const fs = require('fs');
 
 const startServer = async () => {
   try {
@@ -91,6 +93,17 @@ const startServer = async () => {
     app.use(express.json({ limit: '10mb' }));
     app.use(express.urlencoded({ extended: true }));
 
+    // Create uploads directory if it doesn't exist
+    const uploadsDir = path.join(__dirname, 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+      console.log('Created uploads directory');
+    }
+
+    // Serve static files from uploads directory
+    app.use('/uploads', express.static(uploadsDir));
+    console.log('Serving static files from uploads directory');
+
     // Rate limiting
     const limiter = rateLimit({
       windowMs: 15 * 60 * 1000,
@@ -110,6 +123,7 @@ const startServer = async () => {
         database: dbInitialized ? 'connected' : 'disconnected',
         tables: tablesInitialized ? 'initialized' : 'not initialized',
         admin: adminCreated ? 'created' : 'not created',
+        uploads: fs.existsSync(uploadsDir) ? 'available' : 'unavailable',
         port: process.env.PORT || 10000,
         environment: process.env.NODE_ENV || 'development'
       });
@@ -178,13 +192,12 @@ const startServer = async () => {
     console.log('✓ Auth routes loaded: /api/v1/auth');
     
     // User routes  
-// User routes - FIXED PATH
-app.use('/api/v1/user', require('./src/routes/userRoutes'));
-console.log('✓ User routes loaded: /api/v1/user');
+    app.use('/api/v1/user', require('./src/routes/userRoutes'));
+    console.log('✓ User routes loaded: /api/v1/user');
 
-// Keep other routes the same
-app.use('/api/v1/users', require('./src/routes/adminRoutes')); // For admin user management
-console.log('✓ Admin user routes loaded: /api/v1/users');
+    // Admin user routes
+    app.use('/api/v1/users', require('./src/routes/adminRoutes'));
+    console.log('✓ Admin user routes loaded: /api/v1/users');
     
     // Claims routes
     try {
@@ -202,7 +215,7 @@ console.log('✓ Admin user routes loaded: /api/v1/users');
       console.error('✗ Blog routes failed to load:', error.message);
     }
 
-    // ADMIN ROUTES - ADDED THIS SECTION
+    // ADMIN ROUTES
     try {
       const adminRoutes = require('./src/routes/adminRoutes');
       app.use('/api/v1/admin', adminRoutes);
@@ -240,7 +253,8 @@ console.log('✓ Admin user routes loaded: /api/v1/users');
         message: 'Hakikisha API is working!',
         timestamp: new Date().toISOString(),
         version: '1.0.0',
-        database: dbInitialized ? 'connected' : 'disconnected'
+        database: dbInitialized ? 'connected' : 'disconnected',
+        uploads: fs.existsSync(uploadsDir) ? 'available' : 'unavailable'
       });
     });
 
@@ -296,12 +310,15 @@ console.log('✓ Admin user routes loaded: /api/v1/users');
         timestamp: new Date().toISOString(),
         status: 'running',
         database: dbInitialized ? 'connected' : 'disconnected',
+        uploads: fs.existsSync(uploadsDir) ? 'available' : 'unavailable',
         endpoints: {
           health: '/health',
           debug: '/api/debug/db',
           test: '/api/test',
           auth: '/api/v1/auth',
           users: '/api/v1/users',
+          user_profile: '/api/v1/user/profile',
+          user_profile_picture: '/api/v1/user/profile-picture',
           claims: '/api/v1/claims',
           blogs: '/api/v1/blogs',
           admin: '/api/v1/admin',
@@ -324,6 +341,7 @@ console.log('✓ Admin user routes loaded: /api/v1/users');
           '/api/test',
           '/api/v1/auth/*',
           '/api/v1/users/*',
+          '/api/v1/user/*',
           '/api/v1/claims/*',
           '/api/v1/blogs/*',
           '/api/v1/admin/*',
@@ -336,6 +354,22 @@ console.log('✓ Admin user routes loaded: /api/v1/users');
     // Error handling middleware
     app.use((error, req, res, next) => {
       console.error('Unhandled error:', error);
+      
+      // Handle multer file upload errors
+      if (error.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+          error: 'File too large',
+          message: 'File size must be less than 5MB'
+        });
+      }
+      
+      if (error.message === 'Only image files are allowed!') {
+        return res.status(400).json({
+          error: 'Invalid file type',
+          message: 'Only image files are allowed'
+        });
+      }
+
       res.status(500).json({
         error: 'Internal server error',
         message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong',
@@ -356,6 +390,7 @@ console.log('✓ Admin user routes loaded: /api/v1/users');
       console.log('Database: ' + (dbInitialized ? 'Connected' : 'Not Connected'));
       console.log('Tables: ' + (tablesInitialized ? 'Initialized' : 'Not Initialized'));
       console.log('Admin: ' + (adminCreated ? 'Created' : 'Not Created'));
+      console.log('Uploads: ' + (fs.existsSync(uploadsDir) ? 'Available' : 'Unavailable'));
       console.log('');
       console.log('Endpoints:');
       console.log('   Health: http://localhost:' + PORT + '/health');
@@ -363,6 +398,8 @@ console.log('✓ Admin user routes loaded: /api/v1/users');
       console.log('   Routes Debug: http://localhost:' + PORT + '/api/debug/routes');
       console.log('   API Test: http://localhost:' + PORT + '/api/test');
       console.log('   Admin Test: http://localhost:' + PORT + '/api/v1/admin/test');
+      console.log('   User Profile: http://localhost:' + PORT + '/api/v1/user/profile');
+      console.log('   Upload Profile Picture: POST http://localhost:' + PORT + '/api/v1/user/profile-picture');
       console.log('   Trending Claims: http://localhost:' + PORT + '/api/v1/claims/trending');
       console.log('   Blogs: http://localhost:' + PORT + '/api/v1/blogs');
       console.log('   Trending Blogs: http://localhost:' + PORT + '/api/v1/blogs/trending');

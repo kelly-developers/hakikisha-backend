@@ -2,96 +2,144 @@ const bcrypt = require('bcryptjs');
 const db = require('../config/database');
 const logger = require('../utils/logger');
 const { PointsService } = require('../services/pointsService');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = 'uploads/profiles/';
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    // Generate unique filename with user ID and timestamp
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const fileExtension = path.extname(file.originalname);
+    cb(null, 'profile-' + req.user.userId + '-' + uniqueSuffix + fileExtension);
+  }
+});
+
+// File filter for images only
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed!'), false);
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
 
 class UserController {
-async getProfile(req, res) {
-  try {
-    console.log('Get Profile Request for user:', req.user.userId);
-    
-    // First, ensure user points are initialized
+  async getProfile(req, res) {
     try {
-      await PointsService.initializeUserPoints(req.user.userId);
-      console.log('User points initialized/verified');
-    } catch (initError) {
-      console.log('Points initialization check:', initError.message);
-    }
+      console.log('Get Profile Request for user:', req.user.userId);
+      
+      // First, ensure user points are initialized
+      try {
+        await PointsService.initializeUserPoints(req.user.userId);
+        console.log('User points initialized/verified');
+      } catch (initError) {
+        console.log('Points initialization check:', initError.message);
+      }
 
-    // Get user basic info AND points in a single query with JOIN
-    const result = await db.query(
-      `SELECT 
-        u.id, u.email, u.username, u.phone, u.profile_picture, 
-        u.is_verified, u.role, u.registration_status, 
-        u.created_at, u.last_login, u.login_count, u.updated_at,
-        COALESCE(up.total_points, 0) as points,
-        COALESCE(up.current_streak, 0) as current_streak,
-        COALESCE(up.longest_streak, 0) as longest_streak,
-        COALESCE(up.current_streak_days, 0) as current_streak_days,
-        COALESCE(up.longest_streak_days, 0) as longest_streak_days,
-        up.last_activity_date
-       FROM hakikisha.users u
-       LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
-       WHERE u.id = $1`,
-      [req.user.userId]
-    );
+      // Get user basic info AND points in a single query with JOIN
+      const result = await db.query(
+        `SELECT 
+          u.id, u.email, u.username, u.phone, u.profile_picture, 
+          u.is_verified, u.role, u.registration_status, 
+          u.created_at, u.last_login, u.login_count, u.updated_at,
+          COALESCE(up.total_points, 0) as points,
+          COALESCE(up.current_streak, 0) as current_streak,
+          COALESCE(up.longest_streak, 0) as longest_streak,
+          COALESCE(up.current_streak_days, 0) as current_streak_days,
+          COALESCE(up.longest_streak_days, 0) as longest_streak_days,
+          up.last_activity_date
+         FROM hakikisha.users u
+         LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
+         WHERE u.id = $1`,
+        [req.user.userId]
+      );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'User not found',
+          code: 'NOT_FOUND'
+        });
+      }
+
+      const userData = result.rows[0];
+      
+      // Use the correct column names (try both variations)
+      const points = Number(userData.points) || 0;
+      const currentStreak = Number(userData.current_streak) || Number(userData.current_streak_days) || 0;
+      const longestStreak = Number(userData.longest_streak) || Number(userData.longest_streak_days) || 0;
+      
+      console.log('User profile data with points:', {
+        points: points,
+        current_streak: currentStreak,
+        longest_streak: longestStreak,
+        raw_data: userData
+      });
+
+      // Build profile picture URL
+      let profilePictureUrl = null;
+      if (userData.profile_picture) {
+        if (userData.profile_picture.startsWith('http')) {
+          profilePictureUrl = userData.profile_picture;
+        } else {
+          profilePictureUrl = `${req.protocol}://${req.get('host')}/${userData.profile_picture}`;
+        }
+      }
+
+      const responseData = {
+        id: userData.id,
+        email: userData.email,
+        username: userData.username,
+        full_name: userData.username,
+        phone: userData.phone,
+        phone_number: userData.phone,
+        role: userData.role,
+        profile_picture: profilePictureUrl,
+        is_verified: userData.is_verified,
+        registration_status: userData.registration_status,
+        created_at: userData.created_at,
+        updated_at: userData.updated_at,
+        last_login: userData.last_login,
+        login_count: userData.login_count,
+        // Points data - directly from joined query
+        points: points,
+        current_streak: currentStreak,
+        longest_streak: longestStreak,
+        last_activity_date: userData.last_activity_date
+      };
+
+      res.json({
+        success: true,
+        data: responseData
+      });
+    } catch (error) {
+      console.error('Get profile error:', error);
+      logger.error('Get profile error:', error);
+      res.status(500).json({
         success: false,
-        error: 'User not found',
-        code: 'NOT_FOUND'
+        error: 'Failed to get user profile',
+        code: 'SERVER_ERROR'
       });
     }
-
-    const userData = result.rows[0];
-    
-    // Use the correct column names (try both variations)
-    const points = Number(userData.points) || 0;
-    const currentStreak = Number(userData.current_streak) || Number(userData.current_streak_days) || 0;
-    const longestStreak = Number(userData.longest_streak) || Number(userData.longest_streak_days) || 0;
-    
-    console.log('User profile data with points:', {
-      points: points,
-      current_streak: currentStreak,
-      longest_streak: longestStreak,
-      raw_data: userData
-    });
-
-    const responseData = {
-      id: userData.id,
-      email: userData.email,
-      username: userData.username,
-      full_name: userData.username,
-      phone: userData.phone,
-      phone_number: userData.phone,
-      role: userData.role,
-      profile_picture: userData.profile_picture,
-      is_verified: userData.is_verified,
-      registration_status: userData.registration_status,
-      created_at: userData.created_at,
-      updated_at: userData.updated_at,
-      last_login: userData.last_login,
-      login_count: userData.login_count,
-      // Points data - directly from joined query
-      points: points,
-      current_streak: currentStreak,
-      longest_streak: longestStreak,
-      last_activity_date: userData.last_activity_date
-    };
-
-    res.json({
-      success: true,
-      data: responseData
-    });
-  } catch (error) {
-    console.error('Get profile error:', error);
-    logger.error('Get profile error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get user profile',
-      code: 'SERVER_ERROR'
-    });
   }
-}
 
   async updateProfile(req, res) {
     try {
@@ -215,6 +263,16 @@ async getProfile(req, res) {
 
       const updatedUserData = updatedProfileResult.rows[0];
 
+      // Build profile picture URL
+      let profilePictureUrl = null;
+      if (updatedUserData.profile_picture) {
+        if (updatedUserData.profile_picture.startsWith('http')) {
+          profilePictureUrl = updatedUserData.profile_picture;
+        } else {
+          profilePictureUrl = `${req.protocol}://${req.get('host')}/${updatedUserData.profile_picture}`;
+        }
+      }
+
       const points = Number(updatedUserData.points) || 0;
       const currentStreak = Number(updatedUserData.current_streak) || Number(updatedUserData.current_streak_days) || 0;
       const longestStreak = Number(updatedUserData.longest_streak) || Number(updatedUserData.longest_streak_days) || 0;
@@ -226,7 +284,7 @@ async getProfile(req, res) {
         full_name: updatedUserData.username,
         phone: updatedUserData.phone,
         phone_number: updatedUserData.phone,
-        profile_picture: updatedUserData.profile_picture,
+        profile_picture: profilePictureUrl,
         created_at: updatedUserData.created_at,
         updated_at: updatedUserData.updated_at,
         points: points,
@@ -258,7 +316,7 @@ async getProfile(req, res) {
 
   async uploadProfilePicture(req, res) {
     try {
-      console.log('Upload Profile Picture Request');
+      console.log('Upload Profile Picture Request for user:', req.user.userId);
       
       if (!req.file) {
         return res.status(400).json({
@@ -268,11 +326,16 @@ async getProfile(req, res) {
         });
       }
 
-      const imageUrl = `/uploads/profiles/${req.user.userId}-${Date.now()}.jpg`;
+      // Build the file path (relative to uploads directory)
+      const filePath = `uploads/profiles/${req.file.filename}`;
+      
+      // Build full URL for the profile picture
+      const profilePictureUrl = `${req.protocol}://${req.get('host')}/${filePath}`;
 
+      // Update user profile in database
       await db.query(
         'UPDATE hakikisha.users SET profile_picture = $1, updated_at = NOW() WHERE id = $2',
-        [imageUrl, req.user.userId]
+        [filePath, req.user.userId]
       );
 
       // Award points for adding profile picture
@@ -290,8 +353,10 @@ async getProfile(req, res) {
 
       res.json({
         success: true,
-        message: 'Profile picture uploaded',
-        imageUrl
+        message: 'Profile picture uploaded successfully',
+        data: {
+          profile_picture: profilePictureUrl
+        }
       });
     } catch (error) {
       console.error('Upload profile picture error:', error);
@@ -299,6 +364,59 @@ async getProfile(req, res) {
       res.status(500).json({
         success: false,
         error: 'Failed to upload profile picture',
+        code: 'SERVER_ERROR'
+      });
+    }
+  }
+
+  async deleteProfilePicture(req, res) {
+    try {
+      console.log('Delete Profile Picture Request for user:', req.user.userId);
+
+      // Get current profile picture path
+      const userResult = await db.query(
+        'SELECT profile_picture FROM hakikisha.users WHERE id = $1',
+        [req.user.userId]
+      );
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'User not found',
+          code: 'NOT_FOUND'
+        });
+      }
+
+      const currentProfilePicture = userResult.rows[0].profile_picture;
+
+      // Delete file from filesystem if it exists and is a local file
+      if (currentProfilePicture && !currentProfilePicture.startsWith('http')) {
+        try {
+          if (fs.existsSync(currentProfilePicture)) {
+            fs.unlinkSync(currentProfilePicture);
+            console.log('Deleted profile picture file:', currentProfilePicture);
+          }
+        } catch (fileError) {
+          console.log('Could not delete profile picture file:', fileError.message);
+        }
+      }
+
+      // Update database to remove profile picture
+      await db.query(
+        'UPDATE hakikisha.users SET profile_picture = NULL, updated_at = NOW() WHERE id = $1',
+        [req.user.userId]
+      );
+
+      res.json({
+        success: true,
+        message: 'Profile picture deleted successfully'
+      });
+    } catch (error) {
+      console.error('Delete profile picture error:', error);
+      logger.error('Delete profile picture error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to delete profile picture',
         code: 'SERVER_ERROR'
       });
     }
@@ -531,4 +649,4 @@ async getProfile(req, res) {
 }
 
 const userController = new UserController();
-module.exports = userController;
+module.exports = { userController, upload };
