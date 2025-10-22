@@ -7,6 +7,7 @@ class BlogController {
    */
   async getBlogs(req, res) {
     try {
+      console.log('GET /api/v1/blogs - Fetching all published blogs');
       const { category, limit = 10, offset = 0 } = req.query;
       
       const blogs = await blogService.getBlogs({
@@ -15,6 +16,8 @@ class BlogController {
         offset: parseInt(offset)
       });
 
+      console.log(`Found ${blogs.length} blogs`);
+      
       res.json({
         success: true,
         data: blogs,
@@ -25,7 +28,7 @@ class BlogController {
         }
       });
     } catch (error) {
-      logger.error('Get blogs error:', error);
+      console.error('Get blogs error:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to fetch blogs',
@@ -40,9 +43,17 @@ class BlogController {
   async getBlog(req, res) {
     try {
       const { id } = req.params;
+      console.log(`GET /blogs/${id} - Fetching blog`);
       
       const blog = await blogService.getBlogById(id);
       
+      if (!blog) {
+        return res.status(404).json({
+          success: false,
+          error: 'Blog not found'
+        });
+      }
+
       // Increment view count
       await blogService.incrementViewCount(id);
 
@@ -51,7 +62,7 @@ class BlogController {
         data: blog
       });
     } catch (error) {
-      logger.error('Get blog error:', error);
+      console.error('Get blog error:', error);
       if (error.message === 'Blog not found') {
         return res.status(404).json({
           success: false,
@@ -72,6 +83,7 @@ class BlogController {
   async getTrendingBlogs(req, res) {
     try {
       const { limit = 5 } = req.query;
+      console.log('GET /blogs/trending - Fetching trending blogs');
       
       const blogs = await blogService.getTrendingBlogs(parseInt(limit));
 
@@ -80,7 +92,7 @@ class BlogController {
         data: blogs
       });
     } catch (error) {
-      logger.error('Get trending blogs error:', error);
+      console.error('Get trending blogs error:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to fetch trending blogs',
@@ -94,6 +106,7 @@ class BlogController {
    */
   async createBlog(req, res) {
     try {
+      console.log('POST /blogs - Creating new blog');
       const {
         title,
         content,
@@ -124,6 +137,8 @@ class BlogController {
         status
       };
 
+      console.log('Creating blog with data:', { ...blogData, content: `${blogData.content.substring(0, 100)}...` });
+
       const blog = await blogService.createBlog(blogData);
 
       res.status(201).json({
@@ -132,7 +147,7 @@ class BlogController {
         message: status === 'published' ? 'Blog published successfully' : 'Blog created as draft'
       });
     } catch (error) {
-      logger.error('Create blog error:', error);
+      console.error('Create blog error:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to create blog',
@@ -148,9 +163,17 @@ class BlogController {
     try {
       const { id } = req.params;
       const updateData = req.body;
+      console.log(`PUT /blogs/${id} - Updating blog`);
 
       // Check if user owns the blog or is admin
       const existingBlog = await blogService.getBlogById(id);
+      if (!existingBlog) {
+        return res.status(404).json({
+          success: false,
+          error: 'Blog not found'
+        });
+      }
+
       if (existingBlog.author_id !== req.user.userId && !req.user.roles.includes('admin')) {
         return res.status(403).json({
           success: false,
@@ -166,7 +189,7 @@ class BlogController {
         message: 'Blog updated successfully'
       });
     } catch (error) {
-      logger.error('Update blog error:', error);
+      console.error('Update blog error:', error);
       if (error.message === 'Blog not found') {
         return res.status(404).json({
           success: false,
@@ -187,9 +210,17 @@ class BlogController {
   async deleteBlog(req, res) {
     try {
       const { id } = req.params;
+      console.log(`DELETE /blogs/${id} - Deleting blog`);
 
       // Check if user owns the blog or is admin
       const existingBlog = await blogService.getBlogById(id);
+      if (!existingBlog) {
+        return res.status(404).json({
+          success: false,
+          error: 'Blog not found'
+        });
+      }
+
       if (existingBlog.author_id !== req.user.userId && !req.user.roles.includes('admin')) {
         return res.status(403).json({
           success: false,
@@ -204,7 +235,7 @@ class BlogController {
         message: 'Blog deleted successfully'
       });
     } catch (error) {
-      logger.error('Delete blog error:', error);
+      console.error('Delete blog error:', error);
       if (error.message === 'Blog not found') {
         return res.status(404).json({
           success: false,
@@ -225,9 +256,17 @@ class BlogController {
   async publishBlog(req, res) {
     try {
       const { id } = req.params;
+      console.log(`POST /blogs/${id}/publish - Publishing blog`);
 
       // Check if user owns the blog or is admin
       const existingBlog = await blogService.getBlogById(id);
+      if (!existingBlog) {
+        return res.status(404).json({
+          success: false,
+          error: 'Blog not found'
+        });
+      }
+
       if (existingBlog.author_id !== req.user.userId && !req.user.roles.includes('admin')) {
         return res.status(403).json({
           success: false,
@@ -243,7 +282,7 @@ class BlogController {
         message: 'Blog published successfully'
       });
     } catch (error) {
-      logger.error('Publish blog error:', error);
+      console.error('Publish blog error:', error);
       if (error.message === 'Blog not found') {
         return res.status(404).json({
           success: false,
@@ -264,6 +303,7 @@ class BlogController {
   async searchBlogs(req, res) {
     try {
       const { q, limit = 10, offset = 0 } = req.query;
+      console.log(`GET /blogs/search - Searching blogs for: ${q}`);
 
       if (!q) {
         return res.status(400).json({
@@ -287,7 +327,7 @@ class BlogController {
         }
       });
     } catch (error) {
-      logger.error('Search blogs error:', error);
+      console.error('Search blogs error:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to search blogs',
@@ -302,6 +342,7 @@ class BlogController {
   async generateAIBlog(req, res) {
     try {
       const { topic, claims, tone, length } = req.body;
+      console.log('POST /blogs/generate/ai - Generating AI blog');
 
       if (!topic) {
         return res.status(400).json({
@@ -324,7 +365,7 @@ class BlogController {
         message: 'AI blog generated successfully'
       });
     } catch (error) {
-      logger.error('Generate AI blog error:', error);
+      console.error('Generate AI blog error:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to generate AI blog',
@@ -334,12 +375,13 @@ class BlogController {
   }
 
   /**
-   * Get my blogs (current user's blogs)
+   * Get current user's blogs
    */
   async getMyBlogs(req, res) {
     try {
       const { status, limit = 10, offset = 0 } = req.query;
-      
+      console.log(`GET /blogs/user/my-blogs - Fetching user's blogs for user: ${req.user.userId}`);
+
       let blogs;
       if (status === 'draft') {
         blogs = await blogService.getDraftBlogs(req.user.userId);
@@ -349,6 +391,8 @@ class BlogController {
           offset: parseInt(offset)
         });
       }
+
+      console.log(`Found ${blogs.length} blogs for user`);
 
       res.json({
         success: true,
@@ -360,7 +404,7 @@ class BlogController {
         }
       });
     } catch (error) {
-      logger.error('Get my blogs error:', error);
+      console.error('Get my blogs error:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to fetch your blogs',
@@ -374,6 +418,7 @@ class BlogController {
    */
   async getBlogStats(req, res) {
     try {
+      console.log('GET /blogs/stats - Fetching blog statistics');
       const stats = await blogService.getBlogStats();
 
       res.json({
@@ -381,7 +426,7 @@ class BlogController {
         data: stats
       });
     } catch (error) {
-      logger.error('Get blog stats error:', error);
+      console.error('Get blog stats error:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to fetch blog statistics',

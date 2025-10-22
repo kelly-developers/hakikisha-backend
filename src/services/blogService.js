@@ -7,20 +7,25 @@ class BlogService {
    */
   async getBlogs(options = {}) {
     try {
+      console.log('BlogService - Getting blogs with options:', options);
       const { category, limit = 10, offset = 0, author } = options;
       
       if (author === 'current') {
-        // This would require the user ID from the request
         throw new Error('Author filtering requires authentication');
       }
       
+      let blogs;
       if (category) {
-        return await Blog.findByCategory(category, limit, offset);
+        blogs = await Blog.findByCategory(category, limit, offset);
+      } else {
+        // Default: get all published blogs
+        blogs = await Blog.getAll(limit, offset);
       }
-      
-      // Default: get all published blogs
-      return await Blog.getAll(limit, offset);
+
+      console.log(`BlogService - Found ${blogs.length} blogs`);
+      return blogs;
     } catch (error) {
+      console.error('BlogService - Get blogs error:', error);
       logger.error('BlogService - Get blogs error:', error);
       throw error;
     }
@@ -31,12 +36,16 @@ class BlogService {
    */
   async getBlogById(id) {
     try {
+      console.log(`BlogService - Getting blog by ID: ${id}`);
       const blog = await Blog.findById(id);
       if (!blog) {
+        console.log(`BlogService - Blog not found: ${id}`);
         throw new Error('Blog not found');
       }
+      console.log(`BlogService - Found blog: ${blog.title}`);
       return blog;
     } catch (error) {
+      console.error('BlogService - Get blog by ID error:', error);
       logger.error('BlogService - Get blog by ID error:', error);
       throw error;
     }
@@ -47,8 +56,12 @@ class BlogService {
    */
   async getTrendingBlogs(limit = 5) {
     try {
-      return await Blog.getTrendingBlogs(limit);
+      console.log(`BlogService - Getting trending blogs, limit: ${limit}`);
+      const blogs = await Blog.getTrendingBlogs(limit);
+      console.log(`BlogService - Found ${blogs.length} trending blogs`);
+      return blogs;
     } catch (error) {
+      console.error('BlogService - Get trending blogs error:', error);
       logger.error('BlogService - Get trending blogs error:', error);
       throw error;
     }
@@ -59,8 +72,16 @@ class BlogService {
    */
   async createBlog(blogData) {
     try {
-      return await Blog.create(blogData);
+      console.log('BlogService - Creating new blog with data:', { 
+        ...blogData, 
+        content: blogData.content ? `${blogData.content.substring(0, 100)}...` : 'No content'
+      });
+      
+      const blog = await Blog.create(blogData);
+      console.log(`BlogService - Blog created successfully: ${blog.id}`);
+      return blog;
     } catch (error) {
+      console.error('BlogService - Create blog error:', error);
       logger.error('BlogService - Create blog error:', error);
       throw error;
     }
@@ -71,12 +92,16 @@ class BlogService {
    */
   async updateBlog(id, updateData) {
     try {
+      console.log(`BlogService - Updating blog: ${id}`, updateData);
       const blog = await Blog.update(id, updateData);
       if (!blog) {
+        console.log(`BlogService - Blog not found for update: ${id}`);
         throw new Error('Blog not found');
       }
+      console.log(`BlogService - Blog updated successfully: ${id}`);
       return blog;
     } catch (error) {
+      console.error('BlogService - Update blog error:', error);
       logger.error('BlogService - Update blog error:', error);
       throw error;
     }
@@ -87,12 +112,16 @@ class BlogService {
    */
   async deleteBlog(id) {
     try {
+      console.log(`BlogService - Deleting blog: ${id}`);
       const blog = await Blog.delete(id);
       if (!blog) {
+        console.log(`BlogService - Blog not found for deletion: ${id}`);
         throw new Error('Blog not found');
       }
+      console.log(`BlogService - Blog deleted successfully: ${id}`);
       return blog;
     } catch (error) {
+      console.error('BlogService - Delete blog error:', error);
       logger.error('BlogService - Delete blog error:', error);
       throw error;
     }
@@ -103,8 +132,12 @@ class BlogService {
    */
   async incrementViewCount(id) {
     try {
-      return await Blog.updateViewCount(id);
+      console.log(`BlogService - Incrementing view count for blog: ${id}`);
+      const blog = await Blog.updateViewCount(id);
+      console.log(`BlogService - View count incremented for blog: ${id}`);
+      return blog;
     } catch (error) {
+      console.error('BlogService - Increment view count error:', error);
       logger.error('BlogService - Increment view count error:', error);
       throw error;
     }
@@ -115,12 +148,16 @@ class BlogService {
    */
   async publishBlog(id) {
     try {
+      console.log(`BlogService - Publishing blog: ${id}`);
       const blog = await Blog.publish(id);
       if (!blog) {
+        console.log(`BlogService - Blog not found for publishing: ${id}`);
         throw new Error('Blog not found');
       }
+      console.log(`BlogService - Blog published successfully: ${id}`);
       return blog;
     } catch (error) {
+      console.error('BlogService - Publish blog error:', error);
       logger.error('BlogService - Publish blog error:', error);
       throw error;
     }
@@ -131,9 +168,13 @@ class BlogService {
    */
   async searchBlogs(queryText, options = {}) {
     try {
+      console.log(`BlogService - Searching blogs for: "${queryText}"`, options);
       const { limit = 10, offset = 0 } = options;
-      return await Blog.search(queryText, limit, offset);
+      const blogs = await Blog.search(queryText, limit, offset);
+      console.log(`BlogService - Found ${blogs.length} blogs for search: "${queryText}"`);
+      return blogs;
     } catch (error) {
+      console.error('BlogService - Search blogs error:', error);
       logger.error('BlogService - Search blogs error:', error);
       throw error;
     }
@@ -144,10 +185,14 @@ class BlogService {
    */
   async generateAIBlog(options) {
     try {
+      console.log('BlogService - Generating AI blog with options:', options);
       const { topic, claims, tone, length, author_id } = options;
       
+      if (!topic) {
+        throw new Error('Topic is required for AI blog generation');
+      }
+
       // This is a placeholder for AI blog generation
-      // In a real implementation, you would call an AI service like OpenAI
       const aiContent = await this.callAIService({
         topic,
         claims,
@@ -165,8 +210,11 @@ class BlogService {
         status: 'draft'
       };
 
-      return await Blog.create(blogData);
+      const blog = await Blog.create(blogData);
+      console.log(`BlogService - AI blog generated successfully: ${blog.id}`);
+      return blog;
     } catch (error) {
+      console.error('BlogService - Generate AI blog error:', error);
       logger.error('BlogService - Generate AI blog error:', error);
       throw error;
     }
@@ -176,29 +224,38 @@ class BlogService {
    * Placeholder for AI service call
    */
   async callAIService(options) {
-    // This is a mock implementation
-    // Replace with actual AI service integration
-    const { topic, claims, tone, length } = options;
-    
-    return `
-      # ${topic}
+    try {
+      console.log('BlogService - Calling AI service with options:', options);
+      const { topic, claims, tone, length } = options;
+      
+      // This is a mock implementation
+      // Replace with actual AI service integration
+      const aiContent = `
+# ${topic}
 
-      This is an AI-generated blog post about "${topic}".
+This is an AI-generated blog post about "${topic}".
 
-      ## Key Points:
-      ${claims && claims.length > 0 ? 
-        claims.map(claim => `- ${claim}`).join('\n      ') : 
-        '- No specific claims provided'
-      }
+## Key Points:
+${claims && claims.length > 0 ? 
+  claims.map(claim => `- ${claim}`).join('\n') : 
+  '- No specific claims provided'
+}
 
-      ## Analysis:
-      Based on the available information, this topic requires careful fact-checking and analysis.
+## Analysis:
+Based on the available information, this topic requires careful fact-checking and analysis.
 
-      ## Conclusion:
-      Always verify information from multiple reliable sources before drawing conclusions.
+## Conclusion:
+Always verify information from multiple reliable sources before drawing conclusions.
 
-      *This content was generated by AI and should be reviewed by human fact-checkers.*
-    `;
+*This content was generated by AI and should be reviewed by human fact-checkers.*
+      `;
+
+      console.log('BlogService - AI service call completed');
+      return aiContent;
+    } catch (error) {
+      console.error('BlogService - AI service call error:', error);
+      throw error;
+    }
   }
 
   /**
@@ -206,6 +263,7 @@ class BlogService {
    */
   async getBlogStats() {
     try {
+      console.log('BlogService - Getting blog statistics');
       const db = require('../config/database');
       
       const totalQuery = 'SELECT COUNT(*) as total FROM hakikisha.blog_articles WHERE status = $1';
@@ -220,15 +278,26 @@ class BlogService {
         db.query(authorsQuery)
       ]);
 
-      return {
-        total: parseInt(totalResult.rows[0].total),
-        published: parseInt(publishedResult.rows[0].published),
-        total_views: parseInt(viewsResult.rows[0].total_views) || 0,
-        total_authors: parseInt(authorsResult.rows[0].total_authors)
+      const stats = {
+        total: parseInt(totalResult.rows[0]?.total) || 0,
+        published: parseInt(publishedResult.rows[0]?.published) || 0,
+        total_views: parseInt(viewsResult.rows[0]?.total_views) || 0,
+        total_authors: parseInt(authorsResult.rows[0]?.total_authors) || 0
       };
+
+      console.log('BlogService - Blog statistics:', stats);
+      return stats;
     } catch (error) {
+      console.error('BlogService - Get blog stats error:', error);
       logger.error('BlogService - Get blog stats error:', error);
-      throw error;
+      
+      // Return default stats instead of throwing error
+      return {
+        total: 0,
+        published: 0,
+        total_views: 0,
+        total_authors: 0
+      };
     }
   }
 
@@ -237,9 +306,13 @@ class BlogService {
    */
   async getBlogsByAuthor(authorId, options = {}) {
     try {
+      console.log(`BlogService - Getting blogs by author: ${authorId}`, options);
       const { limit = 10, offset = 0 } = options;
-      return await Blog.getByAuthor(authorId, limit, offset);
+      const blogs = await Blog.getByAuthor(authorId, limit, offset);
+      console.log(`BlogService - Found ${blogs.length} blogs for author: ${authorId}`);
+      return blogs;
     } catch (error) {
+      console.error('BlogService - Get blogs by author error:', error);
       logger.error('BlogService - Get blogs by author error:', error);
       throw error;
     }
@@ -250,9 +323,44 @@ class BlogService {
    */
   async getDraftBlogs(authorId) {
     try {
-      return await Blog.getDrafts(authorId);
+      console.log(`BlogService - Getting draft blogs for author: ${authorId}`);
+      const blogs = await Blog.getDrafts(authorId);
+      console.log(`BlogService - Found ${blogs.length} draft blogs for author: ${authorId}`);
+      return blogs;
     } catch (error) {
+      console.error('BlogService - Get draft blogs error:', error);
       logger.error('BlogService - Get draft blogs error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's blogs (both published and drafts)
+   */
+  async getUserBlogs(userId, options = {}) {
+    try {
+      console.log(`BlogService - Getting all blogs for user: ${userId}`, options);
+      const { status, limit = 10, offset = 0 } = options;
+      
+      let blogs;
+      if (status === 'draft') {
+        blogs = await this.getDraftBlogs(userId);
+      } else if (status === 'published') {
+        blogs = await this.getBlogsByAuthor(userId, { limit, offset });
+      } else {
+        // Get both published and drafts
+        const [publishedBlogs, draftBlogs] = await Promise.all([
+          this.getBlogsByAuthor(userId, { limit, offset }),
+          this.getDraftBlogs(userId)
+        ]);
+        blogs = [...publishedBlogs, ...draftBlogs];
+      }
+
+      console.log(`BlogService - Found ${blogs.length} total blogs for user: ${userId}`);
+      return blogs;
+    } catch (error) {
+      console.error('BlogService - Get user blogs error:', error);
+      logger.error('BlogService - Get user blogs error:', error);
       throw error;
     }
   }

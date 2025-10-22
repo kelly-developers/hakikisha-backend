@@ -170,6 +170,37 @@ const startServer = async () => {
       }
     });
 
+    // Debug route to test blog routes
+    app.get('/api/debug/blog-routes', (req, res) => {
+      try {
+        const blogRoutes = require('./src/routes/blogRoutes');
+        res.json({
+          success: true,
+          message: 'Blog routes module loaded successfully',
+          routes: [
+            'GET /api/v1/blogs',
+            'GET /api/v1/blogs/trending', 
+            'GET /api/v1/blogs/search',
+            'GET /api/v1/blogs/stats',
+            'GET /api/v1/blogs/:id',
+            'POST /api/v1/blogs',
+            'GET /api/v1/blogs/user/my-blogs',
+            'PUT /api/v1/blogs/:id',
+            'DELETE /api/v1/blogs/:id',
+            'POST /api/v1/blogs/:id/publish',
+            'POST /api/v1/blogs/generate/ai'
+          ]
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to load blog routes',
+          message: error.message,
+          stack: error.stack
+        });
+      }
+    });
+
     console.log('Loading API routes...');
     
     app.use('/api/v1/auth', require('./src/routes/authRoutes'));
@@ -188,11 +219,27 @@ const startServer = async () => {
       console.error('✗ Claims routes failed to load:', error.message);
     }
 
+    // FIXED: Blog routes loading with better error handling
     try {
-      app.use('/api/v1/blogs', require('./src/routes/blogRoutes'));
+      const blogRoutesPath = './src/routes/blogRoutes';
+      console.log(`Attempting to load blog routes from: ${blogRoutesPath}`);
+      
+      const blogRoutes = require(blogRoutesPath);
+      app.use('/api/v1/blogs', blogRoutes);
       console.log('✓ Blog routes loaded: /api/v1/blogs');
+      
+      // Test the blog routes are working
+      console.log('   Available blog endpoints:');
+      console.log('     GET  /api/v1/blogs');
+      console.log('     GET  /api/v1/blogs/trending');
+      console.log('     GET  /api/v1/blogs/search');
+      console.log('     GET  /api/v1/blogs/stats');
+      console.log('     GET  /api/v1/blogs/:id');
+      console.log('     POST /api/v1/blogs');
+      console.log('     GET  /api/v1/blogs/user/my-blogs');
     } catch (error) {
-      console.error('✗ Blog routes failed to load:', error.message);
+      console.error('✗ Blog routes failed to load:', error);
+      console.error('Error details:', error.stack);
     }
 
     try {
@@ -303,6 +350,7 @@ const startServer = async () => {
           '/health',
           '/api/debug/db',
           '/api/debug/routes',
+          '/api/debug/blog-routes',
           '/api/test',
           '/api/v1/auth/*',
           '/api/v1/users/*',
@@ -358,6 +406,7 @@ const startServer = async () => {
       console.log('   Health: http://localhost:' + PORT + '/health');
       console.log('   DB Debug: http://localhost:' + PORT + '/api/debug/db');
       console.log('   Routes Debug: http://localhost:' + PORT + '/api/debug/routes');
+      console.log('   Blog Routes Debug: http://localhost:' + PORT + '/api/debug/blog-routes');
       console.log('   API Test: http://localhost:' + PORT + '/api/test');
       console.log('   Admin Test: http://localhost:' + PORT + '/api/v1/admin/test');
       console.log('   User Profile: http://localhost:' + PORT + '/api/v1/user/profile');
@@ -365,6 +414,7 @@ const startServer = async () => {
       console.log('   Trending Claims: http://localhost:' + PORT + '/api/v1/claims/trending');
       console.log('   Blogs: http://localhost:' + PORT + '/api/v1/blogs');
       console.log('   Trending Blogs: http://localhost:' + PORT + '/api/v1/blogs/trending');
+      console.log('   My Blogs: http://localhost:' + PORT + '/api/v1/blogs/user/my-blogs');
       console.log('');
       console.log('Admin Endpoints:');
       console.log('   Register Fact Checker: POST http://localhost:' + PORT + '/api/v1/admin/users/register-fact-checker');
