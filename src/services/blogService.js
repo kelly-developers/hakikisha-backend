@@ -31,7 +31,11 @@ class BlogService {
    */
   async getBlogById(id) {
     try {
-      return await Blog.findById(id);
+      const blog = await Blog.findById(id);
+      if (!blog) {
+        throw new Error('Blog not found');
+      }
+      return blog;
     } catch (error) {
       logger.error('BlogService - Get blog by ID error:', error);
       throw error;
@@ -67,7 +71,11 @@ class BlogService {
    */
   async updateBlog(id, updateData) {
     try {
-      return await Blog.update(id, updateData);
+      const blog = await Blog.update(id, updateData);
+      if (!blog) {
+        throw new Error('Blog not found');
+      }
+      return blog;
     } catch (error) {
       logger.error('BlogService - Update blog error:', error);
       throw error;
@@ -79,7 +87,11 @@ class BlogService {
    */
   async deleteBlog(id) {
     try {
-      return await Blog.delete(id);
+      const blog = await Blog.delete(id);
+      if (!blog) {
+        throw new Error('Blog not found');
+      }
+      return blog;
     } catch (error) {
       logger.error('BlogService - Delete blog error:', error);
       throw error;
@@ -103,7 +115,11 @@ class BlogService {
    */
   async publishBlog(id) {
     try {
-      return await Blog.publish(id);
+      const blog = await Blog.publish(id);
+      if (!blog) {
+        throw new Error('Blog not found');
+      }
+      return blog;
     } catch (error) {
       logger.error('BlogService - Publish blog error:', error);
       throw error;
@@ -225,6 +241,18 @@ class BlogService {
       return await Blog.getByAuthor(authorId, limit, offset);
     } catch (error) {
       logger.error('BlogService - Get blogs by author error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get draft blogs by author
+   */
+  async getDraftBlogs(authorId) {
+    try {
+      return await Blog.getDrafts(authorId);
+    } catch (error) {
+      logger.error('BlogService - Get draft blogs error:', error);
       throw error;
     }
   }

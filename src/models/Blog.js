@@ -282,6 +282,27 @@ class Blog {
       throw error;
     }
   }
+
+  static async getDrafts(authorId) {
+    const query = `
+      SELECT 
+        ba.*, 
+        u.email as author_email,
+        u.username as author_name
+      FROM hakikisha.blog_articles ba
+      LEFT JOIN hakikisha.users u ON ba.author_id = u.id
+      WHERE ba.author_id = $1 AND ba.status = 'draft'
+      ORDER BY ba.updated_at DESC
+    `;
+
+    try {
+      const result = await db.query(query, [authorId]);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error getting draft blogs:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = Blog;
