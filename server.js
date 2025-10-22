@@ -20,20 +20,17 @@ const startServer = async () => {
     console.log('Initializing database connection...');
     
     try {
-      // Try to load database configuration
       const db = require('./src/config/database');
       const DatabaseInitializer = require('./src/config/database-init');
       
       console.log('Database modules loaded successfully');
       
-      // Check database connection first
       const isConnected = await db.query('SELECT 1').then(() => true).catch(() => false);
       if (!isConnected) {
         throw new Error('Cannot connect to database');
       }
       dbInitialized = true;
 
-      // Force database initialization
       console.log('Starting database initialization...');
       await DatabaseInitializer.initializeCompleteDatabase();
       tablesInitialized = true;
@@ -46,14 +43,11 @@ const startServer = async () => {
       console.log('Starting server with limited functionality...');
     }
 
-    // Create express app with trust proxy for Render
     const app = express();
     app.set('trust proxy', 1);
     
-    // Enhanced CORS configuration
     app.use(cors({
       origin: function(origin, callback) {
-        // Allow requests with no origin (mobile apps, Postman)
         if (!origin) return callback(null, true);
         
         const allowedOrigins = [
@@ -70,11 +64,10 @@ const startServer = async () => {
         if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('capacitor://') || origin.startsWith('ionic://')) {
           callback(null, true);
         } else {
-          // In production, be more restrictive
           if (process.env.NODE_ENV === 'production') {
             callback(new Error(`CORS blocked for origin: ${origin}`), false);
           } else {
-            callback(null, true); // Allow all in development
+            callback(null, true);
           }
         }
       },
@@ -84,27 +77,22 @@ const startServer = async () => {
       exposedHeaders: ['Content-Range', 'X-Content-Range']
     }));
 
-    // Handle preflight requests
     app.options('*', cors());
     
-    // Middleware
     app.use(helmet());
     app.use(morgan('combined'));
     app.use(express.json({ limit: '10mb' }));
     app.use(express.urlencoded({ extended: true }));
 
-    // Create uploads directory if it doesn't exist
     const uploadsDir = path.join(__dirname, 'uploads');
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
       console.log('Created uploads directory');
     }
 
-    // Serve static files from uploads directory
     app.use('/uploads', express.static(uploadsDir));
     console.log('Serving static files from uploads directory');
 
-    // Rate limiting
     const limiter = rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 1000,
@@ -114,7 +102,6 @@ const startServer = async () => {
     });
     app.use(limiter);
 
-    // Health check endpoint
     app.get('/health', (req, res) => {
       res.json({
         status: 'ok',
@@ -129,7 +116,6 @@ const startServer = async () => {
       });
     });
 
-    // Database debug endpoint
     app.get('/api/debug/db', async (req, res) => {
       try {
         const db = require('./src/config/database');
@@ -184,22 +170,17 @@ const startServer = async () => {
       }
     });
 
-    // API routes
     console.log('Loading API routes...');
     
-    // Auth routes
     app.use('/api/v1/auth', require('./src/routes/authRoutes'));
     console.log('✓ Auth routes loaded: /api/v1/auth');
     
-    // User routes  
     app.use('/api/v1/user', require('./src/routes/userRoutes'));
     console.log('✓ User routes loaded: /api/v1/user');
 
-    // Admin user routes
     app.use('/api/v1/users', require('./src/routes/adminRoutes'));
     console.log('✓ Admin user routes loaded: /api/v1/users');
     
-    // Claims routes
     try {
       app.use('/api/v1/claims', require('./src/routes/claimRoutes'));
       console.log('✓ Claims routes loaded: /api/v1/claims');
@@ -207,7 +188,6 @@ const startServer = async () => {
       console.error('✗ Claims routes failed to load:', error.message);
     }
 
-    // Blog routes
     try {
       app.use('/api/v1/blogs', require('./src/routes/blogRoutes'));
       console.log('✓ Blog routes loaded: /api/v1/blogs');
@@ -215,23 +195,14 @@ const startServer = async () => {
       console.error('✗ Blog routes failed to load:', error.message);
     }
 
-    // ADMIN ROUTES
     try {
       const adminRoutes = require('./src/routes/adminRoutes');
       app.use('/api/v1/admin', adminRoutes);
       console.log('✓ Admin routes loaded: /api/v1/admin');
-      console.log('  - GET /api/v1/admin/users');
-      console.log('  - POST /api/v1/admin/users/register-fact-checker');
-      console.log('  - POST /api/v1/admin/users/register-admin');
-      console.log('  - POST /api/v1/admin/users/action');
-      console.log('  - GET /api/v1/admin/dashboard/stats');
-      console.log('  - GET /api/v1/admin/dashboard/fact-checker-activity');
     } catch (error) {
       console.error('✗ Admin routes failed to load:', error.message);
-      console.log('Admin functionality will not be available');
     }
 
-    // Fact Checker routes
     try {
       app.use('/api/v1/fact-checker', require('./src/routes/factCheckerRoutes'));
       console.log('✓ Fact Checker routes loaded: /api/v1/fact-checker');
@@ -239,7 +210,6 @@ const startServer = async () => {
       console.error('✗ Fact Checker routes failed to load:', error.message);
     }
 
-    // Dashboard routes
     try {
       app.use('/api/v1/dashboard', require('./src/routes/dashboardRoutes'));
       console.log('✓ Dashboard routes loaded: /api/v1/dashboard');
@@ -247,7 +217,6 @@ const startServer = async () => {
       console.error('✗ Dashboard routes failed to load:', error.message);
     }
 
-    // Test endpoint
     app.get('/api/test', (req, res) => {
       res.json({
         message: 'Hakikisha API is working!',
@@ -258,7 +227,6 @@ const startServer = async () => {
       });
     });
 
-    // Admin test endpoint
     app.get('/api/v1/admin/test', (req, res) => {
       res.json({
         message: 'Admin API is working!',
@@ -272,7 +240,6 @@ const startServer = async () => {
       });
     });
 
-    // Debug routes endpoint
     app.get('/api/debug/routes', (req, res) => {
       const routes = [];
       
@@ -302,7 +269,6 @@ const startServer = async () => {
       });
     });
 
-    // Root endpoint
     app.get('/', (req, res) => {
       res.json({
         message: 'Hakikisha Backend API',
@@ -328,7 +294,6 @@ const startServer = async () => {
       });
     });
 
-    // 404 handler
     app.use('*', (req, res) => {
       res.status(404).json({
         error: 'Route not found',
@@ -351,11 +316,9 @@ const startServer = async () => {
       });
     });
 
-    // Error handling middleware
     app.use((error, req, res, next) => {
       console.error('Unhandled error:', error);
       
-      // Handle multer file upload errors
       if (error.code === 'LIMIT_FILE_SIZE') {
         return res.status(400).json({
           error: 'File too large',
@@ -379,7 +342,6 @@ const startServer = async () => {
 
     const PORT = process.env.PORT || 10000;
     
-    // Start server
     app.listen(PORT, '0.0.0.0', () => {
       console.log('');
       console.log('===================================');
@@ -418,7 +380,6 @@ const startServer = async () => {
   }
 };
 
-// Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
 });
