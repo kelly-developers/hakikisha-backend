@@ -4,34 +4,75 @@ const { authMiddleware, requireRole } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
-console.log('✓ Blog routes module loaded');
+console.log('✓ Blog routes module loaded successfully');
 
 // Public routes
 router.get('/', (req, res, next) => {
-  console.log('GET /api/v1/blogs - Public blogs endpoint hit');
+  console.log('📝 GET /api/v1/blogs - Public blogs endpoint hit');
   next();
 }, blogController.getBlogs);
 
-router.get('/trending', blogController.getTrendingBlogs);
-router.get('/search', blogController.searchBlogs);
-router.get('/stats', blogController.getBlogStats);
-router.get('/:id', blogController.getBlog);
+router.get('/trending', (req, res, next) => {
+  console.log('📝 GET /api/v1/blogs/trending - Trending blogs endpoint hit');
+  next();
+}, blogController.getTrendingBlogs);
+
+router.get('/search', (req, res, next) => {
+  console.log('📝 GET /api/v1/blogs/search - Search blogs endpoint hit');
+  next();
+}, blogController.searchBlogs);
+
+router.get('/stats', (req, res, next) => {
+  console.log('📝 GET /api/v1/blogs/stats - Blog stats endpoint hit');
+  next();
+}, blogController.getBlogStats);
+
+router.get('/:id', (req, res, next) => {
+  console.log(`📝 GET /api/v1/blogs/${req.params.id} - Get blog by ID endpoint hit`);
+  next();
+}, blogController.getBlog);
 
 // Protected routes (fact-checkers and admins only)
-router.post('/', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.createBlog);
+router.post('/', (req, res, next) => {
+  console.log('📝 POST /api/v1/blogs - Create blog endpoint hit');
+  next();
+}, authMiddleware, requireRole(['fact_checker', 'admin']), blogController.createBlog);
+
 router.put('/:id', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.updateBlog);
 router.delete('/:id', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.deleteBlog);
 router.post('/:id/publish', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.publishBlog);
 router.post('/generate/ai', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.generateAIBlog);
 
 // User's blogs
-router.get('/user/my-blogs', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.getMyBlogs);
+router.get('/user/my-blogs', (req, res, next) => {
+  console.log('📝 GET /api/v1/blogs/user/my-blogs - My blogs endpoint hit');
+  next();
+}, authMiddleware, requireRole(['fact_checker', 'admin']), blogController.getMyBlogs);
 
 // Test endpoint
 router.get('/test/endpoint', (req, res) => {
+  console.log('📝 GET /api/v1/blogs/test/endpoint - Test endpoint hit');
   res.json({
     success: true,
     message: 'Blog routes are working!',
+    timestamp: new Date().toISOString(),
+    endpoints: [
+      'GET /api/v1/blogs',
+      'GET /api/v1/blogs/trending',
+      'GET /api/v1/blogs/search',
+      'GET /api/v1/blogs/stats',
+      'GET /api/v1/blogs/:id',
+      'POST /api/v1/blogs',
+      'GET /api/v1/blogs/user/my-blogs'
+    ]
+  });
+});
+
+// Health check for blog routes
+router.get('/health/check', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Blog routes are healthy',
     timestamp: new Date().toISOString()
   });
 });
