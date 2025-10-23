@@ -20,7 +20,7 @@ class DatabaseInitializer {
       console.log('🎉 Database initialization completed successfully!');
       return true;
     } catch (error) {
-      console.error(' Database initialization failed:', error);
+      console.error('❌ Database initialization failed:', error);
       throw error;
     }
   }
@@ -28,15 +28,15 @@ class DatabaseInitializer {
   static async createSchema() {
     try {
       await db.query('CREATE SCHEMA IF NOT EXISTS hakikisha');
-      console.log('Schema created/verified');
+      console.log('✅ Schema created/verified');
     } catch (error) {
-      console.log(' Schema might already exist:', error.message);
+      console.log('ℹ️ Schema might already exist:', error.message);
     }
   }
 
   static async initializeEssentialTables() {
     try {
-      console.log(' Creating essential database tables...');
+      console.log('Creating essential database tables...');
 
       await this.createUsersTable();
       await this.createPointsTables();
@@ -46,16 +46,16 @@ class DatabaseInitializer {
       await this.createAIVerdictsTable();
       await this.createVerdictsTable();
       
-      console.log(' Essential tables created/verified successfully!');
+      console.log('✅ Essential tables created/verified successfully!');
     } catch (error) {
-      console.error(' Error creating essential tables:', error);
+      console.error('❌ Error creating essential tables:', error);
       throw error;
     }
   }
 
   static async createPointsTables() {
     try {
-      console.log(' Creating points system tables...');
+      console.log('Creating points system tables...');
 
       const userPointsQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.user_points (
@@ -70,7 +70,7 @@ class DatabaseInitializer {
         )
       `;
       await db.query(userPointsQuery);
-      console.log('User points table created/verified');
+      console.log('✅ User points table created/verified');
 
       const pointsHistoryQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.points_history (
@@ -83,10 +83,10 @@ class DatabaseInitializer {
         )
       `;
       await db.query(pointsHistoryQuery);
-      console.log('Points history table created/verified');
+      console.log('✅ Points history table created/verified');
 
     } catch (error) {
-      console.error(' Error creating points tables:', error);
+      console.error('❌ Error creating points tables:', error);
       throw error;
     }
   }
@@ -114,16 +114,16 @@ class DatabaseInitializer {
         )
       `;
       await db.query(query);
-      console.log(' Users table created/verified');
+      console.log('✅ Users table created/verified');
     } catch (error) {
-      console.error(' Error creating users table:', error);
+      console.error('❌ Error creating users table:', error);
       throw error;
     }
   }
 
   static async createBlogTables() {
     try {
-      console.log(' Creating blog tables...');
+      console.log('Creating blog tables...');
 
       const blogCategoriesQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.blog_categories (
@@ -137,7 +137,7 @@ class DatabaseInitializer {
         )
       `;
       await db.query(blogCategoriesQuery);
-      console.log('Blog categories table created/verified');
+      console.log('✅ Blog categories table created/verified');
 
       const blogArticlesQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.blog_articles (
@@ -165,7 +165,7 @@ class DatabaseInitializer {
         )
       `;
       await db.query(blogArticlesQuery);
-      console.log(' Blog articles table created/verified');
+      console.log('✅ Blog articles table created/verified');
 
       const blogCommentsQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.blog_comments (
@@ -181,7 +181,7 @@ class DatabaseInitializer {
         )
       `;
       await db.query(blogCommentsQuery);
-      console.log(' Blog comments table created/verified');
+      console.log('✅ Blog comments table created/verified');
 
       const blogLikesQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.blog_likes (
@@ -193,17 +193,17 @@ class DatabaseInitializer {
         )
       `;
       await db.query(blogLikesQuery);
-      console.log('Blog likes table created/verified');
+      console.log('✅ Blog likes table created/verified');
 
     } catch (error) {
-      console.error(' Error creating blog tables:', error);
+      console.error('❌ Error creating blog tables:', error);
       throw error;
     }
   }
 
   static async createAdminTables() {
     try {
-      console.log(' Creating admin tables...');
+      console.log('Creating admin tables...');
 
       const adminActivitiesQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.admin_activities (
@@ -219,7 +219,7 @@ class DatabaseInitializer {
         )
       `;
       await db.query(adminActivitiesQuery);
-      console.log(' Admin activities table created/verified');
+      console.log('✅ Admin activities table created/verified');
 
       const registrationRequestsQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.registration_requests (
@@ -234,7 +234,7 @@ class DatabaseInitializer {
         )
       `;
       await db.query(registrationRequestsQuery);
-      console.log('Registration requests table created/verified');
+      console.log('✅ Registration requests table created/verified');
 
       const factCheckersQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.fact_checkers (
@@ -253,13 +253,13 @@ class DatabaseInitializer {
         )
       `;
       await db.query(factCheckersQuery);
-      console.log(' Fact checkers table created/verified');
+      console.log('✅ Fact checkers table created/verified');
 
       await this.ensureFactCheckersColumns();
       await this.ensureAdminActivitiesColumns();
       
     } catch (error) {
-      console.error(' Error creating admin tables:', error);
+      console.error('❌ Error creating admin tables:', error);
       throw error;
     }
   }
@@ -291,9 +291,9 @@ class DatabaseInitializer {
       
       await this.createPublicSchemaClaimsTable();
       
-      console.log('Claims table created/verified');
+      console.log('✅ Claims table created/verified');
     } catch (error) {
-      console.error(' Error creating claims table:', error);
+      console.error('❌ Error creating claims table:', error);
       throw error;
     }
   }
@@ -305,9 +305,9 @@ class DatabaseInitializer {
         SELECT * FROM hakikisha.claims
       `;
       await db.query(viewQuery);
-      console.log('Public schema claims view created');
+      console.log('✅ Public schema claims view created');
     } catch (error) {
-      console.log(' Could not create public schema view:', error.message);
+      console.log('ℹ️ Could not create public schema view:', error.message);
       
       try {
         const tableQuery = `
@@ -332,9 +332,9 @@ class DatabaseInitializer {
           )
         `;
         await db.query(tableQuery);
-        console.log(' Public schema claims table created as fallback');
+        console.log('✅ Public schema claims table created as fallback');
       } catch (fallbackError) {
-        console.log(' Could not create public schema table:', fallbackError.message);
+        console.log('ℹ️ Could not create public schema table:', fallbackError.message);
       }
     }
   }
@@ -355,9 +355,9 @@ class DatabaseInitializer {
         )
       `;
       await db.query(query);
-      console.log(' AI Verdicts table created/verified');
+      console.log('✅ AI Verdicts table created/verified');
     } catch (error) {
-      console.error(' Error creating AI verdicts table:', error);
+      console.error('❌ Error creating AI verdicts table:', error);
       throw error;
     }
   }
@@ -382,9 +382,9 @@ class DatabaseInitializer {
         )
       `;
       await db.query(query);
-      console.log('Verdicts table created/verified');
+      console.log('✅ Verdicts table created/verified');
     } catch (error) {
-      console.error(' Error creating verdicts table:', error);
+      console.error('❌ Error creating verdicts table:', error);
       throw error;
     }
   }
@@ -434,21 +434,21 @@ class DatabaseInitializer {
     for (const indexQuery of essentialIndexes) {
       try {
         await db.query(indexQuery);
-        console.log(`Created index: ${indexQuery.split(' ')[3]}`);
+        console.log(`✅ Created index: ${indexQuery.split(' ')[3]}`);
       } catch (error) {
-        console.log(` Index might already exist: ${error.message}`);
+        console.log(`ℹ️ Index might already exist: ${error.message}`);
       }
     }
-    console.log(' All essential indexes created/verified');
+    console.log('✅ All essential indexes created/verified');
   }
 
   static async checkDatabaseConnection() {
     try {
       await db.query('SELECT 1');
-      console.log('Database connection successful');
+      console.log('✅ Database connection successful');
       return true;
     } catch (error) {
-      console.error(' Database connection failed:', error);
+      console.error('❌ Database connection failed:', error);
       return false;
     }
   }
@@ -487,9 +487,9 @@ class DatabaseInitializer {
             [passwordHash, adminEmail]
           );
           
-          console.log('Admin user fixed and password set');
+          console.log('✅ Admin user fixed and password set');
         } else {
-          console.log('Default admin user already exists with correct settings');
+          console.log('✅ Default admin user already exists with correct settings');
         }
         
         return existingAdmin.rows[0];
@@ -508,7 +508,7 @@ class DatabaseInitializer {
 
         const newAdmin = result.rows[0];
         
-        console.log('Default admin user created: ' + newAdmin.email);
+        console.log('✅ Default admin user created: ' + newAdmin.email);
         console.log('Username: ' + newAdmin.username);
         console.log('Role: ' + newAdmin.role);
         console.log('Registration Status: ' + newAdmin.registration_status);
@@ -517,14 +517,14 @@ class DatabaseInitializer {
         return newAdmin;
       }
     } catch (error) {
-      console.error('Error creating/updating default admin user:', error);
+      console.error('❌ Error creating/updating default admin user:', error);
       throw error;
     }
   }
 
   static async verifyDatabaseState() {
     try {
-      console.log(' Verifying database state...');
+      console.log('Verifying database state...');
       
       const pointsColumns = await db.query(`
         SELECT column_name, data_type, is_nullable, column_default
@@ -537,7 +537,7 @@ class DatabaseInitializer {
       const hasRequiredPointsColumns = pointsColumns.rows.some(col => col.column_name === 'total_points') &&
                                      pointsColumns.rows.some(col => col.column_name === 'current_streak') &&
                                      pointsColumns.rows.some(col => col.column_name === 'longest_streak');
-      console.log(`   - has required columns: ${hasRequiredPointsColumns}`);
+      console.log(`✅ has required columns: ${hasRequiredPointsColumns}`);
 
       const usersWithoutPoints = await db.query(`
         SELECT u.id, u.email 
@@ -553,7 +553,7 @@ class DatabaseInitializer {
             'INSERT INTO hakikisha.user_points (user_id, total_points, current_streak, longest_streak) VALUES ($1, 0, 0, 0)',
             [user.id]
           );
-          console.log(`Initialized points for user: ${user.email}`);
+          console.log(`✅ Initialized points for user: ${user.email}`);
         }
       }
 
@@ -562,14 +562,14 @@ class DatabaseInitializer {
         usersWithPoints: usersWithoutPoints.rows.length === 0
       };
     } catch (error) {
-      console.error('Error verifying database state:', error);
+      console.error('❌ Error verifying database state:', error);
       throw error;
     }
   }
 
   static async ensureFactCheckersColumns() {
     try {
-      console.log(' Checking for missing columns in fact_checkers table...');
+      console.log('Checking for missing columns in fact_checkers table...');
       
       const requiredColumns = [
         { name: 'credentials', type: 'TEXT', defaultValue: "''", isUnique: false },
@@ -588,16 +588,16 @@ class DatabaseInitializer {
         await this.ensureColumnExists('fact_checkers', column);
       }
       
-      console.log('All required columns verified in fact_checkers table');
+      console.log('✅ All required columns verified in fact_checkers table');
     } catch (error) {
-      console.error(' Error ensuring fact_checkers columns:', error);
+      console.error('❌ Error ensuring fact_checkers columns:', error);
       throw error;
     }
   }
 
   static async ensureAdminActivitiesColumns() {
     try {
-      console.log(' Checking for missing columns in admin_activities table...');
+      console.log('Checking for missing columns in admin_activities table...');
       
       const requiredColumns = [
         { name: 'admin_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
@@ -614,9 +614,9 @@ class DatabaseInitializer {
         await this.ensureColumnExists('admin_activities', column);
       }
       
-      console.log('All required columns verified in admin_activities table');
+      console.log('✅ All required columns verified in admin_activities table');
     } catch (error) {
-      console.error(' Error ensuring admin_activities columns:', error);
+      console.error('❌ Error ensuring admin_activities columns:', error);
       throw error;
     }
   }
@@ -646,18 +646,18 @@ class DatabaseInitializer {
         }
         
         await db.query(alterQuery);
-        console.log(`Column ${column.name} added to ${tableName} table`);
+        console.log(`✅ Column ${column.name} added to ${tableName} table`);
         
         if (column.defaultValue !== 'NULL' && !column.defaultValue.includes('random()')) {
           const updateQuery = `UPDATE hakikisha.${tableName} SET ${column.name} = ${column.defaultValue} WHERE ${column.name} IS NULL`;
           await db.query(updateQuery);
-          console.log(`Existing records updated with default ${column.name}`);
+          console.log(`✅ Existing records updated with default ${column.name}`);
         }
       } else {
-        console.log(`Column ${column.name} already exists in ${tableName} table`);
+        console.log(`✅ Column ${column.name} already exists in ${tableName} table`);
       }
     } catch (error) {
-      console.error(`Error ensuring column ${column.name}:`, error.message);
+      console.error(`❌ Error ensuring column ${column.name}:`, error.message);
     }
   }
 
@@ -683,25 +683,25 @@ class DatabaseInitializer {
       for (const table of tables) {
         try {
           await db.query(`DROP TABLE IF EXISTS hakikisha.${table} CASCADE`);
-          console.log(`Dropped table: ${table}`);
+          console.log(`✅ Dropped table: ${table}`);
         } catch (error) {
-          console.log(`Could not drop table ${table}:`, error.message);
+          console.log(`ℹ️ Could not drop table ${table}:`, error.message);
         }
       }
       
       try {
         await db.query('DROP VIEW IF EXISTS public.claims CASCADE');
         await db.query('DROP TABLE IF EXISTS public.claims CASCADE');
-        console.log('Dropped public.claims');
+        console.log('✅ Dropped public.claims');
       } catch (error) {
-        console.log('Could not drop public.claims:', error.message);
+        console.log('ℹ️ Could not drop public.claims:', error.message);
       }
       
       await this.initializeCompleteDatabase();
-      console.log('Database reset and reinitialized successfully!');
+      console.log('✅ Database reset and reinitialized successfully!');
       
     } catch (error) {
-      console.error('Error resetting database:', error);
+      console.error('❌ Error resetting database:', error);
       throw error;
     }
   }
@@ -715,9 +715,9 @@ class DatabaseInitializer {
           ALTER TABLE hakikisha.users 
           ALTER COLUMN username DROP NOT NULL
         `);
-        console.log('Made username column nullable');
+        console.log('✅ Made username column nullable');
       } catch (error) {
-        console.log('Username column might already be nullable:', error.message);
+        console.log('ℹ️ Username column might already be nullable:', error.message);
       }
       
       await this.ensureRequiredColumns();
@@ -728,9 +728,9 @@ class DatabaseInitializer {
       await this.ensureAdminActivitiesColumns();
       await this.createIndexes();
       
-      console.log('Existing database fixed successfully!');
+      console.log('✅ Existing database fixed successfully!');
     } catch (error) {
-      console.error('Error fixing existing database:', error);
+      console.error('❌ Error fixing existing database:', error);
       throw error;
     }
   }
@@ -741,14 +741,14 @@ class DatabaseInitializer {
       await this.ensureUserColumns();
       await this.ensureVerdictsColumns();
     } catch (error) {
-      console.error('Error ensuring required columns:', error);
+      console.error('❌ Error ensuring required columns:', error);
       throw error;
     }
   }
 
   static async ensureUserColumns() {
     try {
-      console.log(' Checking for missing columns in users table...');
+      console.log('Checking for missing columns in users table...');
       
       const requiredColumns = [
         { name: 'username', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: true },
@@ -768,16 +768,16 @@ class DatabaseInitializer {
         await this.ensureColumnExists('users', column);
       }
       
-      console.log('All required columns verified in users table');
+      console.log('✅ All required columns verified in users table');
     } catch (error) {
-      console.error(' Error ensuring user columns:', error);
+      console.error('❌ Error ensuring user columns:', error);
       throw error;
     }
   }
 
   static async ensureVerdictsColumns() {
     try {
-      console.log(' Checking for missing columns in verdicts table...');
+      console.log('Checking for missing columns in verdicts table...');
       
       const requiredColumns = [
         { name: 'is_final', type: 'BOOLEAN', defaultValue: 'TRUE', isUnique: false },
@@ -791,9 +791,9 @@ class DatabaseInitializer {
         await this.ensureColumnExists('verdicts', column);
       }
       
-      console.log('All required columns verified in verdicts table');
+      console.log('✅ All required columns verified in verdicts table');
     } catch (error) {
-      console.error(' Error ensuring verdicts columns:', error);
+      console.error('❌ Error ensuring verdicts columns:', error);
       throw error;
     }
   }
@@ -809,7 +809,7 @@ class DatabaseInitializer {
       `);
       return result.rows[0].exists;
     } catch (error) {
-      console.error('Error checking admin_activities table:', error);
+      console.error('❌ Error checking admin_activities table:', error);
       return false;
     }
   }

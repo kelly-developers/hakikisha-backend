@@ -326,7 +326,7 @@ class FactCheckerController {
         });
       }
 
-      const aiVerdict = aiVictResult.rows[0];
+      const aiVerdict = aiVerdictResult.rows[0];
       const verdictId = uuidv4();
 
       // Use edited content or AI content
@@ -390,6 +390,137 @@ class FactCheckerController {
         success: false, 
         error: 'Failed to approve AI verdict', 
         code: 'SERVER_ERROR' 
+      });
+    }
+  }
+
+  async getMyBlogs(req, res) {
+    try {
+      console.log('Fetching blogs for fact checker:', req.user.userId);
+      
+      const result = await db.query(
+        `SELECT 
+          ba.*, 
+          u.email as author_email,
+          u.username as author_name,
+          u.profile_picture as author_avatar
+         FROM hakikisha.blog_articles ba
+         LEFT JOIN hakikisha.users u ON ba.author_id = u.id
+         WHERE ba.author_id = $1
+         ORDER BY ba.created_at DESC`,
+        [req.user.userId]
+      );
+
+      console.log(`Found ${result.rows.length} blogs for fact checker: ${req.user.userId}`);
+
+      // Format the blogs for response
+      const blogs = result.rows.map(blog => ({
+        id: blog.id,
+        title: blog.title,
+        content: blog.content,
+        excerpt: blog.excerpt,
+        author: {
+          id: blog.author_id,
+          email: blog.author_email,
+          name: blog.author_name,
+          avatar: blog.author_avatar
+        },
+        category: blog.category,
+        featured_image: blog.featured_image,
+        read_time: blog.read_time,
+        view_count: blog.view_count,
+        like_count: blog.like_count,
+        share_count: blog.share_count,
+        status: blog.status,
+        slug: blog.slug,
+        published_at: blog.published_at,
+        created_at: blog.created_at,
+        updated_at: blog.updated_at
+      }));
+
+      res.json({
+        success: true,
+        blogs: blogs
+      });
+    } catch (error) {
+      console.error('Get my blogs error:', error);
+      logger.error('Get my blogs error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get blogs',
+        code: 'SERVER_ERROR'
+      });
+    }
+  }
+
+  async getFactCheckerDashboard(req, res) {
+    try {
+      console.log('Fetching dashboard data for fact checker:', req.user.userId);
+      
+      const [claimsResult, blogsResult, statsResult] = await Promise.all([
+        // Get recent claims assigned to this fact checker
+        db.query(
+          `SELECT 
+            c.id, 
+            c.title, 
+            c.status,
+            c.created_at,
+            c.priority
+           FROM hakikisha.claims c
+           WHERE c.assigned_fact_checker_id = $1
+           ORDER BY c.created_at DESC
+           LIMIT 10`,
+          [req.user.userId]
+        ),
+        
+        // Get recent blogs by this fact checker
+        db.query(
+          `SELECT 
+            id, 
+            title, 
+            status,
+            view_count,
+            created_at
+           FROM hakikisha.blog_articles 
+           WHERE author_id = $1
+           ORDER BY created_at DESC
+           LIMIT 5`,
+          [req.user.userId]
+        ),
+        
+        // Get comprehensive stats
+        db.query(
+          `SELECT 
+            (SELECT COUNT(*) FROM hakikisha.verdicts WHERE fact_checker_id = $1) as total_verdicts,
+            (SELECT COUNT(*) FROM hakikisha.claims WHERE assigned_fact_checker_id = $1 AND status IN ('pending', 'human_review')) as pending_claims,
+            (SELECT COUNT(*) FROM hakikisha.blog_articles WHERE author_id = $1 AND status = 'published') as published_blogs,
+            (SELECT COALESCE(AVG(time_spent), 0) FROM hakikisha.verdicts WHERE fact_checker_id = $1) as avg_review_time`,
+          [req.user.userId]
+        )
+      ]);
+
+      const dashboardData = {
+        recentClaims: claimsResult.rows,
+        recentBlogs: blogsResult.rows,
+        stats: {
+          totalVerdicts: parseInt(statsResult.rows[0]?.total_verdicts) || 0,
+          pendingClaims: parseInt(statsResult.rows[0]?.pending_claims) || 0,
+          publishedBlogs: parseInt(statsResult.rows[0]?.published_blogs) || 0,
+          avgReviewTime: parseInt(statsResult.rows[0]?.avg_review_time) || 0
+        }
+      };
+
+      res.json({
+        success: true,
+        data: dashboardData
+      });
+    } catch (error) {
+      console.error('Get fact checker dashboard error:', error);
+      logger.error('Get fact checker dashboard error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get dashboard data',
+        code: 'SERVER_ERROR'
       });
     }
   }

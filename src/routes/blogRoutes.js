@@ -4,9 +4,9 @@ const { authMiddleware, requireRole } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
-console.log('✓ Blog routes module loaded successfully');
+console.log('✅ Blog routes module loaded successfully');
 
-// Public routes
+// Public routes - no authentication required
 router.get('/', (req, res, next) => {
   console.log('📝 GET /api/v1/blogs - Public blogs endpoint hit');
   next();
@@ -42,8 +42,15 @@ router.post('/', (req, res, next) => {
   next();
 }, authMiddleware, requireRole(['fact_checker', 'admin']), blogController.createBlog);
 
-router.put('/:id', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.updateBlog);
-router.delete('/:id', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.deleteBlog);
+router.put('/:id', (req, res, next) => {
+  console.log(`📝 PUT /api/v1/blogs/${req.params.id} - Update blog endpoint hit`);
+  next();
+}, authMiddleware, requireRole(['fact_checker', 'admin']), blogController.updateBlog);
+
+router.delete('/:id', (req, res, next) => {
+  console.log(`📝 DELETE /api/v1/blogs/${req.params.id} - Delete blog endpoint hit`);
+  next();
+}, authMiddleware, requireRole(['fact_checker', 'admin']), blogController.deleteBlog);
 
 // Publish blog route - FIXED
 router.post('/:id/publish', (req, res, next) => {
@@ -51,7 +58,10 @@ router.post('/:id/publish', (req, res, next) => {
   next();
 }, authMiddleware, requireRole(['fact_checker', 'admin']), blogController.publishBlog);
 
-router.post('/generate/ai', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.generateAIBlog);
+router.post('/generate/ai', (req, res, next) => {
+  console.log('📝 POST /api/v1/blogs/generate/ai - Generate AI blog endpoint hit');
+  next();
+}, authMiddleware, requireRole(['fact_checker', 'admin']), blogController.generateAIBlog);
 
 // User's blogs
 router.get('/user/my-blogs', (req, res, next) => {

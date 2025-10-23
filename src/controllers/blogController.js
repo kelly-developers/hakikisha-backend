@@ -1,49 +1,49 @@
-const blogService = require('../services/BlogService');
+const blogService = require('../services/blogService');
 const logger = require('../utils/logger');
 
 class BlogController {
-  /**
-   * Get all published blogs
-   */
   async getBlogs(req, res) {
     try {
-      console.log('GET /api/v1/blogs - Fetching all published blogs');
-      const { category, limit = 10, offset = 0 } = req.query;
+      console.log('📝 BlogController - Getting blogs with query:', req.query);
       
-      const blogs = await blogService.getBlogs({
+      const { category, limit = 10, offset = 0, author } = req.query;
+      
+      const options = {
         category,
         limit: parseInt(limit),
-        offset: parseInt(offset)
-      });
+        offset: parseInt(offset),
+        author
+      };
 
-      console.log(`Found ${blogs.length} blogs`);
+      const blogs = await blogService.getBlogs(options);
+      
+      console.log(`📝 BlogController - Successfully retrieved ${blogs.length} blogs`);
       
       res.json({
         success: true,
         data: blogs,
         pagination: {
-          limit: parseInt(limit),
-          offset: parseInt(offset),
+          limit: options.limit,
+          offset: options.offset,
           total: blogs.length
         }
       });
     } catch (error) {
-      console.error('Get blogs error:', error);
+      console.error('❌ BlogController - Get blogs error:', error);
+      logger.error('BlogController - Get blogs error:', error);
+      
       res.status(500).json({
         success: false,
-        error: 'Failed to fetch blogs',
+        error: 'Failed to retrieve blogs',
         message: error.message
       });
     }
   }
 
-  /**
-   * Get single blog by ID
-   */
   async getBlog(req, res) {
     try {
       const { id } = req.params;
-      console.log(`GET /blogs/${id} - Fetching blog`);
+      console.log(`📝 BlogController - Getting blog by ID: ${id}`);
       
       const blog = await blogService.getBlogById(id);
       
@@ -56,101 +56,57 @@ class BlogController {
 
       // Increment view count
       await blogService.incrementViewCount(id);
-
+      
+      console.log(`📝 BlogController - Successfully retrieved blog: ${blog.title}`);
+      
       res.json({
         success: true,
         data: blog
       });
     } catch (error) {
-      console.error('Get blog error:', error);
-      if (error.message === 'Blog not found') {
-        return res.status(404).json({
-          success: false,
-          error: 'Blog not found'
-        });
-      }
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch blog',
-        message: error.message
-      });
-    }
-  }
-
-  /**
-   * Get trending blogs
-   */
-  async getTrendingBlogs(req, res) {
-    try {
-      const { limit = 5 } = req.query;
-      console.log('GET /blogs/trending - Fetching trending blogs');
+      console.error('❌ BlogController - Get blog error:', error);
+      logger.error('BlogController - Get blog error:', error);
       
-      const blogs = await blogService.getTrendingBlogs(parseInt(limit));
-
-      res.json({
-        success: true,
-        data: blogs
-      });
-    } catch (error) {
-      console.error('Get trending blogs error:', error);
       res.status(500).json({
         success: false,
-        error: 'Failed to fetch trending blogs',
+        error: 'Failed to retrieve blog',
         message: error.message
       });
     }
   }
 
-  /**
-   * Create new blog
-   */
   async createBlog(req, res) {
     try {
-      console.log('POST /blogs - Creating new blog');
-      const {
-        title,
-        content,
-        category = 'fact_check',
-        source_claim_ids = [],
-        featured_image = null,
-        read_time = 5,
-        excerpt = null,
-        status = 'draft'
-      } = req.body;
+      console.log('📝 BlogController - Creating new blog');
+      console.log('Request user:', req.user);
+      
+      const blogData = {
+        ...req.body,
+        author_id: req.user.userId,
+        author_type: 'human'
+      };
 
-      if (!title || !content) {
+      // Validate required fields
+      if (!blogData.title || !blogData.content) {
         return res.status(400).json({
           success: false,
           error: 'Title and content are required'
         });
       }
 
-      const blogData = {
-        title,
-        content,
-        author_id: req.user.userId,
-        category,
-        source_claim_ids,
-        featured_image,
-        read_time,
-        excerpt,
-        status
-      };
-
-      console.log('Creating blog with data:', { 
-        ...blogData, 
-        content: `${blogData.content.substring(0, 100)}...` 
-      });
-
       const blog = await blogService.createBlog(blogData);
-
+      
+      console.log(`📝 BlogController - Successfully created blog: ${blog.id}`);
+      
       res.status(201).json({
         success: true,
         data: blog,
-        message: status === 'published' ? 'Blog published successfully' : 'Blog created as draft'
+        message: 'Blog created successfully'
       });
     } catch (error) {
-      console.error('Create blog error:', error);
+      console.error('❌ BlogController - Create blog error:', error);
+      logger.error('BlogController - Create blog error:', error);
+      
       res.status(500).json({
         success: false,
         error: 'Failed to create blog',
@@ -159,46 +115,40 @@ class BlogController {
     }
   }
 
-  /**
-   * Update blog
-   */
   async updateBlog(req, res) {
     try {
       const { id } = req.params;
-      const updateData = req.body;
-      console.log(`PUT /blogs/${id} - Updating blog`);
-
-      // Check if user owns the blog or is admin
-      const existingBlog = await blogService.getBlogById(id);
-      if (!existingBlog) {
+      console.log(`📝 BlogController - Updating blog: ${id}`);
+      
+      const blog = await blogService.getBlogById(id);
+      if (!blog) {
         return res.status(404).json({
           success: false,
           error: 'Blog not found'
         });
       }
 
-      if (existingBlog.author_id !== req.user.userId && !req.user.roles.includes('admin')) {
+      // Check if user owns the blog or is admin
+      if (blog.author_id !== req.user.userId && req.user.role !== 'admin') {
         return res.status(403).json({
           success: false,
           error: 'Not authorized to update this blog'
         });
       }
 
-      const blog = await blogService.updateBlog(id, updateData);
-
+      const updatedBlog = await blogService.updateBlog(id, req.body);
+      
+      console.log(`📝 BlogController - Successfully updated blog: ${id}`);
+      
       res.json({
         success: true,
-        data: blog,
+        data: updatedBlog,
         message: 'Blog updated successfully'
       });
     } catch (error) {
-      console.error('Update blog error:', error);
-      if (error.message === 'Blog not found') {
-        return res.status(404).json({
-          success: false,
-          error: 'Blog not found'
-        });
-      }
+      console.error('❌ BlogController - Update blog error:', error);
+      logger.error('BlogController - Update blog error:', error);
+      
       res.status(500).json({
         success: false,
         error: 'Failed to update blog',
@@ -207,24 +157,21 @@ class BlogController {
     }
   }
 
-  /**
-   * Delete blog
-   */
   async deleteBlog(req, res) {
     try {
       const { id } = req.params;
-      console.log(`DELETE /blogs/${id} - Deleting blog`);
-
-      // Check if user owns the blog or is admin
-      const existingBlog = await blogService.getBlogById(id);
-      if (!existingBlog) {
+      console.log(`📝 BlogController - Deleting blog: ${id}`);
+      
+      const blog = await blogService.getBlogById(id);
+      if (!blog) {
         return res.status(404).json({
           success: false,
           error: 'Blog not found'
         });
       }
 
-      if (existingBlog.author_id !== req.user.userId && !req.user.roles.includes('admin')) {
+      // Check if user owns the blog or is admin
+      if (blog.author_id !== req.user.userId && req.user.role !== 'admin') {
         return res.status(403).json({
           success: false,
           error: 'Not authorized to delete this blog'
@@ -232,19 +179,17 @@ class BlogController {
       }
 
       await blogService.deleteBlog(id);
-
+      
+      console.log(`📝 BlogController - Successfully deleted blog: ${id}`);
+      
       res.json({
         success: true,
         message: 'Blog deleted successfully'
       });
     } catch (error) {
-      console.error('Delete blog error:', error);
-      if (error.message === 'Blog not found') {
-        return res.status(404).json({
-          success: false,
-          error: 'Blog not found'
-        });
-      }
+      console.error('❌ BlogController - Delete blog error:', error);
+      logger.error('BlogController - Delete blog error:', error);
+      
       res.status(500).json({
         success: false,
         error: 'Failed to delete blog',
@@ -253,46 +198,40 @@ class BlogController {
     }
   }
 
-  /**
-   * Publish blog - FIXED IMPLEMENTATION
-   */
   async publishBlog(req, res) {
     try {
       const { id } = req.params;
-      console.log(`POST /blogs/${id}/publish - Publishing blog`);
-
-      // Check if user owns the blog or is admin
-      const existingBlog = await blogService.getBlogById(id);
-      if (!existingBlog) {
+      console.log(`📝 BlogController - Publishing blog: ${id}`);
+      
+      const blog = await blogService.getBlogById(id);
+      if (!blog) {
         return res.status(404).json({
           success: false,
           error: 'Blog not found'
         });
       }
 
-      if (existingBlog.author_id !== req.user.userId && !req.user.roles.includes('admin')) {
+      // Check if user owns the blog or is admin
+      if (blog.author_id !== req.user.userId && req.user.role !== 'admin') {
         return res.status(403).json({
           success: false,
           error: 'Not authorized to publish this blog'
         });
       }
 
-      // Publish the blog
-      const blog = await blogService.publishBlog(id);
-
+      const publishedBlog = await blogService.publishBlog(id);
+      
+      console.log(`📝 BlogController - Successfully published blog: ${id}`);
+      
       res.json({
         success: true,
-        data: blog,
+        data: publishedBlog,
         message: 'Blog published successfully'
       });
     } catch (error) {
-      console.error('Publish blog error:', error);
-      if (error.message === 'Blog not found') {
-        return res.status(404).json({
-          success: false,
-          error: 'Blog not found'
-        });
-      }
+      console.error('❌ BlogController - Publish blog error:', error);
+      logger.error('BlogController - Publish blog error:', error);
+      
       res.status(500).json({
         success: false,
         error: 'Failed to publish blog',
@@ -301,14 +240,36 @@ class BlogController {
     }
   }
 
-  /**
-   * Search blogs
-   */
+  async getTrendingBlogs(req, res) {
+    try {
+      console.log('📝 BlogController - Getting trending blogs');
+      
+      const { limit = 5 } = req.query;
+      const blogs = await blogService.getTrendingBlogs(parseInt(limit));
+      
+      console.log(`📝 BlogController - Successfully retrieved ${blogs.length} trending blogs`);
+      
+      res.json({
+        success: true,
+        data: blogs
+      });
+    } catch (error) {
+      console.error('❌ BlogController - Get trending blogs error:', error);
+      logger.error('BlogController - Get trending blogs error:', error);
+      
+      res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve trending blogs',
+        message: error.message
+      });
+    }
+  }
+
   async searchBlogs(req, res) {
     try {
       const { q, limit = 10, offset = 0 } = req.query;
-      console.log(`GET /blogs/search - Searching blogs for: ${q}`);
-
+      console.log(`📝 BlogController - Searching blogs for: "${q}"`);
+      
       if (!q) {
         return res.status(400).json({
           success: false,
@@ -320,7 +281,9 @@ class BlogController {
         limit: parseInt(limit),
         offset: parseInt(offset)
       });
-
+      
+      console.log(`📝 BlogController - Search found ${blogs.length} blogs for: "${q}"`);
+      
       res.json({
         success: true,
         data: blogs,
@@ -331,7 +294,9 @@ class BlogController {
         }
       });
     } catch (error) {
-      console.error('Search blogs error:', error);
+      console.error('❌ BlogController - Search blogs error:', error);
+      logger.error('BlogController - Search blogs error:', error);
+      
       res.status(500).json({
         success: false,
         error: 'Failed to search blogs',
@@ -340,36 +305,62 @@ class BlogController {
     }
   }
 
-  /**
-   * Generate AI blog
-   */
+  async getBlogStats(req, res) {
+    try {
+      console.log('📝 BlogController - Getting blog statistics');
+      
+      const stats = await blogService.getBlogStats();
+      
+      console.log('📝 BlogController - Successfully retrieved blog statistics');
+      
+      res.json({
+        success: true,
+        data: stats
+      });
+    } catch (error) {
+      console.error('❌ BlogController - Get blog stats error:', error);
+      logger.error('BlogController - Get blog stats error:', error);
+      
+      res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve blog statistics',
+        message: error.message
+      });
+    }
+  }
+
   async generateAIBlog(req, res) {
     try {
+      console.log('📝 BlogController - Generating AI blog');
+      
       const { topic, claims, tone, length } = req.body;
-      console.log('POST /blogs/generate/ai - Generating AI blog');
-
+      
       if (!topic) {
         return res.status(400).json({
           success: false,
-          error: 'Topic is required'
+          error: 'Topic is required for AI blog generation'
         });
       }
 
-      const blog = await blogService.generateAIBlog({
+      const aiBlog = await blogService.generateAIBlog({
         topic,
         claims,
         tone,
         length,
         author_id: req.user.userId
       });
-
+      
+      console.log(`📝 BlogController - Successfully generated AI blog: ${aiBlog.id}`);
+      
       res.status(201).json({
         success: true,
-        data: blog,
+        data: aiBlog,
         message: 'AI blog generated successfully'
       });
     } catch (error) {
-      console.error('Generate AI blog error:', error);
+      console.error('❌ BlogController - Generate AI blog error:', error);
+      logger.error('BlogController - Generate AI blog error:', error);
+      
       res.status(500).json({
         success: false,
         error: 'Failed to generate AI blog',
@@ -378,22 +369,20 @@ class BlogController {
     }
   }
 
-  /**
-   * Get current user's blogs
-   */
   async getMyBlogs(req, res) {
     try {
+      console.log(`📝 BlogController - Getting blogs for user: ${req.user.userId}`);
+      
       const { status, limit = 10, offset = 0 } = req.query;
-      console.log(`GET /blogs/user/my-blogs - Fetching user's blogs for user: ${req.user.userId}`);
-
+      
       const blogs = await blogService.getUserBlogs(req.user.userId, {
         status,
         limit: parseInt(limit),
         offset: parseInt(offset)
       });
-
-      console.log(`Found ${blogs.length} blogs for user`);
-
+      
+      console.log(`📝 BlogController - Successfully retrieved ${blogs.length} blogs for user: ${req.user.userId}`);
+      
       res.json({
         success: true,
         data: blogs,
@@ -404,32 +393,12 @@ class BlogController {
         }
       });
     } catch (error) {
-      console.error('Get my blogs error:', error);
+      console.error('❌ BlogController - Get my blogs error:', error);
+      logger.error('BlogController - Get my blogs error:', error);
+      
       res.status(500).json({
         success: false,
-        error: 'Failed to fetch your blogs',
-        message: error.message
-      });
-    }
-  }
-
-  /**
-   * Get blog statistics
-   */
-  async getBlogStats(req, res) {
-    try {
-      console.log('GET /blogs/stats - Fetching blog statistics');
-      const stats = await blogService.getBlogStats();
-
-      res.json({
-        success: true,
-        data: stats
-      });
-    } catch (error) {
-      console.error('Get blog stats error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch blog statistics',
+        error: 'Failed to retrieve your blogs',
         message: error.message
       });
     }
