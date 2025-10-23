@@ -173,7 +173,7 @@ const startServer = async () => {
     // Debug route to test blog routes
     app.get('/api/debug/blog-routes', (req, res) => {
       try {
-        console.log('🔧 Testing blog routes loading...');
+        console.log(' Testing blog routes loading...');
         const blogRoutesPath = path.join(__dirname, 'src', 'routes', 'blogRoutes.js');
         console.log('Blog routes path:', blogRoutesPath);
         
@@ -186,7 +186,7 @@ const startServer = async () => {
         }
 
         const blogRoutes = require(blogRoutesPath);
-        console.log('✅ Blog routes module loaded successfully');
+        console.log(' Blog routes module loaded successfully');
         
         res.json({
           success: true,
@@ -209,7 +209,7 @@ const startServer = async () => {
           ]
         });
       } catch (error) {
-        console.error('❌ Blog routes debug error:', error);
+        console.error(' Blog routes debug error:', error);
         res.status(500).json({
           success: false,
           error: 'Failed to load blog routes',
@@ -224,38 +224,38 @@ const startServer = async () => {
     // Load auth routes
     try {
       app.use('/api/v1/auth', require('./src/routes/authRoutes'));
-      console.log('✅ Auth routes loaded: /api/v1/auth');
+      console.log(' Auth routes loaded: /api/v1/auth');
     } catch (error) {
-      console.error('❌ Auth routes failed to load:', error.message);
+      console.error(' Auth routes failed to load:', error.message);
     }
     
     // Load user routes
     try {
       app.use('/api/v1/user', require('./src/routes/userRoutes'));
-      console.log('✅ User routes loaded: /api/v1/user');
+      console.log(' User routes loaded: /api/v1/user');
     } catch (error) {
-      console.error('❌ User routes failed to load:', error.message);
+      console.error(' User routes failed to load:', error.message);
     }
 
     // Load admin routes
     try {
       app.use('/api/v1/users', require('./src/routes/adminRoutes'));
-      console.log('✅ Admin user routes loaded: /api/v1/users');
+      console.log(' Admin user routes loaded: /api/v1/users');
     } catch (error) {
-      console.error('❌ Admin user routes failed to load:', error.message);
+      console.error(' Admin user routes failed to load:', error.message);
     }
     
     // Load claims routes
     try {
       app.use('/api/v1/claims', require('./src/routes/claimRoutes'));
-      console.log('✅ Claims routes loaded: /api/v1/claims');
+      console.log(' Claims routes loaded: /api/v1/claims');
     } catch (error) {
-      console.error('❌ Claims routes failed to load:', error.message);
+      console.error(' Claims routes failed to load:', error.message);
     }
 
     // FIXED: Blog routes loading with comprehensive error handling
     try {
-      console.log('🔧 Loading blog routes...');
+      console.log(' Loading blog routes...');
       const blogRoutesPath = './src/routes/blogRoutes';
       
       // Check if file exists
@@ -264,12 +264,12 @@ const startServer = async () => {
         throw new Error(`Blog routes file not found at: ${fullPath}`);
       }
       
-      console.log('📁 Blog routes file exists, requiring module...');
+      console.log('Blog routes file exists, requiring module...');
       const blogRoutes = require(blogRoutesPath);
       
       // Mount the routes
       app.use('/api/v1/blogs', blogRoutes);
-      console.log('✅ Blog routes loaded successfully: /api/v1/blogs');
+      console.log(' Blog routes loaded successfully: /api/v1/blogs');
       
       // Log available endpoints
       console.log('   Available blog endpoints:');
@@ -280,6 +280,9 @@ const startServer = async () => {
       console.log('     GET  /api/v1/blogs/:id');
       console.log('     POST /api/v1/blogs');
       console.log('     GET  /api/v1/blogs/user/my-blogs');
+      console.log('     PUT  /api/v1/blogs/:id');
+      console.log('     DELETE /api/v1/blogs/:id');
+      console.log('     POST /api/v1/blogs/:id/publish');
       console.log('     GET  /api/v1/blogs/test/endpoint');
       console.log('     GET  /api/v1/blogs/health/check');
       
@@ -289,7 +292,7 @@ const startServer = async () => {
       
       // Create a fallback blog route
       app.use('/api/v1/blogs', (req, res, next) => {
-        console.log(`📝 Fallback blog route hit: ${req.method} ${req.originalUrl}`);
+        console.log(`Fallback blog route hit: ${req.method} ${req.originalUrl}`);
         res.status(501).json({
           success: false,
           error: 'Blog routes are temporarily unavailable',
@@ -302,25 +305,25 @@ const startServer = async () => {
     try {
       const adminRoutes = require('./src/routes/adminRoutes');
       app.use('/api/v1/admin', adminRoutes);
-      console.log('✅ Admin routes loaded: /api/v1/admin');
+      console.log(' Admin routes loaded: /api/v1/admin');
     } catch (error) {
-      console.error('❌ Admin routes failed to load:', error.message);
+      console.error(' Admin routes failed to load:', error.message);
     }
 
     // Load fact-checker routes
     try {
       app.use('/api/v1/fact-checker', require('./src/routes/factCheckerRoutes'));
-      console.log('✅ Fact Checker routes loaded: /api/v1/fact-checker');
+      console.log(' Fact Checker routes loaded: /api/v1/fact-checker');
     } catch (error) {
-      console.error('❌ Fact Checker routes failed to load:', error.message);
+      console.error(' Fact Checker routes failed to load:', error.message);
     }
 
     // Load dashboard routes
     try {
       app.use('/api/v1/dashboard', require('./src/routes/dashboardRoutes'));
-      console.log('✅ Dashboard routes loaded: /api/v1/dashboard');
+      console.log(' Dashboard routes loaded: /api/v1/dashboard');
     } catch (error) {
-      console.error('❌ Dashboard routes failed to load:', error.message);
+      console.error(' Dashboard routes failed to load:', error.message);
     }
 
     // Test endpoints
@@ -407,7 +410,7 @@ const startServer = async () => {
 
     // 404 handler
     app.use('*', (req, res) => {
-      console.log(`❌ Route not found: ${req.method} ${req.originalUrl}`);
+      console.log(` Route not found: ${req.method} ${req.originalUrl}`);
       res.status(404).json({
         error: 'Route not found',
         path: req.originalUrl,
@@ -483,6 +486,7 @@ const startServer = async () => {
       console.log('   Create Blog: POST http://localhost:' + PORT + '/api/v1/blogs');
       console.log('   My Blogs: GET http://localhost:' + PORT + '/api/v1/blogs/user/my-blogs');
       console.log('   Trending Blogs: GET http://localhost:' + PORT + '/api/v1/blogs/trending');
+      console.log('   Publish Blog: POST http://localhost:' + PORT + '/api/v1/blogs/:id/publish');
       console.log('');
     });
 

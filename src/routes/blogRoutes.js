@@ -35,12 +35,22 @@ router.get('/:id', (req, res, next) => {
 // Protected routes (fact-checkers and admins only)
 router.post('/', (req, res, next) => {
   console.log('📝 POST /api/v1/blogs - Create blog endpoint hit');
+  console.log('Request body:', { 
+    ...req.body, 
+    content: req.body.content ? `${req.body.content.substring(0, 100)}...` : 'No content' 
+  });
   next();
 }, authMiddleware, requireRole(['fact_checker', 'admin']), blogController.createBlog);
 
 router.put('/:id', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.updateBlog);
 router.delete('/:id', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.deleteBlog);
-router.post('/:id/publish', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.publishBlog);
+
+// Publish blog route - FIXED
+router.post('/:id/publish', (req, res, next) => {
+  console.log(`📝 POST /api/v1/blogs/${req.params.id}/publish - Publish blog endpoint hit`);
+  next();
+}, authMiddleware, requireRole(['fact_checker', 'admin']), blogController.publishBlog);
+
 router.post('/generate/ai', authMiddleware, requireRole(['fact_checker', 'admin']), blogController.generateAIBlog);
 
 // User's blogs
@@ -63,7 +73,10 @@ router.get('/test/endpoint', (req, res) => {
       'GET /api/v1/blogs/stats',
       'GET /api/v1/blogs/:id',
       'POST /api/v1/blogs',
-      'GET /api/v1/blogs/user/my-blogs'
+      'GET /api/v1/blogs/user/my-blogs',
+      'PUT /api/v1/blogs/:id',
+      'DELETE /api/v1/blogs/:id',
+      'POST /api/v1/blogs/:id/publish'
     ]
   });
 });

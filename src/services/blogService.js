@@ -144,7 +144,7 @@ class BlogService {
   }
 
   /**
-   * Publish blog
+   * Publish blog - FIXED IMPLEMENTATION
    */
   async publishBlog(id) {
     try {

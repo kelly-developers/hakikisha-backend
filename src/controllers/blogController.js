@@ -137,7 +137,10 @@ class BlogController {
         status
       };
 
-      console.log('Creating blog with data:', { ...blogData, content: `${blogData.content.substring(0, 100)}...` });
+      console.log('Creating blog with data:', { 
+        ...blogData, 
+        content: `${blogData.content.substring(0, 100)}...` 
+      });
 
       const blog = await blogService.createBlog(blogData);
 
@@ -251,7 +254,7 @@ class BlogController {
   }
 
   /**
-   * Publish blog
+   * Publish blog - FIXED IMPLEMENTATION
    */
   async publishBlog(req, res) {
     try {
@@ -274,6 +277,7 @@ class BlogController {
         });
       }
 
+      // Publish the blog
       const blog = await blogService.publishBlog(id);
 
       res.json({
@@ -382,15 +386,11 @@ class BlogController {
       const { status, limit = 10, offset = 0 } = req.query;
       console.log(`GET /blogs/user/my-blogs - Fetching user's blogs for user: ${req.user.userId}`);
 
-      let blogs;
-      if (status === 'draft') {
-        blogs = await blogService.getDraftBlogs(req.user.userId);
-      } else {
-        blogs = await blogService.getBlogsByAuthor(req.user.userId, {
-          limit: parseInt(limit),
-          offset: parseInt(offset)
-        });
-      }
+      const blogs = await blogService.getUserBlogs(req.user.userId, {
+        status,
+        limit: parseInt(limit),
+        offset: parseInt(offset)
+      });
 
       console.log(`Found ${blogs.length} blogs for user`);
 
