@@ -17,7 +17,7 @@ The backend has been completely optimized to handle **5 million concurrent users
 - ✅ Rate limiting (50 requests per 15 min)
 - ✅ Error handling and retry logic
 
-**Model:** Election_Assistant (via Poe API)
+**Model:** Web-Search (via Poe API)
 
 See `docs/AI_INTEGRATION_COMPLETE.md` for full API documentation.
 
@@ -154,7 +154,7 @@ npm install
 ```bash
 # Poe AI
 POE_API_KEY=ZceEiyLZg4JbvhV8UDpnY0rMT037Pi4QIhdPy4pirRA
-AI_MODEL=Election_Assistant
+AI_MODEL=Web-Search
 
 # Redis (Recommended for production)
 REDIS_URL=redis://localhost:6379

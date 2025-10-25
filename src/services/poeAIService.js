@@ -8,7 +8,7 @@ class PoeAIService {
       apiKey: process.env.POE_API_KEY || "ZceEiyLZg4JbvhV8UDpnY0rMT037Pi4QIhdPy4pirRA",
       baseURL: "https://api.poe.com/v1",
     });
-    this.model = "Election_Assistant";
+    this.model = "Web-Search";
     this.systemPrompt = "You are Hakikisha AI, an election fact-checking assistant for Kenya. Provide accurate, helpful information about elections, voting, and claims. Always be professional and unbiased.";
     this.disclaimer = "\n\n⚠️ This response is AI-generated. CRECO is not responsible for any implications. Please verify important information.";
   }

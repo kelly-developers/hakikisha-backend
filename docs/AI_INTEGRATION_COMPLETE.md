@@ -2,7 +2,7 @@
 
 ## ✅ Implementation Status: COMPLETE
 
-All AI features have been successfully implemented using the Poe API with the Election_Assistant model.
+All AI features have been successfully implemented using the Poe API with the Web-Search model.
 
 ---
 
@@ -25,7 +25,7 @@ AI-powered chat interface for user queries.
 {
   "success": true,
   "response": "The voter registration deadline is...\n\n⚠️ This response is AI-generated. CRECO is not responsible for any implications. Please verify important information.",
-  "model": "Election_Assistant",
+  "model": "Web-Search",
   "timestamp": "2025-01-24T10:30:00Z"
 }
 ```
@@ -215,7 +215,7 @@ const submitClaimWithAI = async (claimData) => {
 ```bash
 # Poe API Configuration
 POE_API_KEY=ZceEiyLZg4JbvhV8UDpnY0rMT037Pi4QIhdPy4pirRA
-AI_MODEL=Election_Assistant
+AI_MODEL=Web-Search
 
 # Performance Settings
 REDIS_URL=redis://localhost:6379  # Recommended for production
