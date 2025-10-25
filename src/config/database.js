@@ -11,9 +11,22 @@ const dbConfig = {
   ssl: {
     rejectUnauthorized: false
   },
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
+  // Performance optimizations for 5M concurrent users
+  max: parseInt(process.env.DB_POOL_MAX) || 100, // Increased from 20 to 100
+  min: parseInt(process.env.DB_POOL_MIN) || 10, // Keep minimum connections alive
+  idleTimeoutMillis: 10000, // Release idle connections faster
+  connectionTimeoutMillis: 5000, // Increased timeout
+  
+  // Statement timeout to prevent long-running queries
+  statement_timeout: 10000, // 10 seconds max per query
+  query_timeout: 10000,
+  
+  // Connection pool monitoring
+  application_name: 'hakikisha_backend',
+  
+  // Keep-alive settings for stable connections
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
 };
 
 class Database {
@@ -68,10 +81,15 @@ class Database {
     try {
       const result = await this.pool.query(text, params);
       const duration = Date.now() - start;
-      console.log(`Executed query: ${text}`, { duration, rows: result.rowCount });
+      
+      // Log slow queries (>1s) for performance monitoring
+      if (duration > 1000) {
+        console.warn(`SLOW QUERY (${duration}ms):`, text.substring(0, 100));
+      }
+      
       return result;
     } catch (error) {
-      console.error('Query error:', { text, error: error.message });
+      console.error('Query error:', { text: text.substring(0, 100), error: error.message });
       throw error;
     }
   }
@@ -81,6 +99,19 @@ class Database {
       await this.initializeDatabase();
     }
     return await this.pool.connect();
+  }
+
+  // Expose pool stats for monitoring
+  get totalCount() {
+    return this.pool?.totalCount || 0;
+  }
+
+  get idleCount() {
+    return this.pool?.idleCount || 0;
+  }
+
+  get waitingCount() {
+    return this.pool?.waitingCount || 0;
   }
 
   async end() {

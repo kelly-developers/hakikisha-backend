@@ -16,6 +16,18 @@ const startServer = async () => {
     let dbInitialized = false;
     let tablesInitialized = false;
     let adminCreated = false;
+    let redisInitialized = false;
+
+    // Initialize Redis for caching (for 5M users performance)
+    console.log('Initializing Redis cache...');
+    try {
+      const { initRedis } = require('./src/config/redis');
+      await initRedis();
+      redisInitialized = true;
+      console.log('✅ Redis initialized successfully');
+    } catch (redisError) {
+      console.log('⚠️  Redis not available, using in-memory cache:', redisError.message);
+    }
 
     console.log('Initializing database connection...');
     
@@ -102,17 +114,46 @@ const startServer = async () => {
     });
     app.use(limiter);
 
+    // Performance middleware for 5M users
+    const { 
+      requestTimer, 
+      connectionPoolMonitor, 
+      memoryMonitor,
+      requestId 
+    } = require('./src/middleware/performanceMiddleware');
+    
+    app.use(requestId);
+    app.use(requestTimer);
+    app.use(connectionPoolMonitor);
+    app.use(memoryMonitor);
+
     app.get('/health', (req, res) => {
+      const db = require('./src/config/database');
+      const { isAvailable } = require('./src/config/redis');
+      
       res.json({
         status: 'ok',
         service: 'hakikisha-backend',
         timestamp: new Date().toISOString(),
         database: dbInitialized ? 'connected' : 'disconnected',
+        redis: isAvailable() ? 'connected' : 'disconnected',
         tables: tablesInitialized ? 'initialized' : 'not initialized',
         admin: adminCreated ? 'created' : 'not created',
         uploads: fs.existsSync(uploadsDir) ? 'available' : 'unavailable',
         port: process.env.PORT || 10000,
-        environment: process.env.NODE_ENV || 'development'
+        environment: process.env.NODE_ENV || 'development',
+        performance: {
+          dbPool: {
+            total: db.totalCount,
+            idle: db.idleCount,
+            waiting: db.waitingCount
+          },
+          memory: {
+            rss: `${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`,
+            heapUsed: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`
+          },
+          uptime: `${Math.round(process.uptime())}s`
+        }
       });
     });
 
@@ -324,6 +365,19 @@ const startServer = async () => {
       console.log(' Dashboard routes loaded: /api/v1/dashboard');
     } catch (error) {
       console.error(' Dashboard routes failed to load:', error.message);
+    }
+
+    // Load POE AI routes (NEW - for 5M users with caching)
+    try {
+      app.use('/api/v1/ai', require('./src/routes/poeAIRoutes'));
+      console.log(' AI routes loaded: /api/v1/ai');
+      console.log('   Available AI endpoints:');
+      console.log('     POST /api/v1/ai/chat');
+      console.log('     POST /api/v1/ai/fact-check');
+      console.log('     POST /api/v1/ai/analyze-image');
+      console.log('     GET  /api/v1/ai/health');
+    } catch (error) {
+      console.error(' AI routes failed to load:', error.message);
     }
 
     // Test endpoints

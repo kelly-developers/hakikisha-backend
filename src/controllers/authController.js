@@ -153,23 +153,25 @@ const login = async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Email and password are required',
+        error: 'Email/username and password are required',
         code: 'VALIDATION_ERROR'
       });
     }
 
+    // UPDATED: Support login with either email OR username
     const userResult = await db.query(
       `SELECT id, email, username, password_hash, role, is_verified, registration_status, 
               two_factor_enabled, status, login_count, last_login
-       FROM hakikisha.users WHERE email = $1`,
+       FROM hakikisha.users 
+       WHERE email = $1 OR username = $1`,
       [email]
     );
 
     if (userResult.rows.length === 0) {
-      logger.warn(`Failed login attempt for non-existent email: ${email}`);
+      logger.warn(`Failed login attempt for non-existent email/username: ${email}`);
       return res.status(401).json({
         success: false,
-        error: 'Invalid email or password',
+        error: 'Invalid email/username or password',
         code: 'AUTH_INVALID'
       });
     }

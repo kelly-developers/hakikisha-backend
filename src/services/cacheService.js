@@ -1,81 +1,123 @@
-const redis = require('../config/cache');
+const NodeCache = require('node-cache');
+const { getRedisClient, isAvailable } = require('../config/redis');
 const logger = require('../utils/logger');
 const Constants = require('../config/constants');
 
 class CacheService {
   constructor() {
-    this.client = redis.client;
+    // In-memory cache as fallback
+    this.memoryCache = new NodeCache({
+      stdTTL: 300,
+      checkperiod: 60,
+      useClones: false
+    });
   }
 
   async set(key, value, ttl = Constants.CACHE_TTL.MEDIUM) {
     try {
-      const serializedValue = JSON.stringify(value);
-      await this.client.set(key, serializedValue, { EX: ttl });
-      return true;
+      // Try Redis first if available
+      if (isAvailable()) {
+        const client = getRedisClient();
+        const serializedValue = JSON.stringify(value);
+        await client.set(key, serializedValue, { EX: ttl });
+      }
     } catch (error) {
-      logger.error('Cache set error:', error);
-      return false;
+      logger.error('Redis set error:', error);
     }
+
+    // Always set in memory cache as backup
+    return this.memoryCache.set(key, value, ttl);
   }
 
   async get(key) {
     try {
-      const value = await this.client.get(key);
-      return value ? JSON.parse(value) : null;
+      // Try Redis first if available
+      if (isAvailable()) {
+        const client = getRedisClient();
+        const value = await client.get(key);
+        if (value) {
+          return JSON.parse(value);
+        }
+      }
     } catch (error) {
-      logger.error('Cache get error:', error);
-      return null;
+      logger.error('Redis get error:', error);
     }
+
+    // Fallback to memory cache
+    const cached = this.memoryCache.get(key);
+    return cached || null;
   }
 
   async del(key) {
     try {
-      await this.client.del(key);
-      return true;
+      // Try Redis first if available
+      if (isAvailable()) {
+        const client = getRedisClient();
+        await client.del(key);
+      }
     } catch (error) {
-      logger.error('Cache delete error:', error);
-      return false;
+      logger.error('Redis delete error:', error);
     }
+
+    // Delete from memory cache
+    return this.memoryCache.del(key);
   }
 
   async exists(key) {
     try {
-      const exists = await this.client.exists(key);
-      return exists === 1;
+      if (isAvailable()) {
+        const client = getRedisClient();
+        const exists = await client.exists(key);
+        return exists === 1;
+      }
     } catch (error) {
-      logger.error('Cache exists check error:', error);
-      return false;
+      logger.error('Redis exists check error:', error);
     }
+
+    return this.memoryCache.has(key);
   }
 
   async expire(key, ttl) {
     try {
-      await this.client.expire(key, ttl);
-      return true;
+      if (isAvailable()) {
+        const client = getRedisClient();
+        await client.expire(key, ttl);
+        return true;
+      }
     } catch (error) {
-      logger.error('Cache expire error:', error);
-      return false;
+      logger.error('Redis expire error:', error);
     }
+
+    // Memory cache handles TTL automatically
+    return true;
   }
 
   async keys(pattern) {
     try {
-      return await this.client.keys(pattern);
+      if (isAvailable()) {
+        const client = getRedisClient();
+        return await client.keys(pattern);
+      }
     } catch (error) {
-      logger.error('Cache keys error:', error);
-      return [];
+      logger.error('Redis keys error:', error);
     }
+
+    return this.memoryCache.keys();
   }
 
   async flush() {
     try {
-      await this.client.flushAll();
-      logger.info('Cache flushed successfully');
-      return true;
+      if (isAvailable()) {
+        const client = getRedisClient();
+        await client.flushAll();
+        logger.info('Redis cache flushed successfully');
+      }
     } catch (error) {
-      logger.error('Cache flush error:', error);
-      return false;
+      logger.error('Redis flush error:', error);
     }
+
+    this.memoryCache.flushAll();
+    return true;
   }
 
   async increment(key, amount = 1) {
