@@ -123,7 +123,12 @@ class ClaimController {
           );
         } else {
           // Regular claim submission points
-          pointsResult = await PointsService.awardPointsForClaimSubmission(req.user.userId, claimId);
+          pointsResult = await PointsService.awardPoints(
+            req.user.userId, 
+            POINTS.CLAIM_SUBMISSION, 
+            'CLAIM_SUBMISSION', 
+            `Claim submitted: ${claimId}`
+          );
         }
         
         console.log('Points awarded:', pointsResult);

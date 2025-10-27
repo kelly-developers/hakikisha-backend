@@ -13,8 +13,11 @@ const shouldCompress = (req, res) => {
 const requestTimer = (req, res, next) => {
   const start = Date.now();
   
-  res.on('finish', () => {
+  // Set response time header BEFORE sending response
+  const originalSend = res.send;
+  res.send = function(data) {
     const duration = Date.now() - start;
+    res.setHeader('X-Response-Time', `${duration}ms`);
     
     // Log slow requests (>1s)
     if (duration > 1000) {
@@ -26,9 +29,8 @@ const requestTimer = (req, res, next) => {
       });
     }
     
-    // Set response time header
-    res.setHeader('X-Response-Time', `${duration}ms`);
-  });
+    return originalSend.call(this, data);
+  };
   
   next();
 };
