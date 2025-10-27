@@ -57,6 +57,49 @@ class ClaimController {
 
       console.log('Claim inserted successfully:', result.rows[0]);
 
+      // Automatically process claim with AI
+      const poeAIService = require('../services/poeAIService');
+      const AIVerdict = require('../models/AIVerdict');
+      
+      try {
+        console.log('Starting automatic AI processing for claim:', claimId);
+        const aiFactCheckResult = await poeAIService.factCheck(claimText, category, sourceLink);
+        
+        if (aiFactCheckResult.success && aiFactCheckResult.aiVerdict) {
+          const aiVerdictId = uuidv4();
+          
+          await db.query(
+            `INSERT INTO hakikisha.ai_verdicts (
+              id, claim_id, verdict, confidence_score, explanation, 
+              evidence_sources, ai_model_version, disclaimer, is_edited_by_human, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, NOW())`,
+            [
+              aiVerdictId,
+              claimId,
+              aiFactCheckResult.aiVerdict.verdict,
+              aiFactCheckResult.aiVerdict.confidence === 'high' ? 0.9 : 
+                aiFactCheckResult.aiVerdict.confidence === 'low' ? 0.5 : 0.7,
+              aiFactCheckResult.aiVerdict.explanation,
+              JSON.stringify([]),
+              'Web-Search-POE',
+              'This is an AI-generated response. CRECO is not responsible for any implications. Please verify with fact-checkers.'
+            ]
+          );
+          
+          // Update claim with AI verdict
+          await db.query(
+            `UPDATE hakikisha.claims 
+             SET ai_verdict_id = $1, status = 'ai_approved', updated_at = NOW()
+             WHERE id = $2`,
+            [aiVerdictId, claimId]
+          );
+          
+          console.log('AI verdict created and linked to claim:', claimId);
+        }
+      } catch (aiError) {
+        console.log('AI processing failed, continuing without AI verdict:', aiError.message);
+      }
+
       // Check if this is user's first claim
       const claimCountResult = await db.query(
         'SELECT COUNT(*) FROM hakikisha.claims WHERE user_id = $1',
@@ -247,13 +290,16 @@ class ClaimController {
           v.evidence_sources as "evidence_sources",
           v.created_at as "verdictDate",
           v.time_spent as "review_time",
+          v.responsibility as "verdict_responsibility",
           fc.email as "factCheckerEmail",
           fc.username as "factCheckerName",
           fc.profile_picture as "factCheckerAvatar",
           av.verdict as "ai_verdict",
           av.explanation as "ai_explanation",
           av.confidence_score as "ai_confidence",
-          av.evidence_sources as "ai_sources"
+          av.evidence_sources as "ai_sources",
+          av.disclaimer as "ai_disclaimer",
+          av.is_edited_by_human as "ai_edited"
          FROM hakikisha.claims c
          LEFT JOIN hakikisha.users u ON c.user_id = u.id
          LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
@@ -433,6 +479,9 @@ class ClaimController {
           avatar: claim.factCheckerAvatar
         },
         ai_confidence: claim.ai_confidence,
+        ai_disclaimer: claim.ai_disclaimer,
+        ai_edited: claim.ai_edited,
+        verdict_responsibility: claim.verdict_responsibility || 'ai',
         review_time: claim.review_time,
         imageUrl: claim.media_url,
         videoLink: claim.media_type === 'video' ? claim.media_url : null

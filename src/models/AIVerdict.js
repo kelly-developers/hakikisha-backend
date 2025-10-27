@@ -10,20 +10,24 @@ class AIVerdict {
       confidence_score,
       explanation,
       evidence_sources,
-      ai_model_version
+      ai_model_version,
+      disclaimer = 'This is an AI-generated response. CRECO is not responsible for any implications. Please verify with fact-checkers.'
     } = verdictData;
 
     const id = uuidv4();
     const query = `
-      INSERT INTO ai_verdicts (id, claim_id, verdict, confidence_score, explanation, evidence_sources, ai_model_version, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      INSERT INTO hakikisha.ai_verdicts (
+        id, claim_id, verdict, confidence_score, explanation, 
+        evidence_sources, ai_model_version, disclaimer, is_edited_by_human, created_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, NOW())
       RETURNING *
     `;
 
     try {
       const result = await db.query(query, [
         id, claim_id, verdict, confidence_score, explanation, 
-        JSON.stringify(evidence_sources), ai_model_version
+        JSON.stringify(evidence_sources), ai_model_version, disclaimer
       ]);
       return result.rows[0];
     } catch (error) {
@@ -43,7 +47,7 @@ class AIVerdict {
     }
   }
 
-  static async update(id, updates) {
+  static async update(id, updates, factCheckerId = null) {
     const allowedFields = ['verdict', 'confidence_score', 'explanation', 'evidence_sources'];
     const setClause = [];
     const values = [];
@@ -61,10 +65,19 @@ class AIVerdict {
       throw new Error('No valid fields to update');
     }
 
+    // Mark as edited by human if factCheckerId provided
+    if (factCheckerId) {
+      setClause.push(`is_edited_by_human = true`);
+      setClause.push(`edited_by_fact_checker_id = $${paramCount}`);
+      values.push(factCheckerId);
+      paramCount++;
+      setClause.push(`edited_at = NOW()`);
+    }
+
     values.push(id);
 
     const query = `
-      UPDATE ai_verdicts 
+      UPDATE hakikisha.ai_verdicts 
       SET ${setClause.join(', ')}, updated_at = NOW()
       WHERE id = $${paramCount}
       RETURNING *

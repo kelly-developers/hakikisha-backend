@@ -21,7 +21,9 @@ class FactCheckerController {
           av.verdict as "ai_verdict",
           av.explanation as "ai_explanation",
           av.confidence_score as "ai_confidence",
-          av.evidence_sources as "ai_sources"
+          av.evidence_sources as "ai_sources",
+          av.disclaimer as "ai_disclaimer",
+          av.is_edited_by_human as "ai_edited"
          FROM hakikisha.claims c
          LEFT JOIN hakikisha.users u ON c.user_id = u.id
          LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
@@ -57,7 +59,9 @@ class FactCheckerController {
             verdict: claim.ai_verdict,
             explanation: claim.ai_explanation,
             confidence: claim.ai_confidence,
-            sources: aiSources
+            sources: aiSources,
+            disclaimer: claim.ai_disclaimer,
+            isEdited: claim.ai_edited
           }
         };
       });
@@ -108,8 +112,9 @@ class FactCheckerController {
       await db.query(
         `INSERT INTO hakikisha.verdicts (
           id, claim_id, fact_checker_id, verdict, explanation, 
-          evidence_sources, time_spent, is_final, approval_status, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'approved', NOW())`,
+          evidence_sources, time_spent, is_final, approval_status, 
+          responsibility, based_on_ai_verdict, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'approved', 'creco', false, NOW())`,
         [
           verdictId, 
           claimId, 
@@ -297,7 +302,7 @@ class FactCheckerController {
   async approveAIVerdict(req, res) {
     try {
       const { claimId, approved, editedVerdict, editedExplanation, additionalSources } = req.body;
-      console.log('Approving AI verdict for claim:', claimId);
+      console.log('Approving AI verdict for claim:', claimId, 'Edited:', !approved);
 
       if (!claimId) {
         return res.status(400).json({
@@ -310,7 +315,7 @@ class FactCheckerController {
       await db.query('BEGIN');
 
       const aiVerdictResult = await db.query(
-        `SELECT av.verdict, av.explanation, av.evidence_sources
+        `SELECT av.id, av.verdict, av.explanation, av.evidence_sources
          FROM hakikisha.ai_verdicts av
          JOIN hakikisha.claims c ON c.ai_verdict_id = av.id
          WHERE c.id = $1`,
@@ -328,9 +333,10 @@ class FactCheckerController {
 
       const aiVerdict = aiVerdictResult.rows[0];
       const verdictId = uuidv4();
+      const wasEdited = !approved || editedVerdict || editedExplanation || additionalSources;
 
       // Use edited content or AI content
-      const finalVerdict = approved ? aiVerdict.verdict : (editedVerdict || aiVerdict.verdict);
+      const finalVerdict = editedVerdict || aiVerdict.verdict;
       const finalExplanation = editedExplanation || aiVerdict.explanation;
       
       let finalSources = [];
@@ -348,11 +354,30 @@ class FactCheckerController {
         finalSources = [...finalSources, ...additionalSources];
       }
 
+      // If edited, update the AI verdict to mark it as edited
+      if (wasEdited) {
+        await db.query(
+          `UPDATE hakikisha.ai_verdicts 
+           SET is_edited_by_human = true, 
+               edited_by_fact_checker_id = $1, 
+               edited_at = NOW(),
+               verdict = $2,
+               explanation = $3,
+               evidence_sources = $4
+           WHERE id = $5`,
+          [req.user.userId, finalVerdict, finalExplanation, JSON.stringify(finalSources), aiVerdict.id]
+        );
+      }
+
+      // Determine responsibility based on whether it was edited
+      const responsibility = wasEdited ? 'creco' : 'ai';
+
       await db.query(
         `INSERT INTO hakikisha.verdicts (
           id, claim_id, fact_checker_id, verdict, explanation, 
-          evidence_sources, ai_verdict_id, is_final, approval_status, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'approved', NOW())`,
+          evidence_sources, ai_verdict_id, is_final, approval_status, 
+          responsibility, based_on_ai_verdict, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'approved', $8, true, NOW())`,
         [
           verdictId,
           claimId,
@@ -360,7 +385,8 @@ class FactCheckerController {
           finalVerdict,
           finalExplanation,
           JSON.stringify(finalSources),
-          aiVerdict.id
+          aiVerdict.id,
+          responsibility
         ]
       );
 
@@ -376,11 +402,12 @@ class FactCheckerController {
 
       await db.query('COMMIT');
 
-      console.log('AI verdict approved for claim:', claimId);
+      console.log(`AI verdict ${wasEdited ? 'edited and' : ''} approved for claim:`, claimId, 'Responsibility:', responsibility);
 
       res.json({ 
         success: true, 
-        message: 'Verdict approved and sent to user' 
+        message: wasEdited ? 'Verdict edited and approved. CRECO is now responsible.' : 'AI verdict approved without changes.',
+        responsibility: responsibility
       });
     } catch (error) {
       await db.query('ROLLBACK');
