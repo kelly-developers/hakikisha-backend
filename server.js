@@ -24,9 +24,9 @@ const startServer = async () => {
       const { initRedis } = require('./src/config/redis');
       await initRedis();
       redisInitialized = true;
-      console.log('✅ Redis initialized successfully');
+      console.log('Redis initialized successfully');
     } catch (redisError) {
-      console.log('⚠️  Redis not available, using in-memory cache:', redisError.message);
+      console.log('Redis not available, using in-memory cache:', redisError.message);
     }
 
     console.log('Initializing database connection...');
