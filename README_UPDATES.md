@@ -353,5 +353,146 @@ Your backend is now:
 
 ---
 
-**Last Updated:** January 24, 2025
-**Version:** 2.0.0
+**Last Updated:** October 27, 2025
+**Version:** 2.1.0
+
+---
+
+## 🚨 CRITICAL UPDATE - Version 2.1.0 (October 27, 2025)
+
+### MANUAL ACTION REQUIRED
+
+**Package.json Script Missing**: You MUST manually add this script to your `package.json` file:
+
+```json
+{
+  "scripts": {
+    "build:dev": "vite build --mode development"
+  }
+}
+```
+
+### Database Migration Required - Migration 020
+
+**CRITICAL**: Before deploying, run migration 020:
+
+```bash
+node migrations/020_add_missing_columns.js
+```
+
+This migration adds:
+
+**ai_verdicts table**:
+- `disclaimer` - AI responsibility disclaimer text
+- `is_edited_by_human` - Tracks if fact-checker edited the AI verdict
+- `edited_by_fact_checker_id` - Which fact-checker edited it
+- `edited_at` - When the edit occurred
+
+**verdicts table**:
+- `responsibility` - Who is responsible: 'creco' or 'ai'
+
+### 🐛 Bugs Fixed
+
+1. **✅ Column "disclaimer" does not exist** - Fixed in migration 020
+2. **✅ Column "responsibility" does not exist** - Fixed in migration 020
+3. **✅ ERR_HTTP_HEADERS_SENT** - Fixed in performanceMiddleware.js
+4. **✅ Slow queries on authentication** - Improved with COALESCE
+5. **✅ Error loading claim details** - Fixed query with fallback values
+
+### 🆕 New Features
+
+#### Automatic AI Response to Claims
+
+When users submit claims:
+1. **AI processes immediately** (3-5 seconds)
+2. **AI responds with verdict** + sources + explanation
+3. **Includes disclaimer**: "This is an AI-generated response. CRECO is not responsible for any implications."
+4. **User receives instant feedback**
+5. **Fact-checkers can review** in their dashboard
+
+#### Fact-Checker Edit Capabilities
+
+Fact-checkers now have three options:
+
+1. **Approve AI verdict** (keeps disclaimer, AI responsible)
+2. **Edit AI verdict** (removes disclaimer, CRECO becomes responsible)
+3. **Create original verdict** (bypasses AI, CRECO responsible)
+
+### Updated Workflow
+
+```
+User submits claim
+    ↓
+AI automatically processes (3-5 seconds)
+    ↓
+AI verdict saved with disclaimer
+    ↓
+User receives AI response immediately
+    ↓
+Claim appears in fact-checker dashboard
+    ↓
+Fact-checker reviews AI verdict
+    ↓
+Two options:
+    ├─→ Approve as-is (disclaimer kept, AI responsible)
+    └─→ Edit verdict (disclaimer removed, CRECO responsible)
+    ↓
+User receives final verdict notification
+```
+
+### New Files
+
+- `migrations/020_add_missing_columns.js` - Critical database migration
+- `src/workflows/claimWorkflow.js` - Complete claim processing workflow
+- `docs/DEPLOYMENT_INSTRUCTIONS.md` - Deployment guide with migration steps
+
+### Configuration Changes
+
+Add to your `.env` file:
+
+```bash
+# Poe AI Configuration (Already set)
+POE_API_KEY=ZceEiyLZg4JbvhV8UDpnY0rMT037Pi4QIhdPy4pirRA
+```
+
+### Deployment Checklist for v2.1.0
+
+- [ ] Add `build:dev` script to package.json (MANUAL)
+- [ ] Run migration 020 (CRITICAL)
+- [ ] Verify columns exist in database
+- [ ] Test claim submission with AI response
+- [ ] Test fact-checker editing
+- [ ] Monitor performance
+- [ ] Check error logs
+
+### API Response Changes
+
+**Claim Details Now Include**:
+
+```json
+{
+  "ai_verdict": "verified",
+  "ai_explanation": "...",
+  "ai_disclaimer": "This is an AI-generated response...",
+  "ai_edited": false,
+  "verdict_responsibility": "ai"
+}
+```
+
+**After Fact-Checker Edit**:
+
+```json
+{
+  "ai_verdict": "verified",
+  "ai_explanation": "Edited explanation...",
+  "ai_disclaimer": null,
+  "ai_edited": true,
+  "verdict_responsibility": "creco"
+}
+```
+
+### Documentation
+
+- `docs/DEPLOYMENT_INSTRUCTIONS.md` - Full deployment guide
+- `docs/API_COMPLETE.md` - Updated API documentation
+- `docs/DATABASE_SETUP.md` - Database setup with new columns

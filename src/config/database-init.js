@@ -350,6 +350,10 @@ class DatabaseInitializer {
           explanation TEXT,
           evidence_sources JSONB,
           ai_model_version VARCHAR(100),
+          disclaimer TEXT DEFAULT 'This is an AI-generated response. CRECO is not responsible for any implications. Please verify with fact-checkers.',
+          is_edited_by_human BOOLEAN DEFAULT false,
+          edited_by_fact_checker_id UUID REFERENCES hakikisha.users(id) ON DELETE SET NULL,
+          edited_at TIMESTAMP WITH TIME ZONE,
           created_at TIMESTAMP DEFAULT NOW(),
           updated_at TIMESTAMP DEFAULT NOW()
         )
@@ -377,6 +381,7 @@ class DatabaseInitializer {
           approval_status VARCHAR(50) DEFAULT 'approved' CHECK (approval_status IN ('pending', 'approved', 'rejected')),
           review_notes TEXT,
           time_spent INTEGER DEFAULT 0,
+          responsibility VARCHAR(20) DEFAULT 'creco' CHECK (responsibility IN ('creco', 'ai')),
           created_at TIMESTAMP DEFAULT NOW(),
           updated_at TIMESTAMP DEFAULT NOW()
         )

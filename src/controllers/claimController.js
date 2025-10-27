@@ -295,7 +295,7 @@ class ClaimController {
           v.evidence_sources as "evidence_sources",
           v.created_at as "verdictDate",
           v.time_spent as "review_time",
-          v.responsibility as "verdict_responsibility",
+          COALESCE(v.responsibility, 'creco') as "verdict_responsibility",
           fc.email as "factCheckerEmail",
           fc.username as "factCheckerName",
           fc.profile_picture as "factCheckerAvatar",
@@ -303,8 +303,8 @@ class ClaimController {
           av.explanation as "ai_explanation",
           av.confidence_score as "ai_confidence",
           av.evidence_sources as "ai_sources",
-          av.disclaimer as "ai_disclaimer",
-          av.is_edited_by_human as "ai_edited"
+          COALESCE(av.disclaimer, 'This is an AI-generated response. CRECO is not responsible for any implications.') as "ai_disclaimer",
+          COALESCE(av.is_edited_by_human, false) as "ai_edited"
          FROM hakikisha.claims c
          LEFT JOIN hakikisha.users u ON c.user_id = u.id
          LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
