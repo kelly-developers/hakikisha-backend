@@ -81,7 +81,7 @@ class AIController {
         return res.status(400).json({ error: 'Valid claim IDs array is required' });
       }
 
-      // Get claims details
+      // Get the claims details
       const claims = [];
       for (const claimId of claimIds) {
         const claim = await Claim.findById(claimId);
