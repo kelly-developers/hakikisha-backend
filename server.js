@@ -328,7 +328,7 @@ const startServer = async () => {
       console.log('     GET  /api/v1/blogs/health/check');
       
     } catch (error) {
-      console.error('❌ Blog routes failed to load:', error.message);
+      console.error('Blog routes failed to load:', error.message);
       console.error('Error details:', error.stack);
       
       // Create a fallback blog route
@@ -351,7 +351,7 @@ const startServer = async () => {
       console.error(' Admin routes failed to load:', error.message);
     }
 
-    // Load fact-checker routes
+    // Load fact-checker route
     try {
       app.use('/api/v1/fact-checker', require('./src/routes/factCheckerRoutes'));
       console.log(' Fact Checker routes loaded: /api/v1/fact-checker');
