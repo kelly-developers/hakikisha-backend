@@ -86,18 +86,38 @@ class ClaimController {
             ]
           );
           
-          // Update claim with AI verdict
+          // ✅ FIXED: Update claim with AI verdict AND status to 'completed'
           await db.query(
             `UPDATE hakikisha.claims 
-             SET ai_verdict_id = $1, status = 'ai_approved', updated_at = NOW()
+             SET ai_verdict_id = $1, 
+                 status = 'completed', 
+                 updated_at = NOW()
              WHERE id = $2`,
             [aiVerdictId, claimId]
           );
           
-          console.log('AI verdict created and linked to claim:', claimId);
+          console.log('✅ AI verdict created and claim status updated to completed:', claimId);
+        } else {
+          // ✅ FIXED: If AI processing fails, still update status to indicate processing is done
+          await db.query(
+            `UPDATE hakikisha.claims 
+             SET status = 'ai_processing_failed', 
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [claimId]
+          );
+          console.log('⚠️ AI processing failed, claim status updated:', claimId);
         }
       } catch (aiError) {
-        console.log('AI processing failed, continuing without AI verdict:', aiError.message);
+        console.log('AI processing failed, updating claim status:', aiError.message);
+        // ✅ FIXED: Update status even if AI fails
+        await db.query(
+          `UPDATE hakikisha.claims 
+           SET status = 'ai_processing_failed', 
+               updated_at = NOW()
+           WHERE id = $1`,
+          [claimId]
+        );
       }
 
       // Check if this is user's first claim
@@ -324,7 +344,7 @@ class ClaimController {
       }
 
       const claim = result.rows[0];
-      console.log('Claim found:', claim.id);
+      console.log('Claim found with status:', claim.status);
       
       // Process evidence sources to ensure consistent format
       let humanSources = [];
@@ -494,6 +514,7 @@ class ClaimController {
 
       console.log('Processed claim data for frontend:', {
         id: responseData.id,
+        status: responseData.status,
         hasVerdict: !!responseData.verdict,
         sourcesCount: responseData.sources.length,
         humanSourcesCount: humanSources.length,
@@ -580,7 +601,7 @@ class ClaimController {
         LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
         LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
         LEFT JOIN hakikisha.users fc ON v.fact_checker_id = fc.id
-        WHERE c.status IN ('human_approved', 'published', 'resolved')
+        WHERE c.status IN ('completed', 'human_approved', 'published', 'resolved')
         ORDER BY 
           c.is_trending DESC,
           c.trending_score DESC,
@@ -685,7 +706,7 @@ class ClaimController {
   // New method to handle verdict points awarding
   async awardPointsForVerdict(userId, claimId, verdictType) {
     try {
-      if (verdictType === 'human_approved' || verdictType === 'ai_approved') {
+      if (verdictType === 'human_approved' || verdictType === 'completed') {
         const pointsResult = await PointsService.awardPointsForVerdictReceived(userId, claimId);
         console.log(`Awarded ${pointsResult.pointsAwarded} points for verdict on claim ${claimId}`);
         return pointsResult;
@@ -706,7 +727,7 @@ class ClaimController {
       );
 
       // If user ID is provided and status indicates completion, award points
-      if (userId && (newStatus === 'human_approved' || newStatus === 'ai_approved')) {
+      if (userId && (newStatus === 'human_approved' || newStatus === 'completed')) {
         await this.awardPointsForVerdict(userId, claimId, newStatus);
       }
 

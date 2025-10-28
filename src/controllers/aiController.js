@@ -37,15 +37,15 @@ class AIController {
         ai_model_version: Constants.AI.MODEL_VERSION
       });
 
-      // Update claim status
-      await Claim.updateStatus(claimId, 'ai_approved');
+      // ✅ FIXED: Update claim status to 'completed' instead of 'ai_approved'
+      await Claim.updateStatus(claimId, 'completed');
 
       logger.info(`AI processing completed for claim ${claimId}`);
 
       res.json({
         message: 'AI processing completed successfully',
         verdict: aiVerdict,
-        claim_status: 'ai_approved'
+        claim_status: 'completed' // ✅ Updated status
       });
 
     } catch (error) {
