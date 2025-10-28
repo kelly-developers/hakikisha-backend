@@ -68,6 +68,17 @@ class ClaimController {
         if (aiFactCheckResult.success && aiFactCheckResult.aiVerdict) {
           const aiVerdictId = uuidv4();
           
+          // Map verdict to new format if needed
+          const verdictMapping = {
+            'verified': 'true',
+            'false': 'false',
+            'misleading': 'misleading',
+            'needs_context': 'needs_context',
+            'unverifiable': 'unverifiable'
+          };
+          
+          const mappedVerdict = verdictMapping[aiFactCheckResult.aiVerdict.verdict] || aiFactCheckResult.aiVerdict.verdict;
+
           await db.query(
             `INSERT INTO hakikisha.ai_verdicts (
               id, claim_id, verdict, confidence_score, explanation, 
@@ -76,7 +87,7 @@ class ClaimController {
             [
               aiVerdictId,
               claimId,
-              aiFactCheckResult.aiVerdict.verdict,
+              mappedVerdict,
               aiFactCheckResult.aiVerdict.confidence === 'high' ? 0.9 : 
                 aiFactCheckResult.aiVerdict.confidence === 'low' ? 0.5 : 0.7,
               aiFactCheckResult.aiVerdict.explanation,
@@ -86,7 +97,7 @@ class ClaimController {
             ]
           );
           
-          // ✅ FIXED: Update claim with AI verdict AND status to 'completed'
+          // Update claim with AI verdict AND status to 'completed'
           await db.query(
             `UPDATE hakikisha.claims 
              SET ai_verdict_id = $1, 
@@ -98,7 +109,7 @@ class ClaimController {
           
           console.log('✅ AI verdict created and claim status updated to completed:', claimId);
         } else {
-          // ✅ FIXED: If AI processing fails, still update status to indicate processing is done
+          // If AI processing fails, update status to indicate processing is done
           await db.query(
             `UPDATE hakikisha.claims 
              SET status = 'ai_processing_failed', 
@@ -110,7 +121,7 @@ class ClaimController {
         }
       } catch (aiError) {
         console.log('AI processing failed, updating claim status:', aiError.message);
-        // ✅ FIXED: Update status even if AI fails
+        // Update status even if AI fails
         await db.query(
           `UPDATE hakikisha.claims 
            SET status = 'ai_processing_failed', 
@@ -240,10 +251,14 @@ class ClaimController {
           v.verdict, 
           v.explanation as "verdictText",
           v.evidence_sources as sources,
+          av.verdict as "ai_verdict",
+          av.explanation as "ai_verdict_text",
+          av.confidence_score as "ai_confidence",
           u.email as "factCheckerName",
           fc.username as "factCheckerUsername"
         FROM hakikisha.claims c
         LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
+        LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
         LEFT JOIN hakikisha.users u ON v.fact_checker_id = u.id
         LEFT JOIN hakikisha.fact_checkers fc_profile ON u.id = fc_profile.user_id
         LEFT JOIN hakikisha.users fc ON fc_profile.user_id = fc.id
@@ -264,18 +279,27 @@ class ClaimController {
 
       console.log(`Found ${result.rows.length} claims for user`);
       
-      const claims = result.rows.map(claim => ({
-        id: claim.id,
-        title: claim.title,
-        category: claim.category,
-        status: claim.status,
-        submittedDate: claim.submittedDate,
-        verdictDate: claim.verdictDate,
-        verdict: claim.verdict,
-        verdictText: claim.verdictText,
-        sources: claim.sources || [],
-        factCheckerName: claim.factCheckerUsername || claim.factCheckerName || 'Fact Checker'
-      }));
+      const claims = result.rows.map(claim => {
+        // Use human verdict if available, otherwise use AI verdict
+        const finalVerdict = claim.verdict || claim.ai_verdict;
+        const finalVerdictText = claim.verdictText || claim.ai_verdict_text;
+        
+        return {
+          id: claim.id,
+          title: claim.title,
+          category: claim.category,
+          status: claim.status,
+          submittedDate: claim.submittedDate,
+          verdictDate: claim.verdictDate,
+          verdict: finalVerdict,
+          verdictText: finalVerdictText,
+          sources: claim.sources || [],
+          factCheckerName: claim.factCheckerUsername || claim.factCheckerName || 'Fact Checker',
+          ai_confidence: claim.ai_confidence,
+          hasHumanVerdict: !!claim.verdict,
+          hasAIVerdict: !!claim.ai_verdict
+        };
+      });
 
       res.json({
         success: true,
@@ -480,6 +504,14 @@ class ClaimController {
         ...aiSources.map(source => ({ ...source, type: 'ai' }))
       ];
 
+      // Determine final verdict (human verdict takes precedence over AI verdict)
+      const finalVerdict = claim.human_verdict || claim.ai_verdict;
+      const finalVerdictText = claim.human_explanation || claim.ai_explanation;
+      const verdictResponsibility = claim.human_verdict ? 'human' : 'ai';
+
+      // Get verdict display information
+      const verdictDisplayInfo = this.getVerdictDisplayInfo(finalVerdict);
+
       const responseData = {
         id: claim.id,
         title: claim.title,
@@ -489,10 +521,11 @@ class ClaimController {
         submittedBy: claim.submittedBy,
         submittedDate: claim.created_at,
         verdictDate: claim.verdictDate,
-        verdict: claim.human_verdict || claim.ai_verdict,
+        verdict: finalVerdict,
+        verdictText: finalVerdictText,
+        verdictDisplay: verdictDisplayInfo,
         human_verdict: claim.human_verdict,
         ai_verdict: claim.ai_verdict,
-        verdictText: claim.human_explanation || claim.ai_explanation,
         human_explanation: claim.human_explanation,
         ai_explanation: claim.ai_explanation,
         sources: allSources,
@@ -506,7 +539,7 @@ class ClaimController {
         ai_confidence: claim.ai_confidence,
         ai_disclaimer: claim.ai_disclaimer,
         ai_edited: claim.ai_edited,
-        verdict_responsibility: claim.verdict_responsibility || 'ai',
+        verdict_responsibility: verdictResponsibility,
         review_time: claim.review_time,
         imageUrl: claim.media_url,
         videoLink: claim.media_type === 'video' ? claim.media_url : null
@@ -515,11 +548,11 @@ class ClaimController {
       console.log('Processed claim data for frontend:', {
         id: responseData.id,
         status: responseData.status,
-        hasVerdict: !!responseData.verdict,
-        sourcesCount: responseData.sources.length,
-        humanSourcesCount: humanSources.length,
-        aiSourcesCount: aiSources.length,
-        factChecker: responseData.factChecker
+        verdict: responseData.verdict,
+        verdictDisplay: responseData.verdictDisplay,
+        hasHumanVerdict: !!claim.human_verdict,
+        hasAIVerdict: !!claim.ai_verdict,
+        sourcesCount: responseData.sources.length
       });
 
       res.json({
@@ -551,8 +584,11 @@ class ClaimController {
 
       console.log('Search claims:', q);
       const result = await db.query(
-        `SELECT c.id, c.title, c.description, c.category, c.status
+        `SELECT c.id, c.title, c.description, c.category, c.status,
+                COALESCE(v.verdict, av.verdict) as verdict
          FROM hakikisha.claims c
+         LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
+         LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
          WHERE c.title ILIKE $1 OR c.description ILIKE $1
          ORDER BY c.created_at DESC
          LIMIT 50`,
@@ -626,10 +662,14 @@ class ClaimController {
           sources = [];
         }
 
+        // Get verdict display information
+        const verdictDisplayInfo = this.getVerdictDisplayInfo(claim.verdict);
+
         return {
           ...claim,
           sources: sources,
-          ai_confidence: claim.ai_confidence
+          ai_confidence: claim.ai_confidence,
+          verdictDisplay: verdictDisplayInfo
         };
       });
 
@@ -671,10 +711,14 @@ class ClaimController {
             sources = [];
           }
 
+          // Get verdict display information
+          const verdictDisplayInfo = this.getVerdictDisplayInfo(claim.verdict);
+
           return {
             ...claim,
             sources: sources,
-            ai_confidence: claim.ai_confidence
+            ai_confidence: claim.ai_confidence,
+            verdictDisplay: verdictDisplayInfo
           };
         });
         
@@ -736,6 +780,55 @@ class ClaimController {
       console.error('Error updating claim status:', error);
       throw error;
     }
+  }
+
+  // Helper method to get verdict display information
+  getVerdictDisplayInfo(verdict) {
+    const verdictDisplayMap = {
+      'true': {
+        label: 'True',
+        color: 'green',
+        icon: '✓',
+        description: 'The claim is accurate and supported by evidence',
+        frontendClass: 'verdict-true'
+      },
+      'false': {
+        label: 'False',
+        color: 'red',
+        icon: '✗',
+        description: 'The claim is inaccurate and contradicted by evidence',
+        frontendClass: 'verdict-false'
+      },
+      'misleading': {
+        label: 'Misleading',
+        color: 'orange',
+        icon: '⚠',
+        description: 'The claim contains some truth but is presented in a misleading way',
+        frontendClass: 'verdict-misleading'
+      },
+      'needs_context': {
+        label: 'Needs Context',
+        color: 'yellow',
+        icon: '📋',
+        description: 'The claim requires additional context to be properly understood',
+        frontendClass: 'verdict-needs-context'
+      },
+      'unverifiable': {
+        label: 'Unverifiable',
+        color: 'gray',
+        icon: '?',
+        description: 'There is not enough evidence to verify this claim',
+        frontendClass: 'verdict-unverifiable'
+      }
+    };
+
+    return verdictDisplayMap[verdict] || {
+      label: 'Unknown',
+      color: 'gray',
+      icon: '?',
+      description: 'Verdict status unknown',
+      frontendClass: 'verdict-unknown'
+    };
   }
 }
 

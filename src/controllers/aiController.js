@@ -27,17 +27,28 @@ class AIController {
       const claimText = `${claim.title} ${claim.description}`;
       const aiResult = await AIService.processClaimWithAI(claimText);
 
+      // Map old verdict types to new ones if needed
+      const verdictMapping = {
+        'verified': 'true',
+        'false': 'false',
+        'misleading': 'misleading',
+        'needs_context': 'needs_context',
+        'unverifiable': 'unverifiable'
+      };
+
+      const mappedVerdict = verdictMapping[aiResult.verdict] || aiResult.verdict;
+
       // Save AI verdict
       const aiVerdict = await AIVerdict.create({
         claim_id: claimId,
-        verdict: aiResult.verdict,
+        verdict: mappedVerdict,
         confidence_score: aiResult.confidence_score,
         explanation: aiResult.explanation,
         evidence_sources: aiResult.sources,
         ai_model_version: Constants.AI.MODEL_VERSION
       });
 
-      // ✅ FIXED: Update claim status to 'completed' instead of 'ai_approved'
+      // Update claim status to 'completed'
       await Claim.updateStatus(claimId, 'completed');
 
       logger.info(`AI processing completed for claim ${claimId}`);
@@ -45,7 +56,7 @@ class AIController {
       res.json({
         message: 'AI processing completed successfully',
         verdict: aiVerdict,
-        claim_status: 'completed' // ✅ Updated status
+        claim_status: 'completed'
       });
 
     } catch (error) {
@@ -196,10 +207,20 @@ class AIController {
             const claimText = `${claim.title} ${claim.description}`;
             const newResult = await AIService.processClaimWithAI(claimText);
 
+            // Map verdict if needed
+            const verdictMapping = {
+              'verified': 'true',
+              'false': 'false',
+              'misleading': 'misleading',
+              'needs_context': 'needs_context',
+              'unverifiable': 'unverifiable'
+            };
+            const mappedVerdict = verdictMapping[newResult.verdict] || newResult.verdict;
+
             // Update verdict if confidence improved
             if (newResult.confidence_score > verdict.confidence_score) {
               await AIVerdict.update(verdict.id, {
-                verdict: newResult.verdict,
+                verdict: mappedVerdict,
                 confidence_score: newResult.confidence_score,
                 explanation: newResult.explanation,
                 evidence_sources: newResult.sources
@@ -241,6 +262,49 @@ class AIController {
       logger.error('Reprocess low confidence verdicts error:', error);
       next(error);
     }
+  }
+
+  // New method to handle verdict mapping for frontend
+  async getVerdictDisplayInfo(verdict) {
+    const verdictDisplayMap = {
+      'true': {
+        label: 'True',
+        color: 'green',
+        icon: '✓',
+        description: 'The claim is accurate and supported by evidence'
+      },
+      'false': {
+        label: 'False',
+        color: 'red',
+        icon: '✗',
+        description: 'The claim is inaccurate and contradicted by evidence'
+      },
+      'misleading': {
+        label: 'Misleading',
+        color: 'orange',
+        icon: '⚠',
+        description: 'The claim contains some truth but is presented in a misleading way'
+      },
+      'needs_context': {
+        label: 'Needs Context',
+        color: 'yellow',
+        icon: '📋',
+        description: 'The claim requires additional context to be properly understood'
+      },
+      'unverifiable': {
+        label: 'Unverifiable',
+        color: 'gray',
+        icon: '?',
+        description: 'There is not enough evidence to verify this claim'
+      }
+    };
+
+    return verdictDisplayMap[verdict] || {
+      label: 'Unknown',
+      color: 'gray',
+      icon: '?',
+      description: 'Verdict status unknown'
+    };
   }
 }
 

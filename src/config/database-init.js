@@ -266,7 +266,6 @@ class DatabaseInitializer {
 
   static async createClaimsTable() {
     try {
-      // ✅ FIXED: Added 'completed' and 'ai_processing_failed' to the status CHECK constraint
       const query = `
         CREATE TABLE IF NOT EXISTS hakikisha.claims (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -311,7 +310,6 @@ class DatabaseInitializer {
       console.log('ℹ️ Could not create public schema view:', error.message);
       
       try {
-        // ✅ FIXED: Also update public schema table if it exists
         const tableQuery = `
           CREATE TABLE IF NOT EXISTS public.claims (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -347,7 +345,7 @@ class DatabaseInitializer {
         CREATE TABLE IF NOT EXISTS hakikisha.ai_verdicts (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           claim_id UUID NOT NULL REFERENCES hakikisha.claims(id) ON DELETE CASCADE,
-          verdict VARCHAR(50) CHECK (verdict IN ('verified', 'false', 'misleading', 'needs_context', 'unverifiable')),
+          verdict VARCHAR(50) CHECK (verdict IN ('true', 'false', 'misleading', 'needs_context', 'unverifiable')),
           confidence_score DECIMAL(3,2) CHECK (confidence_score >= 0 AND confidence_score <= 1),
           explanation TEXT,
           evidence_sources JSONB,
@@ -375,7 +373,7 @@ class DatabaseInitializer {
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           claim_id UUID NOT NULL REFERENCES hakikisha.claims(id) ON DELETE CASCADE,
           fact_checker_id UUID REFERENCES hakikisha.users(id),
-          verdict VARCHAR(50) NOT NULL CHECK (verdict IN ('verified', 'false', 'misleading', 'needs_context', 'unverifiable')),
+          verdict VARCHAR(50) NOT NULL CHECK (verdict IN ('true', 'false', 'misleading', 'needs_context', 'unverifiable')),
           explanation TEXT NOT NULL,
           evidence_sources JSONB,
           ai_verdict_id UUID REFERENCES hakikisha.ai_verdicts(id),
@@ -405,8 +403,10 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_claims_trending_score ON hakikisha.claims(trending_score)',
       'CREATE INDEX IF NOT EXISTS idx_claims_created_at ON hakikisha.claims(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_claim_id ON hakikisha.ai_verdicts(claim_id)',
+      'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_verdict ON hakikisha.ai_verdicts(verdict)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_id ON hakikisha.verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_fact_checker_id ON hakikisha.verdicts(fact_checker_id)',
+      'CREATE INDEX IF NOT EXISTS idx_verdicts_verdict ON hakikisha.verdicts(verdict)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_is_final ON hakikisha.verdicts(is_final)',
       'CREATE INDEX IF NOT EXISTS idx_users_email ON hakikisha.users(email)',
       'CREATE INDEX IF NOT EXISTS idx_users_username ON hakikisha.users(username)',
@@ -727,8 +727,8 @@ class DatabaseInitializer {
         console.log('ℹ️ Username column might already be nullable:', error.message);
       }
       
-      // ✅ FIXED: Update claims table to include new status values
       await this.updateClaimsTableStatus();
+      await this.updateVerdictsTableConstraints();
       
       await this.ensureRequiredColumns();
       await this.createPointsTables();
@@ -745,12 +745,10 @@ class DatabaseInitializer {
     }
   }
 
-  // ✅ NEW: Method to update claims table status constraint
   static async updateClaimsTableStatus() {
     try {
       console.log('Updating claims table status constraint...');
       
-      // First, drop the existing constraint
       try {
         await db.query('ALTER TABLE hakikisha.claims DROP CONSTRAINT IF EXISTS claims_status_check');
         console.log('✅ Dropped existing claims_status_check constraint');
@@ -758,7 +756,6 @@ class DatabaseInitializer {
         console.log('ℹ️ Could not drop constraint (might not exist):', error.message);
       }
       
-      // Add the new constraint with updated status values
       await db.query(`
         ALTER TABLE hakikisha.claims 
         ADD CONSTRAINT claims_status_check 
@@ -768,6 +765,46 @@ class DatabaseInitializer {
       
     } catch (error) {
       console.error('❌ Error updating claims table status constraint:', error);
+      throw error;
+    }
+  }
+
+  static async updateVerdictsTableConstraints() {
+    try {
+      console.log('Updating verdicts table constraints...');
+      
+      // Update AI verdicts table
+      try {
+        await db.query('ALTER TABLE hakikisha.ai_verdicts DROP CONSTRAINT IF EXISTS ai_verdicts_verdict_check');
+        console.log('✅ Dropped existing ai_verdicts_verdict_check constraint');
+      } catch (error) {
+        console.log('ℹ️ Could not drop AI verdicts constraint:', error.message);
+      }
+      
+      await db.query(`
+        ALTER TABLE hakikisha.ai_verdicts 
+        ADD CONSTRAINT ai_verdicts_verdict_check 
+        CHECK (verdict IN ('true', 'false', 'misleading', 'needs_context', 'unverifiable'))
+      `);
+      console.log('✅ Added updated ai_verdicts_verdict_check constraint');
+      
+      // Update verdicts table
+      try {
+        await db.query('ALTER TABLE hakikisha.verdicts DROP CONSTRAINT IF EXISTS verdicts_verdict_check');
+        console.log('✅ Dropped existing verdicts_verdict_check constraint');
+      } catch (error) {
+        console.log('ℹ️ Could not drop verdicts constraint:', error.message);
+      }
+      
+      await db.query(`
+        ALTER TABLE hakikisha.verdicts 
+        ADD CONSTRAINT verdicts_verdict_check 
+        CHECK (verdict IN ('true', 'false', 'misleading', 'needs_context', 'unverifiable'))
+      `);
+      console.log('✅ Added updated verdicts_verdict_check constraint');
+      
+    } catch (error) {
+      console.error('❌ Error updating verdicts table constraints:', error);
       throw error;
     }
   }
