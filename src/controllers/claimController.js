@@ -726,7 +726,7 @@ class ClaimController {
         [newStatus, claimId]
       );
 
-      // If user ID is provided and status indicates completion, award points
+      // If user ID is provided and status indicates completion, award pointss
       if (userId && (newStatus === 'human_approved' || newStatus === 'completed')) {
         await this.awardPointsForVerdict(userId, claimId, newStatus);
       }
