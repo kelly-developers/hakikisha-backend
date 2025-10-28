@@ -1,7 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const db = require('../config/database');
 const logger = require('../utils/logger');
-const Constants = require('./constants');
 
 class FactCheckerController {
   async getPendingClaims(req, res) {
@@ -18,8 +17,6 @@ class FactCheckerController {
           c.created_at as "submittedDate",
           c.media_url as "imageUrl",
           c.media_type,
-          c.status,
-          c.priority,
           u.email as "submitterEmail",
           av.verdict as "ai_verdict",
           av.explanation as "ai_explanation",
@@ -30,16 +27,8 @@ class FactCheckerController {
          FROM hakikisha.claims c
          LEFT JOIN hakikisha.users u ON c.user_id = u.id
          LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
-         WHERE c.status IN ('pending', 'ai_processing', 'human_review', 'ai_approved')
-         ORDER BY 
-           CASE c.priority 
-             WHEN 'urgent' THEN 1
-             WHEN 'high' THEN 2
-             WHEN 'medium' THEN 3
-             WHEN 'low' THEN 4
-             ELSE 5
-           END,
-           c.created_at ASC
+         WHERE c.status IN ('pending', 'ai_processing', 'human_review')
+         ORDER BY c.priority DESC, c.created_at ASC
          LIMIT 50`
       );
 
@@ -56,17 +45,11 @@ class FactCheckerController {
           aiSources = [];
         }
 
-        // Get AI verdict display info
-        const aiVerdictDisplay = claim.ai_verdict ? 
-          Constants.VERDICT_DISPLAY[claim.ai_verdict] || null : null;
-
         return {
           id: claim.id,
           title: claim.title,
           description: claim.description,
           category: claim.category,
-          status: claim.status,
-          priority: claim.priority,
           submittedBy: claim.submitterEmail || claim.submittedBy,
           submittedDate: new Date(claim.submittedDate).toISOString().split('T')[0],
           imageUrl: claim.imageUrl,
@@ -74,7 +57,6 @@ class FactCheckerController {
           sourceLink: null,
           ai_suggestion: {
             verdict: claim.ai_verdict,
-            verdict_display: aiVerdictDisplay,
             explanation: claim.ai_explanation,
             confidence: claim.ai_confidence,
             sources: aiSources,
@@ -112,12 +94,12 @@ class FactCheckerController {
         });
       }
 
-      // Validate verdict value - UPDATED
-      const validVerdicts = ['true', 'false', 'misleading', 'needs_context', 'unverifiable'];
+      // Validate verdict value
+      const validVerdicts = ['verified', 'false', 'misleading', 'needs_context', 'unverifiable'];
       if (!validVerdicts.includes(verdict)) {
         return res.status(400).json({
           success: false,
-          error: 'Invalid verdict value. Must be one of: true, false, misleading, needs_context, unverifiable',
+          error: 'Invalid verdict value',
           code: 'VALIDATION_ERROR'
         });
       }
@@ -126,22 +108,13 @@ class FactCheckerController {
 
       await db.query('BEGIN');
 
-      // Check if AI verdict exists for this claim
-      const aiVerdictResult = await db.query(
-        `SELECT id FROM hakikisha.ai_verdicts WHERE claim_id = $1`,
-        [claimId]
-      );
-
-      const aiVerdictId = aiVerdictResult.rows[0]?.id || null;
-      const basedOnAIVerdict = !!aiVerdictId;
-
-      // Insert verdict - UPDATED with new fields
+      // Insert verdict
       await db.query(
         `INSERT INTO hakikisha.verdicts (
           id, claim_id, fact_checker_id, verdict, explanation, 
           evidence_sources, time_spent, is_final, approval_status, 
-          responsibility, ai_verdict_id, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'approved', 'creco', $8, NOW())`,
+          responsibility, based_on_ai_verdict, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'approved', 'creco', false, NOW())`,
         [
           verdictId, 
           claimId, 
@@ -149,12 +122,11 @@ class FactCheckerController {
           verdict, 
           explanation, 
           JSON.stringify(sources || []),
-          time_spent,
-          aiVerdictId
+          time_spent
         ]
       );
 
-      // Update claim status and link verdict - UPDATED status
+      // Update claim status and link verdict
       await db.query(
         `UPDATE hakikisha.claims 
          SET status = 'human_approved', 
@@ -172,31 +144,20 @@ class FactCheckerController {
       // Log activity
       try {
         await db.query(
-          `INSERT INTO hakikisha.admin_activities (
-            id, admin_id, activity_type, description, target_user_id, created_at
-          ) VALUES ($1, $2, $3, $4, $5, NOW())`,
-          [
-            uuidv4(), 
-            req.user.userId, 
-            'verdict_submitted', 
-            `Submitted ${verdict} verdict for claim: ${claimId}`,
-            req.user.userId
-          ]
+          `INSERT INTO hakikisha.fact_checker_activities (
+            id, fact_checker_id, activity_type, claim_id, verdict_id, 
+            start_time, end_time, duration, created_at
+          ) VALUES ($1, $2, $3, $4, $5, NOW() - INTERVAL '${time_spent} seconds', NOW(), $6, NOW())`,
+          [uuidv4(), req.user.userId, 'verdict_submission', claimId, verdictId, time_spent]
         );
       } catch (activityError) {
         console.log('Failed to log activity:', activityError.message);
       }
 
-      // Get verdict display info for response
-      const verdictDisplay = Constants.VERDICT_DISPLAY[verdict];
-
       res.json({
         success: true,
         message: 'Verdict submitted successfully',
-        verdictId: verdictId,
-        verdict: verdict,
-        verdict_display: verdictDisplay,
-        based_on_ai: basedOnAIVerdict
+        verdictId: verdictId
       });
     } catch (error) {
       await db.query('ROLLBACK');
@@ -214,31 +175,26 @@ class FactCheckerController {
     try {
       console.log('Fetching stats for fact checker:', req.user.userId);
       
-      const [totalResult, pendingResult, verdictStatsResult, timeResult] = await Promise.all([
-        // Total verdicts submitted
+      const [totalResult, pendingResult, accuracyResult, timeResult] = await Promise.all([
         db.query(
           `SELECT COUNT(*) as total
            FROM hakikisha.verdicts 
            WHERE fact_checker_id = $1`,
           [req.user.userId]
         ),
-        // Pending claims count
         db.query(
           `SELECT COUNT(*) as total
            FROM hakikisha.claims 
-           WHERE status IN ('pending', 'ai_processing', 'human_review', 'ai_approved')`,
+           WHERE status IN ('pending', 'ai_processing', 'human_review')`
         ),
-        // Verdict breakdown
         db.query(
           `SELECT 
-            verdict,
-            COUNT(*) as count
+            COUNT(*) as total_verdicts,
+            COUNT(CASE WHEN verdict = 'verified' THEN 1 END) as verified_count
            FROM hakikisha.verdicts 
-           WHERE fact_checker_id = $1
-           GROUP BY verdict`,
+           WHERE fact_checker_id = $1`,
           [req.user.userId]
         ),
-        // Average time spent
         db.query(
           `SELECT COALESCE(AVG(time_spent), 0) as avg_time_spent
            FROM hakikisha.verdicts 
@@ -247,45 +203,21 @@ class FactCheckerController {
         )
       ]);
 
-      const totalVerdicts = parseInt(totalResult.rows[0]?.total) || 0;
+      const totalVerified = parseInt(totalResult.rows[0]?.total) || 0;
       const pendingReview = parseInt(pendingResult.rows[0]?.total) || 0;
+      const totalVerdicts = parseInt(accuracyResult.rows[0]?.total_verdicts) || 1;
+      const verifiedCount = parseInt(accuracyResult.rows[0]?.verified_count) || 0;
       const avgTimeSpent = parseInt(timeResult.rows[0]?.avg_time_spent) || 0;
       
-      // Calculate verdict distribution
-      const verdictStats = {};
-      let totalVerdictsForAccuracy = 0;
-      
-      verdictStatsResult.rows.forEach(row => {
-        verdictStats[row.verdict] = parseInt(row.count);
-        totalVerdictsForAccuracy += parseInt(row.count);
-      });
-
-      // Calculate accuracy (percentage of definitive verdicts)
-      const definitiveVerdicts = (verdictStats['true'] || 0) + (verdictStats['false'] || 0);
-      const accuracy = totalVerdictsForAccuracy > 0 ? 
-        Math.round((definitiveVerdicts / totalVerdictsForAccuracy) * 100) : 0;
-
-      // Format verdict stats with display info
-      const formattedVerdictStats = {};
-      Object.keys(verdictStats).forEach(verdict => {
-        formattedVerdictStats[verdict] = {
-          count: verdictStats[verdict],
-          display: Constants.VERDICT_DISPLAY[verdict] || {
-            label: verdict,
-            color: 'gray',
-            icon: '?'
-          }
-        };
-      });
+      const accuracy = totalVerdicts > 0 ? Math.round((verifiedCount / totalVerdicts) * 100) : 0;
 
       res.json({
         success: true,
         stats: { 
-          totalVerdicts, 
+          totalVerified, 
           pendingReview, 
-          avgTimeSpent: `${Math.round(avgTimeSpent / 60)} minutes`, 
-          accuracy: `${accuracy}%`,
-          verdictDistribution: formattedVerdictStats
+          timeSpent: `${Math.round(avgTimeSpent / 60)} minutes avg`, 
+          accuracy: `${accuracy}%` 
         }
       });
     } catch (error) {
@@ -309,18 +241,15 @@ class FactCheckerController {
           c.title,
           c.description,
           c.category,
-          c.status,
           c.user_id as "submittedBy",
           c.created_at as "submittedDate",
-          c.priority,
           av.verdict as "aiVerdict",
           av.confidence_score as "confidence",
           av.explanation as "aiExplanation",
-          av.evidence_sources as "aiSources",
-          av.disclaimer as "aiDisclaimer"
+          av.evidence_sources as "aiSources"
          FROM hakikisha.claims c
          JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
-         WHERE c.status IN ('ai_approved', 'completed')
+         WHERE c.status = 'ai_approved'
          AND c.human_verdict_id IS NULL
          ORDER BY av.confidence_score ASC, c.created_at ASC
          LIMIT 20`
@@ -339,25 +268,18 @@ class FactCheckerController {
           aiSources = [];
         }
 
-        // Get verdict display info
-        const verdictDisplay = Constants.VERDICT_DISPLAY[claim.aiVerdict] || null;
-
         return {
           id: claim.id,
           title: claim.title,
           description: claim.description,
           category: claim.category,
-          status: claim.status,
-          priority: claim.priority,
           submittedBy: claim.submittedBy,
           submittedDate: new Date(claim.submittedDate).toISOString().split('T')[0],
           aiSuggestion: {
-            verdict: claim.aiVerdict,
-            verdict_display: verdictDisplay,
-            explanation: claim.aiExplanation,
-            confidence: claim.confidence,
-            sources: aiSources,
-            disclaimer: claim.aiDisclaimer
+            status: claim.aiVerdict || 'needs_context',
+            verdict: claim.aiExplanation || 'AI analysis completed',
+            confidence: claim.confidence || 0.75,
+            sources: aiSources
           }
         };
       });
@@ -454,8 +376,8 @@ class FactCheckerController {
         `INSERT INTO hakikisha.verdicts (
           id, claim_id, fact_checker_id, verdict, explanation, 
           evidence_sources, ai_verdict_id, is_final, approval_status, 
-          responsibility, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'approved', $8, NOW())`,
+          responsibility, based_on_ai_verdict, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'approved', $8, true, NOW())`,
         [
           verdictId,
           claimId,
@@ -482,15 +404,10 @@ class FactCheckerController {
 
       console.log(`AI verdict ${wasEdited ? 'edited and' : ''} approved for claim:`, claimId, 'Responsibility:', responsibility);
 
-      // Get verdict display info for response
-      const verdictDisplay = Constants.VERDICT_DISPLAY[finalVerdict];
-
       res.json({ 
         success: true, 
         message: wasEdited ? 'Verdict edited and approved. CRECO is now responsible.' : 'AI verdict approved without changes.',
-        responsibility: responsibility,
-        verdict: finalVerdict,
-        verdict_display: verdictDisplay
+        responsibility: responsibility
       });
     } catch (error) {
       await db.query('ROLLBACK');
@@ -567,7 +484,7 @@ class FactCheckerController {
     try {
       console.log('Fetching dashboard data for fact checker:', req.user.userId);
       
-      const [claimsResult, blogsResult, statsResult, recentVerdictsResult] = await Promise.all([
+      const [claimsResult, blogsResult, statsResult] = await Promise.all([
         // Get recent claims assigned to this fact checker
         db.query(
           `SELECT 
@@ -575,10 +492,8 @@ class FactCheckerController {
             c.title, 
             c.status,
             c.created_at,
-            c.priority,
-            v.verdict
+            c.priority
            FROM hakikisha.claims c
-           LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
            WHERE c.assigned_fact_checker_id = $1
            ORDER BY c.created_at DESC
            LIMIT 10`,
@@ -604,44 +519,16 @@ class FactCheckerController {
         db.query(
           `SELECT 
             (SELECT COUNT(*) FROM hakikisha.verdicts WHERE fact_checker_id = $1) as total_verdicts,
-            (SELECT COUNT(*) FROM hakikisha.claims WHERE assigned_fact_checker_id = $1 AND status IN ('pending', 'human_review', 'ai_approved')) as pending_claims,
+            (SELECT COUNT(*) FROM hakikisha.claims WHERE assigned_fact_checker_id = $1 AND status IN ('pending', 'human_review')) as pending_claims,
             (SELECT COUNT(*) FROM hakikisha.blog_articles WHERE author_id = $1 AND status = 'published') as published_blogs,
             (SELECT COALESCE(AVG(time_spent), 0) FROM hakikisha.verdicts WHERE fact_checker_id = $1) as avg_review_time`,
-          [req.user.userId]
-        ),
-
-        // Get recent verdicts with display info
-        db.query(
-          `SELECT 
-            v.verdict,
-            v.explanation,
-            v.created_at,
-            c.title as claim_title
-           FROM hakikisha.verdicts v
-           JOIN hakikisha.claims c ON v.claim_id = c.id
-           WHERE v.fact_checker_id = $1
-           ORDER BY v.created_at DESC
-           LIMIT 5`,
           [req.user.userId]
         )
       ]);
 
-      // Format recent claims with verdict display info
-      const recentClaims = claimsResult.rows.map(claim => ({
-        ...claim,
-        verdict_display: claim.verdict ? Constants.VERDICT_DISPLAY[claim.verdict] : null
-      }));
-
-      // Format recent verdicts with display info
-      const recentVerdicts = recentVerdictsResult.rows.map(verdict => ({
-        ...verdict,
-        verdict_display: Constants.VERDICT_DISPLAY[verdict.verdict]
-      }));
-
       const dashboardData = {
-        recentClaims: recentClaims,
+        recentClaims: claimsResult.rows,
         recentBlogs: blogsResult.rows,
-        recentVerdicts: recentVerdicts,
         stats: {
           totalVerdicts: parseInt(statsResult.rows[0]?.total_verdicts) || 0,
           pendingClaims: parseInt(statsResult.rows[0]?.pending_claims) || 0,
@@ -660,111 +547,6 @@ class FactCheckerController {
       res.status(500).json({
         success: false,
         error: 'Failed to get dashboard data',
-        code: 'SERVER_ERROR'
-      });
-    }
-  }
-
-  async getClaimDetails(req, res) {
-    try {
-      const { claimId } = req.params;
-      console.log('Fetching claim details for fact checker:', claimId);
-
-      const result = await db.query(
-        `SELECT 
-          c.*, 
-          u.email as "submittedBy",
-          u.username as "submitterName",
-          av.verdict as "ai_verdict",
-          av.explanation as "ai_explanation",
-          av.confidence_score as "ai_confidence",
-          av.evidence_sources as "ai_sources",
-          av.disclaimer as "ai_disclaimer",
-          av.is_edited_by_human as "ai_edited",
-          v.verdict as "human_verdict",
-          v.explanation as "human_explanation",
-          v.evidence_sources as "human_sources",
-          v.created_at as "verdict_date"
-         FROM hakikisha.claims c
-         LEFT JOIN hakikisha.users u ON c.user_id = u.id
-         LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
-         LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
-         WHERE c.id = $1`,
-        [claimId]
-      );
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          error: 'Claim not found',
-          code: 'NOT_FOUND'
-        });
-      }
-
-      const claim = result.rows[0];
-
-      // Parse sources
-      let aiSources = [];
-      let humanSources = [];
-      
-      try {
-        aiSources = claim.ai_sources ? 
-          (typeof claim.ai_sources === 'string' ? JSON.parse(claim.ai_sources) : claim.ai_sources) : [];
-      } catch (e) {
-        console.log('Error parsing AI sources:', e);
-      }
-      
-      try {
-        humanSources = claim.human_sources ? 
-          (typeof claim.human_sources === 'string' ? JSON.parse(claim.human_sources) : claim.human_sources) : [];
-      } catch (e) {
-        console.log('Error parsing human sources:', e);
-      }
-
-      // Get verdict display info
-      const aiVerdictDisplay = claim.ai_verdict ? Constants.VERDICT_DISPLAY[claim.ai_verdict] : null;
-      const humanVerdictDisplay = claim.human_verdict ? Constants.VERDICT_DISPLAY[claim.human_verdict] : null;
-
-      const claimDetails = {
-        id: claim.id,
-        title: claim.title,
-        description: claim.description,
-        category: claim.category,
-        status: claim.status,
-        priority: claim.priority,
-        submittedBy: claim.submittedBy,
-        submitterName: claim.submitterName,
-        submittedDate: claim.created_at,
-        media_type: claim.media_type,
-        media_url: claim.media_url,
-        ai_verdict: {
-          verdict: claim.ai_verdict,
-          verdict_display: aiVerdictDisplay,
-          explanation: claim.ai_explanation,
-          confidence: claim.ai_confidence,
-          sources: aiSources,
-          disclaimer: claim.ai_disclaimer,
-          is_edited: claim.ai_edited
-        },
-        human_verdict: claim.human_verdict ? {
-          verdict: claim.human_verdict,
-          verdict_display: humanVerdictDisplay,
-          explanation: claim.human_explanation,
-          sources: humanSources,
-          verdict_date: claim.verdict_date
-        } : null
-      };
-
-      res.json({
-        success: true,
-        claim: claimDetails
-      });
-    } catch (error) {
-      console.error('Get claim details error:', error);
-      logger.error('Get claim details error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get claim details',
         code: 'SERVER_ERROR'
       });
     }

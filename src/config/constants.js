@@ -16,60 +16,19 @@ const Constants = {
     PENDING: 'pending',
     AI_PROCESSING: 'ai_processing',
     HUMAN_REVIEW: 'human_review',
-    RESOLVED: 'resolved',
-    REJECTED: 'rejected',
-    HUMAN_APPROVED: 'human_approved',
     AI_APPROVED: 'ai_approved',
-    COMPLETED: 'completed',
-    AI_PROCESSING_FAILED: 'ai_processing_failed'
+    HUMAN_APPROVED: 'human_approved',
+    PUBLISHED: 'published',
+    REJECTED: 'rejected'
   },
 
-  // Verdict Types - UPDATED
+  // Verdict Types
   VERDICTS: {
     TRUE: 'true',
     FALSE: 'false',
     MISLEADING: 'misleading',
-    NEEDS_CONTEXT: 'needs_context',
-    UNVERIFIABLE: 'unverifiable'
-  },
-
-  // Verdict Display Configuration - NEW
-  VERDICT_DISPLAY: {
-    'true': {
-      label: 'True',
-      color: 'green',
-      icon: '✓',
-      description: 'The claim is accurate and supported by evidence',
-      frontendClass: 'verdict-true'
-    },
-    'false': {
-      label: 'False',
-      color: 'red',
-      icon: '✗',
-      description: 'The claim is inaccurate and contradicted by evidence',
-      frontendClass: 'verdict-false'
-    },
-    'misleading': {
-      label: 'Misleading',
-      color: 'orange',
-      icon: '⚠',
-      description: 'The claim contains some truth but is presented in a misleading way',
-      frontendClass: 'verdict-misleading'
-    },
-    'needs_context': {
-      label: 'Needs Context',
-      color: 'yellow',
-      icon: '📋',
-      description: 'The claim requires additional context to be properly understood',
-      frontendClass: 'verdict-needs-context'
-    },
-    'unverifiable': {
-      label: 'Unverifiable',
-      color: 'gray',
-      icon: '?',
-      description: 'There is not enough evidence to verify this claim',
-      frontendClass: 'verdict-unverifiable'
-    }
+    SATIRE: 'satire',
+    NEEDS_CONTEXT: 'needs_context'
   },
 
   // Claim Categories
