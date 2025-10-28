@@ -552,7 +552,7 @@ app.listen(PORT, () => {
   console.log('🎯 Supported verdict types: true, false, misleading, needs_context, unverifiable');
   console.log('👥 User roles: user, fact_checker, admin');
   console.log('🤖 AI Integration: Enabled');
-  console.log('🏆 Points System: Enabled');
+  console.log('Points System: Enabled');
   console.log('='.repeat(60) + '\n');
 });
 
