@@ -266,6 +266,7 @@ class DatabaseInitializer {
 
   static async createClaimsTable() {
     try {
+      // ✅ FIXED: Added 'completed' and 'ai_processing_failed' to the status CHECK constraint
       const query = `
         CREATE TABLE IF NOT EXISTS hakikisha.claims (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -275,7 +276,7 @@ class DatabaseInitializer {
           category VARCHAR(100),
           media_type VARCHAR(50) DEFAULT 'text',
           media_url TEXT,
-          status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved')),
+          status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed')),
           priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
           submission_count INTEGER DEFAULT 1,
           is_trending BOOLEAN DEFAULT FALSE,
@@ -310,6 +311,7 @@ class DatabaseInitializer {
       console.log('ℹ️ Could not create public schema view:', error.message);
       
       try {
+        // ✅ FIXED: Also update public schema table if it exists
         const tableQuery = `
           CREATE TABLE IF NOT EXISTS public.claims (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -319,8 +321,8 @@ class DatabaseInitializer {
             category VARCHAR(100),
             media_type VARCHAR(50) DEFAULT 'text',
             media_url TEXT,
-            status VARCHAR(50) DEFAULT 'pending',
-            priority VARCHAR(50) DEFAULT 'medium',
+            status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed')),
+            priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
             submission_count INTEGER DEFAULT 1,
             is_trending BOOLEAN DEFAULT FALSE,
             trending_score DECIMAL(5,2) DEFAULT 0,
@@ -725,6 +727,9 @@ class DatabaseInitializer {
         console.log('ℹ️ Username column might already be nullable:', error.message);
       }
       
+      // ✅ FIXED: Update claims table to include new status values
+      await this.updateClaimsTableStatus();
+      
       await this.ensureRequiredColumns();
       await this.createPointsTables();
       await this.createBlogTables();
@@ -736,6 +741,33 @@ class DatabaseInitializer {
       console.log('✅ Existing database fixed successfully!');
     } catch (error) {
       console.error('❌ Error fixing existing database:', error);
+      throw error;
+    }
+  }
+
+  // ✅ NEW: Method to update claims table status constraint
+  static async updateClaimsTableStatus() {
+    try {
+      console.log('Updating claims table status constraint...');
+      
+      // First, drop the existing constraint
+      try {
+        await db.query('ALTER TABLE hakikisha.claims DROP CONSTRAINT IF EXISTS claims_status_check');
+        console.log('✅ Dropped existing claims_status_check constraint');
+      } catch (error) {
+        console.log('ℹ️ Could not drop constraint (might not exist):', error.message);
+      }
+      
+      // Add the new constraint with updated status values
+      await db.query(`
+        ALTER TABLE hakikisha.claims 
+        ADD CONSTRAINT claims_status_check 
+        CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed'))
+      `);
+      console.log('✅ Added updated claims_status_check constraint');
+      
+    } catch (error) {
+      console.error('❌ Error updating claims table status constraint:', error);
       throw error;
     }
   }
