@@ -69,6 +69,7 @@ class AIVerdict {
     if (factCheckerId) {
       setClause.push(`is_edited_by_human = true`);
       setClause.push(`edited_by_fact_checker_id = $${paramCount}`);
+      setClause.push(`disclaimer = NULL`); // Remove AI disclaimer when human edits
       values.push(factCheckerId);
       paramCount++;
       setClause.push(`edited_at = NOW()`);
@@ -88,6 +89,52 @@ class AIVerdict {
       return result.rows[0];
     } catch (error) {
       logger.error('Error updating AI verdict:', error);
+      throw error;
+    }
+  }
+
+  static async updateByClaimId(claimId, updates, factCheckerId = null) {
+    const allowedFields = ['verdict', 'confidence_score', 'explanation', 'evidence_sources'];
+    const setClause = [];
+    const values = [];
+    let paramCount = 1;
+
+    Object.keys(updates).forEach(field => {
+      if (allowedFields.includes(field)) {
+        setClause.push(`${field} = $${paramCount}`);
+        values.push(field === 'evidence_sources' ? JSON.stringify(updates[field]) : updates[field]);
+        paramCount++;
+      }
+    });
+
+    if (setClause.length === 0) {
+      throw new Error('No valid fields to update');
+    }
+
+    // Mark as edited by human if factCheckerId provided
+    if (factCheckerId) {
+      setClause.push(`is_edited_by_human = true`);
+      setClause.push(`edited_by_fact_checker_id = $${paramCount}`);
+      setClause.push(`disclaimer = NULL`); // Remove AI disclaimer when human edits
+      values.push(factCheckerId);
+      paramCount++;
+      setClause.push(`edited_at = NOW()`);
+    }
+
+    values.push(claimId);
+
+    const query = `
+      UPDATE hakikisha.ai_verdicts 
+      SET ${setClause.join(', ')}, updated_at = NOW()
+      WHERE claim_id = $${paramCount}
+      RETURNING *
+    `;
+
+    try {
+      const result = await db.query(query, values);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error updating AI verdict by claim ID:', error);
       throw error;
     }
   }

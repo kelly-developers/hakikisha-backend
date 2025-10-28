@@ -37,20 +37,64 @@ class Claim {
   static async findById(id) {
     const query = `
       SELECT c.*, u.email as user_email, u.phone as user_phone,
-             av.verdict as ai_verdict, av.confidence_score as ai_confidence,
-             v.verdict as human_verdict, v.explanation as human_explanation,
-             fc.user_id as fact_checker_id
+             av.id as ai_verdict_id,
+             av.verdict as ai_verdict_value, 
+             av.confidence_score as ai_confidence,
+             av.explanation as ai_explanation,
+             av.evidence_sources as ai_sources,
+             av.is_edited_by_human,
+             av.edited_by_fact_checker_id,
+             av.edited_at,
+             av.disclaimer as ai_disclaimer,
+             v.verdict as human_verdict, 
+             v.explanation as human_explanation,
+             v.evidence_sources as human_sources,
+             fc.id as fact_checker_id,
+             u2.email as fact_checker_email
       FROM claims c
       LEFT JOIN users u ON c.user_id = u.id
       LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
       LEFT JOIN verdicts v ON c.human_verdict_id = v.id
-      LEFT JOIN fact_checkers fc ON c.assigned_fact_checker_id = fc.id
+      LEFT JOIN users fc ON c.assigned_fact_checker_id = fc.id
+      LEFT JOIN users u2 ON av.edited_by_fact_checker_id = u2.id
       WHERE c.id = $1
     `;
 
     try {
       const result = await db.query(query, [id]);
-      return result.rows[0];
+      const claim = result.rows[0];
+      
+      if (claim) {
+        // Determine the actual verdict (human takes precedence, then AI)
+        claim.verdict = claim.human_verdict || claim.ai_verdict_value || null;
+        claim.verdictText = claim.human_explanation || claim.ai_explanation || null;
+        claim.verified_by_ai = !!claim.ai_verdict_id && !claim.human_verdict;
+        
+        // Structure AI verdict object if exists
+        if (claim.ai_verdict_id) {
+          claim.ai_verdict = {
+            id: claim.ai_verdict_id,
+            verdict: claim.ai_verdict_value,
+            explanation: claim.ai_explanation,
+            confidence_score: claim.ai_confidence,
+            sources: claim.ai_sources,
+            disclaimer: claim.ai_disclaimer,
+            is_edited_by_human: claim.is_edited_by_human || false,
+            edited_at: claim.edited_at,
+            edited_by: claim.fact_checker_email
+          };
+        }
+        
+        // Structure fact checker info if exists
+        if (claim.is_edited_by_human && claim.fact_checker_email) {
+          claim.fact_checker = {
+            id: claim.edited_by_fact_checker_id,
+            email: claim.fact_checker_email
+          };
+        }
+      }
+      
+      return claim;
     } catch (error) {
       logger.error('Error finding claim by id:', error);
       throw error;
@@ -118,11 +162,15 @@ class Claim {
              COALESCE(v.verdict, av.verdict) as verdict,
              c.trending_score as trendingScore,
              c.created_at as submittedDate,
-             v.created_at as verdictDate
+             COALESCE(v.created_at, av.created_at) as verdictDate,
+             CASE WHEN v.id IS NOT NULL THEN false ELSE true END as verified_by_ai,
+             av.confidence_score as ai_confidence,
+             av.is_edited_by_human
       FROM claims c
       LEFT JOIN verdicts v ON c.human_verdict_id = v.id
       LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
-      WHERE c.is_trending = true
+      WHERE c.is_trending = true 
+        AND (v.verdict IS NOT NULL OR av.verdict IS NOT NULL)
       ORDER BY c.trending_score DESC, c.submission_count DESC
       LIMIT $1
     `;
@@ -172,10 +220,13 @@ class Claim {
     let query = `
       SELECT c.id, c.title, c.category, c.status,
              c.created_at as submittedDate,
-             v.created_at as verdictDate,
-             v.verdict, v.evidence_sources as sources
+             COALESCE(v.created_at, av.created_at) as verdictDate,
+             COALESCE(v.verdict, av.verdict) as verdict,
+             COALESCE(v.evidence_sources, av.evidence_sources) as sources,
+             CASE WHEN v.id IS NOT NULL THEN false ELSE true END as verified_by_ai
       FROM claims c
       LEFT JOIN verdicts v ON c.human_verdict_id = v.id
+      LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
       WHERE c.user_id = $1
     `;
 

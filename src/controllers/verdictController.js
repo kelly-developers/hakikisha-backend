@@ -5,6 +5,7 @@ const Notification = require('../models/Notification');
 const FactCheckerActivity = require('../models/FactCheckerActivity');
 const logger = require('../utils/logger');
 const { validateVerdict } = require('../utils/validators');
+const db = require('../config/database');
 
 class VerdictController {
   async submitVerdict(req, res, next) {
@@ -121,7 +122,11 @@ class VerdictController {
       const offset = (page - 1) * limit;
 
       const verdicts = await Verdict.findByFactChecker(req.user.userId, limit, offset);
-      const total = await Verdict.countByFactChecker(req.user.userId);
+      
+      // Get total count for pagination
+      const countQuery = `SELECT COUNT(*) as total FROM verdicts WHERE fact_checker_id = $1`;
+      const countResult = await db.query(countQuery, [req.user.userId]);
+      const total = parseInt(countResult.rows[0].total);
 
       res.json({
         verdicts,
@@ -181,6 +186,116 @@ class VerdictController {
 
     } catch (error) {
       logger.error('Update verdict error:', error);
+      next(error);
+    }
+  }
+
+  async editAIVerdict(req, res, next) {
+    try {
+      const { claimId } = req.params;
+      const { verdict, explanation, evidence_sources } = req.body;
+
+      // Check if user is a fact-checker
+      if (req.user.role !== 'fact_checker' && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Only fact-checkers can edit AI verdicts' });
+      }
+
+      // Get claim
+      const claim = await Claim.findById(claimId);
+      if (!claim) {
+        return res.status(404).json({ error: 'Claim not found' });
+      }
+
+      if (!claim.ai_verdict_id) {
+        return res.status(404).json({ error: 'No AI verdict found for this claim' });
+      }
+
+      // Update AI verdict with fact-checker's edits
+      const updatedVerdict = await AIVerdict.updateByClaimId(
+        claimId,
+        {
+          verdict,
+          explanation,
+          evidence_sources
+        },
+        req.user.userId
+      );
+
+      // Update claim status
+      await Claim.updateStatus(claimId, 'verified', req.user.userId);
+
+      // Send notification to user
+      await Notification.create({
+        user_id: claim.user_id,
+        type: 'verdict_ready',
+        title: 'Your claim has been verified',
+        message: `A fact-checker has reviewed and updated the verdict for your claim: "${claim.title}"`,
+        related_entity_type: 'claim',
+        related_entity_id: claimId
+      });
+
+      logger.info(`AI verdict edited for claim ${claimId} by fact-checker ${req.user.userId}`);
+
+      res.json({
+        message: 'AI verdict updated successfully',
+        verdict: updatedVerdict,
+        claim_status: 'verified'
+      });
+
+    } catch (error) {
+      logger.error('Edit AI verdict error:', error);
+      next(error);
+    }
+  }
+
+  async getPendingAIVerdicts(req, res, next) {
+    try {
+      const { page = 1, limit = 20 } = req.query;
+      const offset = (page - 1) * limit;
+
+      // Check if user is a fact-checker
+      if (req.user.role !== 'fact_checker' && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const query = `
+        SELECT c.id, c.title, c.description, c.category, c.status,
+               av.id as ai_verdict_id, av.verdict, av.explanation, 
+               av.confidence_score, av.evidence_sources, av.created_at as verdict_date,
+               av.is_edited_by_human
+        FROM claims c
+        INNER JOIN ai_verdicts av ON c.ai_verdict_id = av.id
+        WHERE av.is_edited_by_human = false
+          AND c.status IN ('ai_processed', 'completed')
+        ORDER BY av.created_at DESC
+        LIMIT $1 OFFSET $2
+      `;
+
+      const countQuery = `
+        SELECT COUNT(*) as total
+        FROM claims c
+        INNER JOIN ai_verdicts av ON c.ai_verdict_id = av.id
+        WHERE av.is_edited_by_human = false
+          AND c.status IN ('ai_processed', 'completed')
+      `;
+
+      const [claims, countResult] = await Promise.all([
+        db.query(query, [limit, offset]),
+        db.query(countQuery)
+      ]);
+
+      res.json({
+        claims: claims.rows,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: parseInt(countResult.rows[0].total),
+          pages: Math.ceil(countResult.rows[0].total / limit)
+        }
+      });
+
+    } catch (error) {
+      logger.error('Get pending AI verdicts error:', error);
       next(error);
     }
   }

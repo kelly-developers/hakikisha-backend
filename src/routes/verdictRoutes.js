@@ -21,4 +21,8 @@ router.get('/stats', requireRole(['fact_checker']), verdictController.getVerdict
 // Update verdict (fact-checkers only)
 router.put('/:id', requireRole(['fact_checker']), verdictController.updateVerdict);
 
+// Fact-checker AI verdict review routes
+router.get('/ai-pending', requireRole(['fact_checker', 'admin']), verdictController.getPendingAIVerdicts);
+router.put('/ai/:claimId', requireRole(['fact_checker', 'admin']), verdictController.editAIVerdict);
+
 module.exports = router;

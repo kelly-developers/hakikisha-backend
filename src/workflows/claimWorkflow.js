@@ -4,6 +4,7 @@ const Verdict = require('../models/Verdict');
 const { processClaimWithAI } = require('../services/poeAIService');
 const { sendNotification } = require('../services/notificationService');
 const logger = require('../utils/logger');
+const db = require('../config/database');
 
 /**
  * Complete claim processing workflow
@@ -42,11 +43,13 @@ class ClaimWorkflow {
         is_edited_by_human: false
       });
 
-      // Update claim with AI verdict
-      await Claim.update(claimId, {
-        ai_verdict_id: aiVerdict.id,
-        status: 'ai_processed'
-      });
+      // Update claim with AI verdict and status
+      await db.query(
+        `UPDATE claims 
+         SET ai_verdict_id = $1, status = 'completed', updated_at = NOW()
+         WHERE id = $2`,
+        [aiVerdict.id, claimId]
+      );
 
       // Notify user that AI has responded
       await sendNotification({

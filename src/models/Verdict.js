@@ -52,6 +52,22 @@ class Verdict {
     }
   }
 
+  static async findById(verdictId) {
+    const query = `
+      SELECT v.*, u.email as fact_checker_email, u.profile_picture as fact_checker_avatar
+      FROM verdicts v
+      LEFT JOIN users u ON v.fact_checker_id = u.id
+      WHERE v.id = $1
+    `;
+    try {
+      const result = await db.query(query, [verdictId]);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error finding verdict by ID:', error);
+      throw error;
+    }
+  }
+
   static async findByFactChecker(factCheckerId, limit = 20, offset = 0) {
     const query = `
       SELECT v.*, c.title as claim_title, c.category as claim_category
