@@ -27,7 +27,7 @@ class FactCheckerController {
          FROM hakikisha.claims c
          LEFT JOIN hakikisha.users u ON c.user_id = u.id
          LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
-         WHERE c.status IN ('pending', 'ai_processing', 'human_review')
+         WHERE c.status IN ('pending', 'ai_processing', 'human_review', 'completed')
          ORDER BY c.priority DESC, c.created_at ASC
          LIMIT 50`
       );
@@ -188,7 +188,7 @@ class FactCheckerController {
         db.query(
           `SELECT COUNT(*) as total
            FROM hakikisha.claims 
-           WHERE status IN ('pending', 'ai_processing', 'human_review')`
+           WHERE status IN ('pending', 'ai_processing', 'human_review', 'completed')`
         ),
         db.query(
           `SELECT 
@@ -234,6 +234,305 @@ class FactCheckerController {
     }
   }
 
+  // NEW: Get all AI verdicts for fact checkers to review and edit
+  async getAIVerdicts(req, res) {
+    try {
+      console.log('Fetching AI verdicts for fact checker review:', req.user.userId);
+      
+      const { page = 1, limit = 20, status = 'all' } = req.query;
+      const offset = (page - 1) * limit;
+
+      let statusCondition = '';
+      if (status === 'edited') {
+        statusCondition = "AND av.is_edited_by_human = true";
+      } else if (status === 'unedited') {
+        statusCondition = "AND av.is_edited_by_human = false";
+      }
+
+      const result = await db.query(
+        `SELECT 
+          c.id as claim_id,
+          c.title,
+          c.description,
+          c.category,
+          c.status as claim_status,
+          c.created_at as claim_date,
+          u.email as submitted_by,
+          av.id as ai_verdict_id,
+          av.verdict as ai_verdict,
+          av.explanation as ai_explanation,
+          av.confidence_score as ai_confidence,
+          av.evidence_sources as ai_sources,
+          av.disclaimer as ai_disclaimer,
+          av.is_edited_by_human as is_edited,
+          av.edited_by_fact_checker_id as edited_by,
+          av.edited_at as edited_date,
+          fc.username as editor_name,
+          COUNT(*) OVER() as total_count
+         FROM hakikisha.claims c
+         LEFT JOIN hakikisha.users u ON c.user_id = u.id
+         LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
+         LEFT JOIN hakikisha.users fc ON av.edited_by_fact_checker_id = fc.id
+         WHERE av.id IS NOT NULL
+         ${statusCondition}
+         ORDER BY c.created_at DESC
+         LIMIT $1 OFFSET $2`,
+        [limit, offset]
+      );
+
+      console.log(`Found ${result.rows.length} AI verdicts`);
+
+      const aiVerdicts = result.rows.map(row => {
+        let aiSources = [];
+        try {
+          aiSources = row.ai_sources ? 
+            (typeof row.ai_sources === 'string' ? 
+              JSON.parse(row.ai_sources) : row.ai_sources) : [];
+        } catch (e) {
+          console.log('Error parsing AI sources:', e);
+          aiSources = [];
+        }
+
+        return {
+          claim_id: row.claim_id,
+          claim_title: row.title,
+          claim_description: row.description,
+          claim_category: row.category,
+          claim_status: row.claim_status,
+          claim_date: row.claim_date,
+          submitted_by: row.submitted_by,
+          ai_verdict: {
+            id: row.ai_verdict_id,
+            verdict: row.ai_verdict,
+            explanation: row.ai_explanation,
+            confidence: row.ai_confidence,
+            sources: aiSources,
+            disclaimer: row.ai_disclaimer,
+            is_edited: row.is_edited,
+            edited_by: row.edited_by,
+            edited_by_name: row.editor_name,
+            edited_date: row.edited_date
+          }
+        };
+      });
+
+      const totalCount = result.rows.length > 0 ? parseInt(result.rows[0].total_count) : 0;
+
+      res.json({
+        success: true,
+        ai_verdicts: aiVerdicts,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: totalCount,
+          pages: Math.ceil(totalCount / limit)
+        }
+      });
+    } catch (error) {
+      console.error('Get AI verdicts error:', error);
+      logger.error('Get AI verdicts error:', error);
+      res.status(500).json({ 
+        success: false, 
+        error: 'Failed to get AI verdicts', 
+        code: 'SERVER_ERROR' 
+      });
+    }
+  }
+
+  // NEW: Edit AI verdict
+  async editAIVerdict(req, res) {
+    try {
+      const { claimId } = req.params;
+      const { verdict, explanation, confidence_score, evidence_sources } = req.body;
+      
+      console.log('Editing AI verdict for claim:', claimId, 'by fact checker:', req.user.userId);
+
+      if (!claimId || !verdict || !explanation) {
+        return res.status(400).json({
+          success: false,
+          error: 'Claim ID, verdict, and explanation are required',
+          code: 'VALIDATION_ERROR'
+        });
+      }
+
+      // Validate verdict value
+      const validVerdicts = ['true', 'false', 'misleading', 'needs_context', 'unverifiable'];
+      if (!validVerdicts.includes(verdict)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid verdict value. Must be one of: true, false, misleading, needs_context, unverifiable',
+          code: 'VALIDATION_ERROR'
+        });
+      }
+
+      await db.query('BEGIN');
+
+      // Update AI verdict with edited information
+      const updateResult = await db.query(
+        `UPDATE hakikisha.ai_verdicts 
+         SET verdict = $1,
+             explanation = $2,
+             confidence_score = $3,
+             evidence_sources = $4,
+             is_edited_by_human = true,
+             edited_by_fact_checker_id = $5,
+             edited_at = NOW(),
+             updated_at = NOW()
+         WHERE claim_id = $6
+         RETURNING *`,
+        [
+          verdict,
+          explanation,
+          confidence_score || 0.8, // Default confidence if not provided
+          JSON.stringify(evidence_sources || []),
+          req.user.userId,
+          claimId
+        ]
+      );
+
+      if (updateResult.rows.length === 0) {
+        await db.query('ROLLBACK');
+        return res.status(404).json({
+          success: false,
+          error: 'AI verdict not found for this claim',
+          code: 'NOT_FOUND'
+        });
+      }
+
+      // Update claim status to indicate human review
+      await db.query(
+        `UPDATE hakikisha.claims 
+         SET status = 'human_approved',
+             updated_at = NOW()
+         WHERE id = $1`,
+        [claimId]
+      );
+
+      await db.query('COMMIT');
+
+      console.log('AI verdict edited successfully for claim:', claimId);
+
+      // Log editing activity
+      try {
+        await db.query(
+          `INSERT INTO hakikisha.fact_checker_activities (
+            id, fact_checker_id, activity_type, claim_id, 
+            start_time, end_time, duration, created_at
+          ) VALUES ($1, $2, $3, $4, NOW() - INTERVAL '5 minutes', NOW(), 300, NOW())`,
+          [uuidv4(), req.user.userId, 'ai_verdict_edit', claimId]
+        );
+      } catch (activityError) {
+        console.log('Failed to log activity:', activityError.message);
+      }
+
+      res.json({
+        success: true,
+        message: 'AI verdict edited successfully',
+        ai_verdict: updateResult.rows[0]
+      });
+    } catch (error) {
+      await db.query('ROLLBACK');
+      console.error('Edit AI verdict error:', error);
+      logger.error('Edit AI verdict error:', error);
+      res.status(500).json({ 
+        success: false, 
+        error: 'Failed to edit AI verdict', 
+        code: 'SERVER_ERROR' 
+      });
+    }
+  }
+
+  // NEW: Get specific AI verdict details
+  async getAIVerdictDetails(req, res) {
+    try {
+      const { claimId } = req.params;
+      console.log('Fetching AI verdict details for claim:', claimId);
+
+      const result = await db.query(
+        `SELECT 
+          c.id as claim_id,
+          c.title,
+          c.description,
+          c.category,
+          c.status as claim_status,
+          c.created_at as claim_date,
+          u.email as submitted_by,
+          av.id as ai_verdict_id,
+          av.verdict as ai_verdict,
+          av.explanation as ai_explanation,
+          av.confidence_score as ai_confidence,
+          av.evidence_sources as ai_sources,
+          av.disclaimer as ai_disclaimer,
+          av.is_edited_by_human as is_edited,
+          av.edited_by_fact_checker_id as edited_by,
+          av.edited_at as edited_date,
+          fc.username as editor_name,
+          fc.email as editor_email
+         FROM hakikisha.claims c
+         LEFT JOIN hakikisha.users u ON c.user_id = u.id
+         LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
+         LEFT JOIN hakikisha.users fc ON av.edited_by_fact_checker_id = fc.id
+         WHERE c.id = $1 AND av.id IS NOT NULL`,
+        [claimId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'AI verdict not found for this claim',
+          code: 'NOT_FOUND'
+        });
+      }
+
+      const row = result.rows[0];
+      let aiSources = [];
+      try {
+        aiSources = row.ai_sources ? 
+          (typeof row.ai_sources === 'string' ? 
+            JSON.parse(row.ai_sources) : row.ai_sources) : [];
+      } catch (e) {
+        console.log('Error parsing AI sources:', e);
+        aiSources = [];
+      }
+
+      const aiVerdict = {
+        claim_id: row.claim_id,
+        claim_title: row.title,
+        claim_description: row.description,
+        claim_category: row.category,
+        claim_status: row.claim_status,
+        claim_date: row.claim_date,
+        submitted_by: row.submitted_by,
+        ai_verdict: {
+          id: row.ai_verdict_id,
+          verdict: row.ai_verdict,
+          explanation: row.ai_explanation,
+          confidence: row.ai_confidence,
+          sources: aiSources,
+          disclaimer: row.ai_disclaimer,
+          is_edited: row.is_edited,
+          edited_by: row.edited_by,
+          edited_by_name: row.editor_name,
+          edited_by_email: row.editor_email,
+          edited_date: row.edited_date
+        }
+      };
+
+      res.json({
+        success: true,
+        ai_verdict: aiVerdict
+      });
+    } catch (error) {
+      console.error('Get AI verdict details error:', error);
+      logger.error('Get AI verdict details error:', error);
+      res.status(500).json({ 
+        success: false, 
+        error: 'Failed to get AI verdict details', 
+        code: 'SERVER_ERROR' 
+      });
+    }
+  }
+
   async getAISuggestions(req, res) {
     try {
       console.log('Fetching AI suggestions for fact checker:', req.user.userId);
@@ -252,7 +551,7 @@ class FactCheckerController {
           av.evidence_sources as "aiSources"
          FROM hakikisha.claims c
          JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
-         WHERE c.status = 'ai_approved'
+         WHERE c.status = 'completed'
          AND c.human_verdict_id IS NULL
          ORDER BY av.confidence_score ASC, c.created_at ASC
          LIMIT 20`
@@ -487,7 +786,7 @@ class FactCheckerController {
     try {
       console.log('Fetching dashboard data for fact checker:', req.user.userId);
       
-      const [claimsResult, blogsResult, statsResult] = await Promise.all([
+      const [claimsResult, blogsResult, statsResult, aiVerdictsResult] = await Promise.all([
         // Get recent claims assigned to this fact checker
         db.query(
           `SELECT 
@@ -522,10 +821,20 @@ class FactCheckerController {
         db.query(
           `SELECT 
             (SELECT COUNT(*) FROM hakikisha.verdicts WHERE fact_checker_id = $1) as total_verdicts,
-            (SELECT COUNT(*) FROM hakikisha.claims WHERE assigned_fact_checker_id = $1 AND status IN ('pending', 'human_review')) as pending_claims,
+            (SELECT COUNT(*) FROM hakikisha.claims WHERE assigned_fact_checker_id = $1 AND status IN ('pending', 'human_review', 'completed')) as pending_claims,
             (SELECT COUNT(*) FROM hakikisha.blog_articles WHERE author_id = $1 AND status = 'published') as published_blogs,
             (SELECT COALESCE(AVG(time_spent), 0) FROM hakikisha.verdicts WHERE fact_checker_id = $1) as avg_review_time`,
           [req.user.userId]
+        ),
+
+        // Get AI verdicts stats
+        db.query(
+          `SELECT 
+            COUNT(*) as total_ai_verdicts,
+            COUNT(CASE WHEN is_edited_by_human = true THEN 1 END) as edited_ai_verdicts
+           FROM hakikisha.ai_verdicts av
+           JOIN hakikisha.claims c ON av.claim_id = c.id
+           WHERE c.status = 'completed'`
         )
       ]);
 
@@ -536,7 +845,9 @@ class FactCheckerController {
           totalVerdicts: parseInt(statsResult.rows[0]?.total_verdicts) || 0,
           pendingClaims: parseInt(statsResult.rows[0]?.pending_claims) || 0,
           publishedBlogs: parseInt(statsResult.rows[0]?.published_blogs) || 0,
-          avgReviewTime: parseInt(statsResult.rows[0]?.avg_review_time) || 0
+          avgReviewTime: parseInt(statsResult.rows[0]?.avg_review_time) || 0,
+          totalAIVerdicts: parseInt(aiVerdictsResult.rows[0]?.total_ai_verdicts) || 0,
+          editedAIVerdicts: parseInt(aiVerdictsResult.rows[0]?.edited_ai_verdicts) || 0
         }
       };
 

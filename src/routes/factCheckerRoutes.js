@@ -25,6 +25,22 @@ router.get('/stats', (req, res, next) => {
   next();
 }, factCheckerController.getStats);
 
+// NEW: AI Verdicts management routes
+router.get('/ai-verdicts', (req, res, next) => {
+  console.log('🔍 GET /api/v1/fact-checker/ai-verdicts - AI verdicts endpoint hit');
+  next();
+}, factCheckerController.getAIVerdicts);
+
+router.get('/ai-verdicts/:claimId', (req, res, next) => {
+  console.log('🔍 GET /api/v1/fact-checker/ai-verdicts/:claimId - AI verdict details endpoint hit');
+  next();
+}, factCheckerController.getAIVerdictDetails);
+
+router.put('/ai-verdicts/:claimId', (req, res, next) => {
+  console.log('🔍 PUT /api/v1/fact-checker/ai-verdicts/:claimId - Edit AI verdict endpoint hit');
+  next();
+}, factCheckerController.editAIVerdict);
+
 router.get('/ai-suggestions', (req, res, next) => {
   console.log('🔍 GET /api/v1/fact-checker/ai-suggestions - AI suggestions endpoint hit');
   next();
@@ -41,6 +57,12 @@ router.get('/blogs', (req, res, next) => {
   next();
 }, factCheckerController.getMyBlogs);
 
+// Fact-checker dashboard
+router.get('/dashboard', (req, res, next) => {
+  console.log('🔍 GET /api/v1/fact-checker/dashboard - Fact-checker dashboard endpoint hit');
+  next();
+}, factCheckerController.getFactCheckerDashboard);
+
 // Test endpoint
 router.get('/test/endpoint', (req, res) => {
   console.log('🔍 GET /api/v1/fact-checker/test/endpoint - Test endpoint hit');
@@ -48,7 +70,14 @@ router.get('/test/endpoint', (req, res) => {
     success: true,
     message: 'Fact-checker routes are working!',
     user: req.user,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      pending_claims: 'GET /api/v1/fact-checker/pending-claims',
+      ai_verdicts: 'GET /api/v1/fact-checker/ai-verdicts',
+      edit_ai_verdict: 'PUT /api/v1/fact-checker/ai-verdicts/:claimId',
+      submit_verdict: 'POST /api/v1/fact-checker/submit-verdict',
+      dashboard: 'GET /api/v1/fact-checker/dashboard'
+    }
   });
 });
 
