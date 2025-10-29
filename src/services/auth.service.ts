@@ -10,8 +10,12 @@ const REFRESH_TOKEN_EXPIRES_IN = '7d';
 
 export class AuthService {
   static async register(email: string, password: string, phone?: string, role: string = 'user') {
+    // Trim and normalize inputs
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPhone = phone ? phone.trim() : null;
+    
     // Check if user exists
-    const existing = await db.query('SELECT id FROM users WHERE email = $1', [email]);
+    const existing = await db.query('SELECT id FROM users WHERE email = $1', [trimmedEmail]);
     
     if (existing.rows.length > 0) {
       throw new Error('User already exists');
@@ -26,17 +30,20 @@ export class AuthService {
       `INSERT INTO users (id, email, password_hash, phone, role, registration_status, is_verified, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
        RETURNING id, email, role, is_verified, registration_status, created_at`,
-      [id, email, password_hash, phone || null, role, 'pending', false]
+      [id, trimmedEmail, password_hash, trimmedPhone, role, 'pending', false]
     );
 
     return result.rows[0];
   }
 
   static async login(email: string, password: string) {
-    // Find user
+    // Trim and normalize input - support both email and username
+    const trimmedEmailOrUsername = email.trim().toLowerCase();
+    
+    // Find user by email or username
     const userResult = await db.query(
-      'SELECT id, email, password_hash, role, is_verified, registration_status FROM users WHERE email = $1',
-      [email]
+      'SELECT id, email, password_hash, role, is_verified, registration_status FROM users WHERE LOWER(email) = $1 OR username = $2',
+      [trimmedEmailOrUsername, email.trim()]
     );
 
     if (userResult.rows.length === 0) {

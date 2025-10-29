@@ -94,21 +94,24 @@ class FactCheckerController {
         });
       }
 
-      // Validate verdict value
-      const validVerdicts = ['verified', 'false', 'misleading', 'needs_context', 'unverifiable'];
+      // Validate verdict value - support both 'true' and 'verified'
+      const validVerdicts = ['true', 'verified', 'false', 'misleading', 'needs_context', 'unverifiable'];
       if (!validVerdicts.includes(verdict)) {
         return res.status(400).json({
           success: false,
-          error: 'Invalid verdict value',
+          error: 'Invalid verdict value. Must be one of: true, false, misleading, needs_context, unverifiable',
           code: 'VALIDATION_ERROR'
         });
       }
+
+      // Normalize 'verified' to 'true' for consistency
+      const normalizedVerdict = verdict === 'verified' ? 'true' : verdict;
 
       const verdictId = uuidv4();
 
       await db.query('BEGIN');
 
-      // Insert verdict
+      // Insert verdict using normalized verdict value
       await db.query(
         `INSERT INTO hakikisha.verdicts (
           id, claim_id, fact_checker_id, verdict, explanation, 
@@ -119,7 +122,7 @@ class FactCheckerController {
           verdictId, 
           claimId, 
           req.user.userId, 
-          verdict, 
+          normalizedVerdict, 
           explanation, 
           JSON.stringify(sources || []),
           time_spent

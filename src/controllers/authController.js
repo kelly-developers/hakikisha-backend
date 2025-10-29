@@ -27,7 +27,12 @@ const generateJWTToken = (user) => {
 const register = async (req, res) => {
   try {
     console.log('Register Request Received');
-    const { email, username, password, phone, role = 'user' } = req.body;
+    // TRIM all string inputs to handle spaces
+    const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
+    const username = req.body.username ? req.body.username.trim() : '';
+    const password = req.body.password || '';
+    const phone = req.body.phone ? req.body.phone.trim() : null;
+    const role = req.body.role || 'user';
 
     if (!email || !password) {
       return res.status(400).json({
@@ -148,9 +153,11 @@ const register = async (req, res) => {
 const login = async (req, res) => {
   try {
     console.log('Login Request Received');
-    const { email, password } = req.body;
+    // TRIM input to handle spaces and normalize email to lowercase
+    const emailOrUsername = req.body.email ? req.body.email.trim().toLowerCase() : '';
+    const password = req.body.password || '';
 
-    if (!email || !password) {
+    if (!emailOrUsername || !password) {
       return res.status(400).json({
         success: false,
         error: 'Email/username and password are required',
@@ -158,17 +165,17 @@ const login = async (req, res) => {
       });
     }
 
-    // UPDATED: Support login with either email OR username
+    // Support login with either email OR username (case-insensitive for email)
     const userResult = await db.query(
       `SELECT id, email, username, password_hash, role, is_verified, registration_status, 
               two_factor_enabled, status, login_count, last_login
        FROM hakikisha.users 
-       WHERE email = $1 OR username = $1`,
-      [email]
+       WHERE LOWER(email) = $1 OR username = $2`,
+      [emailOrUsername, emailOrUsername]
     );
 
     if (userResult.rows.length === 0) {
-      logger.warn(`Failed login attempt for non-existent email/username: ${email}`);
+      logger.warn(`Failed login attempt for non-existent email/username: ${emailOrUsername}`);
       return res.status(401).json({
         success: false,
         error: 'Invalid email/username or password',
@@ -401,7 +408,8 @@ const verify2FA = async (req, res) => {
 const forgotPassword = async (req, res) => {
   try {
     console.log('Forgot Password Request');
-    const { email } = req.body;
+    // TRIM and normalize email
+    const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
 
     if (!email) {
       return res.status(400).json({
@@ -479,7 +487,10 @@ const forgotPassword = async (req, res) => {
 const resetPassword = async (req, res) => {
   try {
     console.log('Reset Password Request');
-    const { email, resetCode, newPassword } = req.body;
+    // TRIM inputs
+    const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
+    const resetCode = req.body.resetCode ? req.body.resetCode.trim() : '';
+    const newPassword = req.body.newPassword || '';
 
     if (!email || !resetCode || !newPassword) {
       return res.status(400).json({

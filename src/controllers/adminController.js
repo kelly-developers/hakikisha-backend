@@ -13,9 +13,9 @@ exports.getAllUsers = async (req, res, next) => {
     const { page = 1, limit = 20, role } = req.query;
     const offset = (page - 1) * limit;
 
-    // FIXED: Use correct count method
+    // FIXED: Use correct count method with proper where condition
     const users = await User.findAll({ role, limit, offset });
-    const total = await User.count({ where: { role } }); // FIXED: Changed from countAll to count
+    const total = role ? await User.count({ role }) : await User.countAll({});
 
     res.json({
       users,
