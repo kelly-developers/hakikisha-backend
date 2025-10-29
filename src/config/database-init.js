@@ -954,30 +954,28 @@ class DatabaseInitializer {
     }
   }
 
-static async ensureVerdictsColumns() {
-  try {
-    console.log('Checking for missing columns in verdicts table...');
-    
-    const requiredColumns = [
-      { name: 'is_final', type: 'BOOLEAN', defaultValue: 'TRUE', isUnique: false },
-      { name: 'approval_status', type: 'VARCHAR(50)', defaultValue: "'approved'", isUnique: false },
-      { name: 'review_notes', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
-      { name: 'time_spent', type: 'INTEGER', defaultValue: '0', isUnique: false },
-      { name: 'ai_verdict_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
-      { name: 'based_on_ai_verdict', type: 'BOOLEAN', defaultValue: 'false', isUnique: false }, // NEW: Add this column
-      { name: 'responsibility', type: 'VARCHAR(20)', defaultValue: "'creco'", isUnique: false }
-    ];
+  static async ensureVerdictsColumns() {
+    try {
+      console.log('Checking for missing columns in verdicts table...');
+      
+      const requiredColumns = [
+        { name: 'is_final', type: 'BOOLEAN', defaultValue: 'TRUE', isUnique: false },
+        { name: 'approval_status', type: 'VARCHAR(50)', defaultValue: "'approved'", isUnique: false },
+        { name: 'review_notes', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
+        { name: 'time_spent', type: 'INTEGER', defaultValue: '0', isUnique: false },
+        { name: 'ai_verdict_id', type: 'UUID', defaultValue: 'NULL', isUnique: false }
+      ];
 
-    for (const column of requiredColumns) {
-      await this.ensureColumnExists('verdicts', column);
+      for (const column of requiredColumns) {
+        await this.ensureColumnExists('verdicts', column);
+      }
+      
+      console.log('All required columns verified in verdicts table');
+    } catch (error) {
+      console.error('❌ Error ensuring verdicts columns:', error);
+      throw error;
     }
-    
-    console.log('✅ All required columns verified in verdicts table');
-  } catch (error) {
-    console.error('❌ Error ensuring verdicts columns:', error);
-    throw error;
   }
-}
 
   static async checkAdminActivitiesTable() {
     try {
