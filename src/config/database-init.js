@@ -45,7 +45,7 @@ class DatabaseInitializer {
       await this.createClaimsTable();
       await this.createAIVerdictsTable();
       await this.createVerdictsTable();
-      await this.createFactCheckerActivitiesTable(); // NEW: Added fact checker activities table
+      await this.createFactCheckerActivitiesTable();
       
       console.log('✅ Essential tables created/verified successfully!');
     } catch (error) {
@@ -368,6 +368,7 @@ class DatabaseInitializer {
     }
   }
 
+  // UPDATED: Verdicts table with based_on_ai_verdict column
   static async createVerdictsTable() {
     try {
       const query = `
@@ -379,6 +380,7 @@ class DatabaseInitializer {
           explanation TEXT NOT NULL,
           evidence_sources JSONB,
           ai_verdict_id UUID REFERENCES hakikisha.ai_verdicts(id),
+          based_on_ai_verdict BOOLEAN DEFAULT false, -- NEW: Added this column
           is_final BOOLEAN DEFAULT TRUE,
           approval_status VARCHAR(50) DEFAULT 'approved' CHECK (approval_status IN ('pending', 'approved', 'rejected')),
           review_notes TEXT,
@@ -442,6 +444,7 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_verdicts_fact_checker_id ON hakikisha.verdicts(fact_checker_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_verdict ON hakikisha.verdicts(verdict)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_is_final ON hakikisha.verdicts(is_final)',
+      'CREATE INDEX IF NOT EXISTS idx_verdicts_based_on_ai ON hakikisha.verdicts(based_on_ai_verdict)', // NEW: Index for based_on_ai_verdict
       
       // Fact Checker Activities indexes
       'CREATE INDEX IF NOT EXISTS idx_fact_checker_activities_fact_checker_id ON hakikisha.fact_checker_activities(fact_checker_id)',
@@ -581,6 +584,23 @@ class DatabaseInitializer {
     try {
       console.log('Verifying database state...');
       
+      // Check verdicts table for the based_on_ai_verdict column
+      const verdictsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'verdicts'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`Verdicts table columns: ${verdictsColumns.rows.length}`);
+      const hasBasedOnAIVerdictColumn = verdictsColumns.rows.some(col => col.column_name === 'based_on_ai_verdict');
+      console.log(`✅ Verdicts has based_on_ai_verdict column: ${hasBasedOnAIVerdictColumn}`);
+      
+      if (!hasBasedOnAIVerdictColumn) {
+        console.log('⚠️ based_on_ai_verdict column missing, adding it now...');
+        await this.ensureVerdictsColumns();
+      }
+
       // Check AI verdicts table
       const aiVerdictsColumns = await db.query(`
         SELECT column_name, data_type, is_nullable, column_default
@@ -641,6 +661,7 @@ class DatabaseInitializer {
       }
 
       return {
+        verdictsTableHasBasedOnAI: hasBasedOnAIVerdictColumn,
         aiVerdictsTablesExist: hasRequiredAIVerdictsColumns,
         factCheckerActivitiesExist: hasRequiredActivitiesColumns,
         pointsTablesExist: hasRequiredPointsColumns,
@@ -756,7 +777,7 @@ class DatabaseInitializer {
         'blog_likes',
         'blog_comments',
         'blog_articles',
-        'fact_checker_activities', // NEW: Added to reset list
+        'fact_checker_activities',
         'verdicts',
         'ai_verdicts', 
         'claims',
@@ -812,9 +833,9 @@ class DatabaseInitializer {
       await this.ensureRequiredColumns();
       await this.createPointsTables();
       await this.createBlogTables();
-      await this.createAIVerdictsTable(); // Ensure AI verdicts table exists
-      await this.createFactCheckerActivitiesTable(); // Ensure fact checker activities table exists
-      await this.ensureVerdictsColumns();
+      await this.createAIVerdictsTable();
+      await this.createFactCheckerActivitiesTable();
+      await this.ensureVerdictsColumns(); // Ensure verdicts columns are properly set
       await this.ensureFactCheckersColumns();
       await this.ensureAdminActivitiesColumns();
       await this.createIndexes();
@@ -894,15 +915,14 @@ class DatabaseInitializer {
     try {
       console.log('Ensuring all required columns exist...');
       await this.ensureUserColumns();
-      await this.ensureVerdictsColumns();
-      await this.ensureAIVerdictsColumns(); // NEW: Ensure AI verdicts columns
+      await this.ensureVerdictsColumns(); // Make sure this is called
+      await this.ensureAIVerdictsColumns();
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
       throw error;
     }
   }
 
-  // NEW: Ensure AI verdicts table has required columns for fact checker editing
   static async ensureAIVerdictsColumns() {
     try {
       console.log('Checking for missing columns in ai_verdicts table...');
@@ -954,30 +974,31 @@ class DatabaseInitializer {
     }
   }
 
-static async ensureVerdictsColumns() {
-  try {
-    console.log('Checking for missing columns in verdicts table...');
-    
-    const requiredColumns = [
-      { name: 'is_final', type: 'BOOLEAN', defaultValue: 'TRUE', isUnique: false },
-      { name: 'approval_status', type: 'VARCHAR(50)', defaultValue: "'approved'", isUnique: false },
-      { name: 'review_notes', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
-      { name: 'time_spent', type: 'INTEGER', defaultValue: '0', isUnique: false },
-      { name: 'ai_verdict_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
-      { name: 'based_on_ai_verdict', type: 'BOOLEAN', defaultValue: 'false', isUnique: false }, // NEW: Add this column
-      { name: 'responsibility', type: 'VARCHAR(20)', defaultValue: "'creco'", isUnique: false }
-    ];
+  // UPDATED: Fixed ensureVerdictsColumns method
+  static async ensureVerdictsColumns() {
+    try {
+      console.log('Checking for missing columns in verdicts table...');
+      
+      const requiredColumns = [
+        { name: 'is_final', type: 'BOOLEAN', defaultValue: 'TRUE', isUnique: false },
+        { name: 'approval_status', type: 'VARCHAR(50)', defaultValue: "'approved'", isUnique: false },
+        { name: 'review_notes', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
+        { name: 'time_spent', type: 'INTEGER', defaultValue: '0', isUnique: false },
+        { name: 'ai_verdict_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
+        { name: 'based_on_ai_verdict', type: 'BOOLEAN', defaultValue: 'false', isUnique: false }, // This is the missing column
+        { name: 'responsibility', type: 'VARCHAR(20)', defaultValue: "'creco'", isUnique: false }
+      ];
 
-    for (const column of requiredColumns) {
-      await this.ensureColumnExists('verdicts', column);
+      for (const column of requiredColumns) {
+        await this.ensureColumnExists('verdicts', column);
+      }
+      
+      console.log('✅ All required columns verified in verdicts table');
+    } catch (error) {
+      console.error('❌ Error ensuring verdicts columns:', error);
+      throw error;
     }
-    
-    console.log('✅ All required columns verified in verdicts table');
-  } catch (error) {
-    console.error(' Error ensuring verdicts columns:', error);
-    throw error;
   }
-}
 
   static async checkAdminActivitiesTable() {
     try {
