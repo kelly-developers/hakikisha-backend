@@ -974,7 +974,7 @@ static async ensureVerdictsColumns() {
     
     console.log('✅ All required columns verified in verdicts table');
   } catch (error) {
-    console.error('❌ Error ensuring verdicts columns:', error);
+    console.error(' Error ensuring verdicts columns:', error);
     throw error;
   }
 }
