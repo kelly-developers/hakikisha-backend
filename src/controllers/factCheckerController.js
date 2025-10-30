@@ -601,9 +601,12 @@ class FactCheckerController {
     }
   }
 
+  // FIXED: Updated approveAIVerdict to accept claimId as parameter
   async approveAIVerdict(req, res) {
     try {
-      const { claimId, approved, editedVerdict, editedExplanation, additionalSources } = req.body;
+      const { claimId } = req.params;
+      const { approved, editedVerdict, editedExplanation, additionalSources } = req.body;
+      
       console.log('Approving AI verdict for claim:', claimId, 'Edited:', !approved);
 
       if (!claimId) {

@@ -46,8 +46,9 @@ router.get('/ai-suggestions', (req, res, next) => {
   next();
 }, factCheckerController.getAISuggestions);
 
-router.post('/approve-ai-verdict', (req, res, next) => {
-  console.log('🔍 POST /api/v1/fact-checker/approve-ai-verdict - Approve AI verdict endpoint hit');
+// FIXED: Updated approve AI verdict route to accept claimId parameter
+router.post('/approve-ai-verdict/:claimId', (req, res, next) => {
+  console.log('🔍 POST /api/v1/fact-checker/approve-ai-verdict/:claimId - Approve AI verdict endpoint hit');
   next();
 }, factCheckerController.approveAIVerdict);
 
@@ -76,6 +77,7 @@ router.get('/test/endpoint', (req, res) => {
       ai_verdicts: 'GET /api/v1/fact-checker/ai-verdicts',
       edit_ai_verdict: 'PUT /api/v1/fact-checker/ai-verdicts/:claimId',
       submit_verdict: 'POST /api/v1/fact-checker/submit-verdict',
+      approve_ai_verdict: 'POST /api/v1/fact-checker/approve-ai-verdict/:claimId',
       dashboard: 'GET /api/v1/fact-checker/dashboard'
     }
   });
