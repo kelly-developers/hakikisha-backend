@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Claim = require('../models/Claim');
 const Verdict = require('../models/Verdict');
 const FactChecker = require('../models/FactChecker');
+const Blog = require('../models/Blog');
 const RegistrationRequest = require('../models/RegistrationRequest');
 const AdminActivity = require('../models/AdminActivity');
 const authService = require('../services/authService');
@@ -10,14 +11,21 @@ const logger = require('../utils/logger');
 // User management
 exports.getAllUsers = async (req, res, next) => {
   try {
-    const { page = 1, limit = 20, role } = req.query;
+    const { page = 1, limit = 20, role, status, search } = req.query;
     const offset = (page - 1) * limit;
 
-    // FIXED: Use correct count method with proper where condition
-    const users = await User.findAll({ role, limit, offset });
-    const total = role ? await User.count({ role }) : await User.countAll({});
+    const users = await User.findAllWithPoints({ 
+      role, 
+      status, 
+      search, 
+      limit: parseInt(limit), 
+      offset: parseInt(offset) 
+    });
+    
+    const total = await User.countWithFilters({ role, status, search });
 
     res.json({
+      success: true,
       users,
       pagination: {
         page: parseInt(page),
@@ -29,7 +37,396 @@ exports.getAllUsers = async (req, res, next) => {
 
   } catch (error) {
     logger.error('Get all users error:', error);
-    next(error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch users: ' + error.message
+    });
+  }
+};
+
+exports.getUserDetails = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    const user = await User.findByIdWithDetails(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    // Get user points
+    const points = await User.getUserPoints(userId);
+    
+    // Get user claims count
+    const claimsCount = await Claim.countByUserId(userId);
+    
+    // Get user activity
+    const lastActivity = await User.getLastActivity(userId);
+
+    res.json({
+      success: true,
+      user: {
+        ...user,
+        points: points || { total_points: 0, current_streak: 0, longest_streak: 0 },
+        stats: {
+          claims_count: claimsCount,
+          last_activity: lastActivity
+        }
+      }
+    });
+
+  } catch (error) {
+    logger.error('Get user details error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch user details: ' + error.message
+    });
+  }
+};
+
+exports.resetUserPassword = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const { newPassword } = req.body;
+
+    if (!newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'New password is required'
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const passwordHash = await authService.hashPassword(newPassword);
+    await User.update(userId, { password_hash: passwordHash });
+
+    // Log admin activity
+    await AdminActivity.create({
+      admin_id: req.user.userId,
+      activity_type: 'password_reset',
+      description: `Reset password for user ${user.email}`,
+      target_user_id: userId,
+      changes_made: { action: 'password_reset' }
+    });
+
+    logger.info(`Password reset for user: ${user.email} by admin ${req.user.userId}`);
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully',
+      user_id: userId
+    });
+
+  } catch (error) {
+    logger.error('Reset user password error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to reset password: ' + error.message
+    });
+  }
+};
+
+exports.deleteUser = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    // Prevent admin from deleting themselves
+    if (user.id === req.user.userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot delete your own account'
+      });
+    }
+
+    await User.delete(userId);
+
+    // Log admin activity
+    await AdminActivity.create({
+      admin_id: req.user.userId,
+      activity_type: 'user_deletion',
+      description: `Deleted user ${user.email}`,
+      target_user_id: userId,
+      changes_made: { action: 'user_deletion', email: user.email }
+    });
+
+    logger.info(`User deleted: ${user.email} by admin ${req.user.userId}`);
+
+    res.json({
+      success: true,
+      message: 'User deleted successfully',
+      user_id: userId
+    });
+
+  } catch (error) {
+    logger.error('Delete user error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete user: ' + error.message
+    });
+  }
+};
+
+// Fact Checker Management
+exports.getAllFactCheckers = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 20, status, search } = req.query;
+    const offset = (page - 1) * limit;
+
+    const factCheckers = await FactChecker.findAllWithDetails({
+      status,
+      search,
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    });
+
+    const total = await FactChecker.countWithFilters({ status, search });
+
+    res.json({
+      success: true,
+      fact_checkers: factCheckers,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    logger.error('Get all fact checkers error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch fact checkers: ' + error.message
+    });
+  }
+};
+
+exports.getFactCheckerDetails = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    const factChecker = await FactChecker.findByUserIdWithDetails(userId);
+    if (!factChecker) {
+      return res.status(404).json({
+        success: false,
+        error: 'Fact checker not found'
+      });
+    }
+
+    // Get fact checker stats
+    const stats = await FactChecker.getStats(userId);
+
+    res.json({
+      success: true,
+      fact_checker: {
+        ...factChecker,
+        stats
+      }
+    });
+
+  } catch (error) {
+    logger.error('Get fact checker details error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch fact checker details: ' + error.message
+    });
+  }
+};
+
+exports.resetFactCheckerPassword = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const { newPassword } = req.body;
+
+    if (!newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'New password is required'
+      });
+    }
+
+    const factChecker = await FactChecker.findByUserId(userId);
+    if (!factChecker) {
+      return res.status(404).json({
+        success: false,
+        error: 'Fact checker not found'
+      });
+    }
+
+    const passwordHash = await authService.hashPassword(newPassword);
+    await User.update(userId, { password_hash: passwordHash });
+
+    // Log admin activity
+    await AdminActivity.create({
+      admin_id: req.user.userId,
+      activity_type: 'fact_checker_password_reset',
+      description: `Reset password for fact checker ${factChecker.email}`,
+      target_user_id: userId,
+      changes_made: { action: 'password_reset' }
+    });
+
+    logger.info(`Password reset for fact checker: ${factChecker.email} by admin ${req.user.userId}`);
+
+    res.json({
+      success: true,
+      message: 'Fact checker password reset successfully',
+      user_id: userId
+    });
+
+  } catch (error) {
+    logger.error('Reset fact checker password error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to reset fact checker password: ' + error.message
+    });
+  }
+};
+
+exports.deleteFactChecker = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    const factChecker = await FactChecker.findByUserId(userId);
+    if (!factChecker) {
+      return res.status(404).json({
+        success: false,
+        error: 'Fact checker not found'
+      });
+    }
+
+    await FactChecker.deleteByUserId(userId);
+
+    // Log admin activity
+    await AdminActivity.create({
+      admin_id: req.user.userId,
+      activity_type: 'fact_checker_deletion',
+      description: `Deleted fact checker ${factChecker.email}`,
+      target_user_id: userId,
+      changes_made: { action: 'fact_checker_deletion', email: factChecker.email }
+    });
+
+    logger.info(`Fact checker deleted: ${factChecker.email} by admin ${req.user.userId}`);
+
+    res.json({
+      success: true,
+      message: 'Fact checker deleted successfully',
+      user_id: userId
+    });
+
+  } catch (error) {
+    logger.error('Delete fact checker error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete fact checker: ' + error.message
+    });
+  }
+};
+
+// Admin Management
+exports.getAllAdmins = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+
+    const admins = await User.findAll({ 
+      role: 'admin', 
+      limit: parseInt(limit), 
+      offset: parseInt(offset) 
+    });
+
+    const total = await User.count({ role: 'admin' });
+
+    res.json({
+      success: true,
+      admins,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    logger.error('Get all admins error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch admins: ' + error.message
+    });
+  }
+};
+
+exports.resetAdminPassword = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const { newPassword } = req.body;
+
+    if (!newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'New password is required'
+      });
+    }
+
+    const admin = await User.findById(userId);
+    if (!admin || admin.role !== 'admin') {
+      return res.status(404).json({
+        success: false,
+        error: 'Admin not found'
+      });
+    }
+
+    // Prevent admin from resetting their own password via this endpoint
+    if (admin.id === req.user.userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Use profile settings to change your own password'
+      });
+    }
+
+    const passwordHash = await authService.hashPassword(newPassword);
+    await User.update(userId, { password_hash: passwordHash });
+
+    // Log admin activity
+    await AdminActivity.create({
+      admin_id: req.user.userId,
+      activity_type: 'admin_password_reset',
+      description: `Reset password for admin ${admin.email}`,
+      target_user_id: userId,
+      changes_made: { action: 'password_reset' }
+    });
+
+    logger.info(`Password reset for admin: ${admin.email} by admin ${req.user.userId}`);
+
+    res.json({
+      success: true,
+      message: 'Admin password reset successfully',
+      user_id: userId
+    });
+
+  } catch (error) {
+    logger.error('Reset admin password error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to reset admin password: ' + error.message
+    });
   }
 };
 
@@ -260,11 +657,15 @@ exports.approvePendingFactCheckers = async (req, res, next) => {
 
 exports.userAction = async (req, res, next) => {
   try {
-    const { userId, action, reason } = req.body;
+    const { userId } = req.params;
+    const { action, reason } = req.body;
 
     const user = await User.findById(userId);
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'User not found' 
+      });
     }
 
     let updateData = {};
@@ -292,7 +693,10 @@ exports.userAction = async (req, res, next) => {
         description = `Approved user registration ${userId}`;
         break;
       default:
-        return res.status(400).json({ error: 'Invalid action' });
+        return res.status(400).json({ 
+          success: false,
+          error: 'Invalid action' 
+        });
     }
 
     await User.update(userId, updateData);
@@ -317,6 +721,7 @@ exports.userAction = async (req, res, next) => {
     logger.info(`User action performed: ${action} on user ${userId} by admin ${req.user.userId}`);
 
     res.json({
+      success: true,
       message: `User ${action} successfully`,
       user_id: userId,
       action: action
@@ -324,7 +729,10 @@ exports.userAction = async (req, res, next) => {
 
   } catch (error) {
     logger.error('User action error:', error);
-    next(error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to perform user action: ' + error.message
+    });
   }
 };
 
@@ -338,30 +746,93 @@ exports.getDashboardStats = async (req, res, next) => {
       totalUsers,
       totalClaims,
       pendingClaims,
+      verifiedFalseClaims,
       activeFactCheckers,
-      pendingRegistrations
+      pendingRegistrations,
+      totalBlogs,
+      totalAdmins
     ] = await Promise.all([
-      User.count(), // FIXED: Changed from countAll() to count()
-      Claim.count(), // FIXED: Changed from countAll(timeframe) to count()
-      Claim.count({ where: { status: 'pending' } }), // FIXED: Changed from countByStatus()
-      FactChecker.count({ where: { is_active: true } }), // FIXED: Changed from countActive()
-      User.count({ where: { registration_status: 'pending' } }) // FIXED: Changed from countByRegistrationStatus()
+      User.countAll(),
+      Claim.countAll(),
+      Claim.countByStatus('pending'),
+      Claim.countVerifiedFalse(),
+      FactChecker.countActive(),
+      User.countByRegistrationStatus('pending'),
+      Blog.countAll(),
+      User.countByRole('admin')
     ]);
 
+    // Get recent activity
+    const recentUsers = await User.getRecentRegistrations(timeframe);
+    const recentClaims = await Claim.getRecentClaims(timeframe);
+
     res.json({
+      success: true,
       stats: {
         total_users: totalUsers,
         total_claims: totalClaims,
         pending_claims: pendingClaims,
+        verified_false_claims: verifiedFalseClaims,
         active_fact_checkers: activeFactCheckers,
-        pending_registrations: pendingRegistrations
+        pending_registrations: pendingRegistrations,
+        total_blogs: totalBlogs,
+        total_admins: totalAdmins
+      },
+      recent_activity: {
+        new_users: recentUsers,
+        new_claims: recentClaims
       },
       timeframe
     });
 
   } catch (error) {
     logger.error('Get dashboard stats error:', error);
-    next(error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch dashboard stats: ' + error.message
+    });
+  }
+};
+
+exports.getUsersOverview = async (req, res, next) => {
+  try {
+    const { timeframe = '30 days' } = req.query;
+
+    const overview = await User.getOverviewStats(timeframe);
+
+    res.json({
+      success: true,
+      overview,
+      timeframe
+    });
+
+  } catch (error) {
+    logger.error('Get users overview error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch users overview: ' + error.message
+    });
+  }
+};
+
+exports.getClaimsOverview = async (req, res, next) => {
+  try {
+    const { timeframe = '30 days' } = req.query;
+
+    const overview = await Claim.getOverviewStats(timeframe);
+
+    res.json({
+      success: true,
+      overview,
+      timeframe
+    });
+
+  } catch (error) {
+    logger.error('Get claims overview error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch claims overview: ' + error.message
+    });
   }
 };
 
@@ -372,15 +843,14 @@ exports.getFactCheckerActivity = async (req, res, next) => {
     let activity;
     if (userId) {
       // Get activity for specific fact checker
-      // FIXED: You'll need to implement this method in your FactChecker model
       activity = await FactChecker.getActivityStats(userId, timeframe);
     } else {
       // Get overall fact checker activity  
-      // FIXED: You'll need to implement this method in your FactChecker model
       activity = await FactChecker.getAllActivity(timeframe);
     }
 
     res.json({
+      success: true,
       activity,
       timeframe,
       user_id: userId || 'all'
@@ -388,7 +858,10 @@ exports.getFactCheckerActivity = async (req, res, next) => {
 
   } catch (error) {
     logger.error('Get fact checker activity error:', error);
-    next(error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch fact checker activity: ' + error.message
+    });
   }
 };
 
@@ -398,11 +871,11 @@ exports.getRegistrationRequests = async (req, res, next) => {
     const { status = 'pending', page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
 
-    // FIXED: These methods need to be implemented in your RegistrationRequest model
     const requests = await RegistrationRequest.findByStatus(status, limit, offset);
-    const total = await RegistrationRequest.count({ where: { status } }); // FIXED: Changed from countByStatus()
+    const total = await RegistrationRequest.countByStatus(status);
 
     res.json({
+      success: true,
       requests,
       pagination: {
         page: parseInt(page),
@@ -414,7 +887,10 @@ exports.getRegistrationRequests = async (req, res, next) => {
 
   } catch (error) {
     logger.error('Get registration requests error:', error);
-    next(error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch registration requests: ' + error.message
+    });
   }
 };
 
@@ -425,7 +901,10 @@ exports.approveRegistration = async (req, res, next) => {
 
     const request = await RegistrationRequest.findById(requestId);
     if (!request) {
-      return res.status(404).json({ error: 'Registration request not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Registration request not found' 
+      });
     }
 
     // Approve the request
@@ -458,13 +937,17 @@ exports.approveRegistration = async (req, res, next) => {
     logger.info(`Registration approved: ${requestId} by admin ${req.user.userId}`);
 
     res.json({
+      success: true,
       message: 'Registration approved successfully',
       request_id: requestId
     });
 
   } catch (error) {
     logger.error('Approve registration error:', error);
-    next(error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to approve registration: ' + error.message
+    });
   }
 };
 
@@ -475,7 +958,10 @@ exports.rejectRegistration = async (req, res, next) => {
 
     const request = await RegistrationRequest.findById(requestId);
     if (!request) {
-      return res.status(404).json({ error: 'Registration request not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Registration request not found' 
+      });
     }
 
     await RegistrationRequest.reject(requestId, req.user.userId, reason);
@@ -492,12 +978,50 @@ exports.rejectRegistration = async (req, res, next) => {
     logger.info(`Registration rejected: ${requestId} by admin ${req.user.userId}`);
 
     res.json({
+      success: true,
       message: 'Registration rejected successfully',
       request_id: requestId
     });
 
   } catch (error) {
     logger.error('Reject registration error:', error);
-    next(error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to reject registration: ' + error.message
+    });
+  }
+};
+
+exports.getSystemHealth = async (req, res, next) => {
+  try {
+    const db = require('../config/database');
+    const { isAvailable } = require('../config/redis');
+    
+    const dbStatus = await db.query('SELECT 1').then(() => 'healthy').catch(() => 'unhealthy');
+    const redisStatus = isAvailable() ? 'healthy' : 'unhealthy';
+    
+    const memoryUsage = process.memoryUsage();
+    const uptime = process.uptime();
+
+    res.json({
+      success: true,
+      health: {
+        database: dbStatus,
+        redis: redisStatus,
+        memory: {
+          rss: `${Math.round(memoryUsage.rss / 1024 / 1024)}MB`,
+          heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`,
+          heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`
+        },
+        uptime: `${Math.round(uptime)}s`
+      }
+    });
+
+  } catch (error) {
+    logger.error('Get system health error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch system health: ' + error.message
+    });
   }
 };

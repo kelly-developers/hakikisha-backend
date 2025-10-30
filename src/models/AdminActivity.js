@@ -34,7 +34,7 @@ class AdminActivity {
       if (error.code === '42P01' || error.message.includes('relation "admin_activities" does not exist')) {
         logger.info('Admin activities table missing, attempting to fix database schema...');
         try {
-          const DatabaseInitializer = require('./DatabaseInitializer');
+          const DatabaseInitializer = require('../config/database-init');
           await DatabaseInitializer.fixExistingDatabase();
           
           // Retry the operation

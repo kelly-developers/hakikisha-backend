@@ -13,7 +13,7 @@ class RegistrationRequest {
 
     const id = uuidv4();
     const query = `
-      INSERT INTO registration_requests (id, user_id, request_type, status, admin_notes, submitted_at)
+      INSERT INTO hakikisha.registration_requests (id, user_id, request_type, status, admin_notes, submitted_at)
       VALUES ($1, $2, $3, $4, $5, NOW())
       RETURNING *
     `;
@@ -32,8 +32,8 @@ class RegistrationRequest {
   static async findById(id) {
     const query = `
       SELECT rr.*, u.email, u.phone, u.role
-      FROM registration_requests rr
-      JOIN users u ON rr.user_id = u.id
+      FROM hakikisha.registration_requests rr
+      JOIN hakikisha.users u ON rr.user_id = u.id
       WHERE rr.id = $1
     `;
 
@@ -48,7 +48,7 @@ class RegistrationRequest {
 
   static async findByUserId(userId) {
     const query = `
-      SELECT * FROM registration_requests 
+      SELECT * FROM hakikisha.registration_requests 
       WHERE user_id = $1 
       ORDER BY submitted_at DESC
     `;
@@ -58,6 +58,31 @@ class RegistrationRequest {
       return result.rows[0];
     } catch (error) {
       logger.error('Error finding registration request by user ID:', error);
+      throw error;
+    }
+  }
+
+  static async findByStatus(status, limit = 50, offset = 0) {
+    const query = `
+      SELECT 
+        rr.*,
+        u.email,
+        u.phone,
+        u.created_at as user_created_at,
+        a.email as reviewed_by_email
+      FROM hakikisha.registration_requests rr
+      JOIN hakikisha.users u ON rr.user_id = u.id
+      LEFT JOIN hakikisha.users a ON rr.reviewed_by = a.id
+      WHERE rr.status = $1
+      ORDER BY rr.submitted_at DESC 
+      LIMIT $2 OFFSET $3
+    `;
+
+    try {
+      const result = await db.query(query, [status, limit, offset]);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error finding registration requests by status:', error);
       throw error;
     }
   }
@@ -72,9 +97,9 @@ class RegistrationRequest {
         u.phone,
         u.created_at as user_created_at,
         a.email as reviewed_by_email
-      FROM registration_requests rr
-      JOIN users u ON rr.user_id = u.id
-      LEFT JOIN users a ON rr.reviewed_by = a.id
+      FROM hakikisha.registration_requests rr
+      JOIN hakikisha.users u ON rr.user_id = u.id
+      LEFT JOIN hakikisha.users a ON rr.reviewed_by = a.id
       WHERE 1=1
     `;
 
@@ -107,7 +132,7 @@ class RegistrationRequest {
 
   static async updateStatus(id, status, reviewedBy = null, adminNotes = null) {
     const query = `
-      UPDATE registration_requests 
+      UPDATE hakikisha.registration_requests 
       SET status = $1, reviewed_by = $2, reviewed_at = NOW(), admin_notes = $3
       WHERE id = $4
       RETURNING *
@@ -130,13 +155,23 @@ class RegistrationRequest {
     return await this.updateStatus(id, 'rejected', reviewedBy, notes);
   }
 
+  static async countByStatus(status) {
+    try {
+      const result = await db.query('SELECT COUNT(*) FROM hakikisha.registration_requests WHERE status = $1', [status]);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting registration requests by status:', error);
+      return 0;
+    }
+  }
+
   static async getStats() {
     const query = `
       SELECT 
         status,
         request_type,
         COUNT(*) as count
-      FROM registration_requests 
+      FROM hakikisha.registration_requests 
       GROUP BY status, request_type
       ORDER BY request_type, status
     `;
@@ -153,7 +188,7 @@ class RegistrationRequest {
   static async getPendingCount() {
     const query = `
       SELECT COUNT(*) as count 
-      FROM registration_requests 
+      FROM hakikisha.registration_requests 
       WHERE status = 'pending'
     `;
 
@@ -168,7 +203,7 @@ class RegistrationRequest {
 
   static async deleteByUserId(userId) {
     const query = `
-      DELETE FROM registration_requests 
+      DELETE FROM hakikisha.registration_requests 
       WHERE user_id = $1
     `;
 
@@ -183,7 +218,7 @@ class RegistrationRequest {
 
   static async cleanupOldRequests(retentionDays = 90) {
     const query = `
-      DELETE FROM registration_requests 
+      DELETE FROM hakikisha.registration_requests 
       WHERE submitted_at < NOW() - INTERVAL '${retentionDays} days'
         AND status IN ('approved', 'rejected')
     `;

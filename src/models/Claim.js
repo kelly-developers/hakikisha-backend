@@ -15,7 +15,7 @@ class Claim {
 
     const id = uuidv4();
     const query = `
-      INSERT INTO claims (
+      INSERT INTO hakikisha.claims (
         id, user_id, title, description, category, media_type, media_url, 
         status, priority, submission_count, created_at
       )
@@ -51,12 +51,12 @@ class Claim {
              v.evidence_sources as human_sources,
              fc.id as fact_checker_id,
              u2.email as fact_checker_email
-      FROM claims c
-      LEFT JOIN users u ON c.user_id = u.id
-      LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
-      LEFT JOIN verdicts v ON c.human_verdict_id = v.id
-      LEFT JOIN users fc ON c.assigned_fact_checker_id = fc.id
-      LEFT JOIN users u2 ON av.edited_by_fact_checker_id = u2.id
+      FROM hakikisha.claims c
+      LEFT JOIN hakikisha.users u ON c.user_id = u.id
+      LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
+      LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
+      LEFT JOIN hakikisha.users fc ON c.assigned_fact_checker_id = fc.id
+      LEFT JOIN hakikisha.users u2 ON av.edited_by_fact_checker_id = u2.id
       WHERE c.id = $1
     `;
 
@@ -104,8 +104,8 @@ class Claim {
   static async findByStatus(status, limit = 20, offset = 0) {
     const query = `
       SELECT c.*, u.email as user_email
-      FROM claims c
-      LEFT JOIN users u ON c.user_id = u.id
+      FROM hakikisha.claims c
+      LEFT JOIN hakikisha.users u ON c.user_id = u.id
       WHERE c.status = $1
       ORDER BY c.created_at DESC
       LIMIT $2 OFFSET $3
@@ -122,7 +122,7 @@ class Claim {
 
   static async updateStatus(id, status, factCheckerId = null) {
     const query = `
-      UPDATE claims 
+      UPDATE hakikisha.claims 
       SET status = $1, 
           assigned_fact_checker_id = $2,
           updated_at = NOW()
@@ -141,7 +141,7 @@ class Claim {
 
   static async assignToFactChecker(claimId, factCheckerId) {
     const query = `
-      UPDATE claims 
+      UPDATE hakikisha.claims 
       SET assigned_fact_checker_id = $1, status = 'human_review', updated_at = NOW()
       WHERE id = $2
       RETURNING *
@@ -166,9 +166,9 @@ class Claim {
              CASE WHEN v.id IS NOT NULL THEN false ELSE true END as verified_by_ai,
              av.confidence_score as ai_confidence,
              av.is_edited_by_human
-      FROM claims c
-      LEFT JOIN verdicts v ON c.human_verdict_id = v.id
-      LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
+      FROM hakikisha.claims c
+      LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
+      LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
       WHERE c.is_trending = true 
         AND (v.verdict IS NOT NULL OR av.verdict IS NOT NULL)
       ORDER BY c.trending_score DESC, c.submission_count DESC
@@ -188,10 +188,10 @@ class Claim {
     let query = `
       SELECT c.*, u.email as user_email,
              COALESCE(v.verdict, av.verdict) as final_verdict
-      FROM claims c
-      LEFT JOIN users u ON c.user_id = u.id
-      LEFT JOIN verdicts v ON c.human_verdict_id = v.id
-      LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
+      FROM hakikisha.claims c
+      LEFT JOIN hakikisha.users u ON c.user_id = u.id
+      LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
+      LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
       WHERE (c.title ILIKE $1 OR c.description ILIKE $1)
     `;
 
@@ -224,9 +224,9 @@ class Claim {
              COALESCE(v.verdict, av.verdict) as verdict,
              COALESCE(v.evidence_sources, av.evidence_sources) as sources,
              CASE WHEN v.id IS NOT NULL THEN false ELSE true END as verified_by_ai
-      FROM claims c
-      LEFT JOIN verdicts v ON c.human_verdict_id = v.id
-      LEFT JOIN ai_verdicts av ON c.ai_verdict_id = av.id
+      FROM hakikisha.claims c
+      LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
+      LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
       WHERE c.user_id = $1
     `;
 
@@ -245,6 +245,123 @@ class Claim {
     } catch (error) {
       logger.error('Error getting user claims:', error);
       throw error;
+    }
+  }
+
+  static async countAll() {
+    try {
+      const result = await db.query('SELECT COUNT(*) FROM hakikisha.claims');
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting all claims:', error);
+      return 0;
+    }
+  }
+
+  static async countByStatus(status) {
+    try {
+      const result = await db.query('SELECT COUNT(*) FROM hakikisha.claims WHERE status = $1', [status]);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting claims by status:', error);
+      return 0;
+    }
+  }
+
+  static async countVerifiedFalse() {
+    try {
+      const result = await db.query(`
+        SELECT COUNT(*) 
+        FROM hakikisha.claims c
+        JOIN hakikisha.verdicts v ON c.id = v.claim_id
+        WHERE v.verdict = 'false' AND v.is_final = true
+      `);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting verified false claims:', error);
+      return 0;
+    }
+  }
+
+  static async countByUserId(userId) {
+    try {
+      const result = await db.query('SELECT COUNT(*) FROM hakikisha.claims WHERE user_id = $1', [userId]);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting claims by user:', error);
+      return 0;
+    }
+  }
+
+  static async getRecentClaims(timeframe = '7 days') {
+    try {
+      const result = await db.query(`
+        SELECT COUNT(*) 
+        FROM hakikisha.claims 
+        WHERE created_at >= NOW() - INTERVAL '${timeframe}'
+      `);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error getting recent claims:', error);
+      return 0;
+    }
+  }
+
+  static async getOverviewStats(timeframe = '30 days') {
+    try {
+      const [
+        totalClaims,
+        newClaims,
+        claimsByStatus,
+        claimsByCategory
+      ] = await Promise.all([
+        this.countAll(),
+        this.getRecentClaims(timeframe),
+        this.getClaimsByStatus(),
+        this.getClaimsByCategory(timeframe)
+      ]);
+
+      return {
+        total: totalClaims,
+        new: newClaims,
+        by_status: claimsByStatus,
+        by_category: claimsByCategory
+      };
+    } catch (error) {
+      logger.error('Error getting claim overview stats:', error);
+      throw error;
+    }
+  }
+
+  static async getClaimsByStatus() {
+    try {
+      const result = await db.query(`
+        SELECT status, COUNT(*) as count 
+        FROM hakikisha.claims 
+        GROUP BY status
+      `);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error getting claims by status:', error);
+      return [];
+    }
+  }
+
+  static async getClaimsByCategory(timeframe = '30 days') {
+    try {
+      const result = await db.query(`
+        SELECT category, COUNT(*) as count 
+        FROM hakikisha.claims 
+        WHERE created_at >= NOW() - INTERVAL '${timeframe}'
+        AND category IS NOT NULL
+        GROUP BY category
+        ORDER BY count DESC
+        LIMIT 10
+      `);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error getting claims by category:', error);
+      return [];
     }
   }
 }

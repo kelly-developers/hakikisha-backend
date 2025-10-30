@@ -303,6 +303,16 @@ class Blog {
       throw error;
     }
   }
+
+  static async countAll() {
+    try {
+      const result = await db.query('SELECT COUNT(*) FROM hakikisha.blog_articles');
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting all blogs:', error);
+      return 0;
+    }
+  }
 }
 
 module.exports = Blog;

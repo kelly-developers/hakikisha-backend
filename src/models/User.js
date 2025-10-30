@@ -58,6 +58,29 @@ class User {
     }
   }
 
+  static async findByIdWithDetails(userId) {
+    const query = `
+      SELECT 
+        u.*,
+        COALESCE(up.total_points, 0) as total_points,
+        COALESCE(up.current_streak, 0) as current_streak,
+        COALESCE(up.longest_streak, 0) as longest_streak,
+        up.last_activity_date,
+        up.points_reset_date
+      FROM hakikisha.users u
+      LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
+      WHERE u.id = $1
+    `;
+
+    try {
+      const result = await db.query(query, [userId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Error finding user with details:', error);
+      throw error;
+    }
+  }
+
   static async create(userData) {
     const {
       email,
@@ -197,7 +220,52 @@ class User {
     }
   }
 
-  // FIXED: Added count() method that accepts where conditions
+  static async findAllWithPoints({ role, status, search, limit = 20, offset = 0 } = {}) {
+    let query = `
+      SELECT 
+        u.*,
+        COALESCE(up.total_points, 0) as total_points,
+        COALESCE(up.current_streak, 0) as current_streak,
+        COALESCE(up.longest_streak, 0) as longest_streak,
+        up.last_activity_date
+      FROM hakikisha.users u
+      LEFT JOIN hakikisha.user_points up ON u.id = up.user_id
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    let paramCount = 1;
+
+    if (role) {
+      query += ` AND u.role = $${paramCount}`;
+      params.push(role);
+      paramCount++;
+    }
+
+    if (status) {
+      query += ` AND u.status = $${paramCount}`;
+      params.push(status);
+      paramCount++;
+    }
+
+    if (search) {
+      query += ` AND (u.email ILIKE $${paramCount} OR u.username ILIKE $${paramCount})`;
+      params.push(`%${search}%`);
+      paramCount++;
+    }
+
+    query += ` ORDER BY up.total_points DESC NULLS LAST, u.created_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+    params.push(limit, offset);
+
+    try {
+      const result = await db.query(query, params);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error finding users with points:', error);
+      throw error;
+    }
+  }
+
   static async count(where = {}) {
     let query = 'SELECT COUNT(*) FROM hakikisha.users WHERE 1=1';
     const params = [];
@@ -218,37 +286,65 @@ class User {
     }
   }
 
-  // Keep the existing countAll method for backward compatibility
-  static async countAll(options = {}) {
-    const { role, status, registration_status } = options;
-    
-    let query = 'SELECT COUNT(*) FROM hakikisha.users WHERE 1=1';
+  static async countAll() {
+    try {
+      const result = await db.query('SELECT COUNT(*) FROM hakikisha.users');
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting all users:', error);
+      return 0;
+    }
+  }
+
+  static async countWithFilters({ role, status, search } = {}) {
+    let query = `SELECT COUNT(*) FROM hakikisha.users u WHERE 1=1`;
     const params = [];
     let paramCount = 1;
 
     if (role) {
-      query += ` AND role = $${paramCount}`;
+      query += ` AND u.role = $${paramCount}`;
       params.push(role);
       paramCount++;
     }
 
     if (status) {
-      query += ` AND status = $${paramCount}`;
+      query += ` AND u.status = $${paramCount}`;
       params.push(status);
       paramCount++;
     }
 
-    if (registration_status) {
-      query += ` AND registration_status = $${paramCount}`;
-      params.push(registration_status);
+    if (search) {
+      query += ` AND (u.email ILIKE $${paramCount} OR u.username ILIKE $${paramCount})`;
+      params.push(`%${search}%`);
+      paramCount++;
     }
 
     try {
       const result = await db.query(query, params);
       return parseInt(result.rows[0].count);
     } catch (error) {
-      logger.error('Error counting users:', error);
+      logger.error('Error counting users with filters:', error);
       throw error;
+    }
+  }
+
+  static async countByRole(role) {
+    try {
+      const result = await db.query('SELECT COUNT(*) FROM hakikisha.users WHERE role = $1', [role]);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting users by role:', error);
+      return 0;
+    }
+  }
+
+  static async countByRegistrationStatus(status) {
+    try {
+      const result = await db.query('SELECT COUNT(*) FROM hakikisha.users WHERE registration_status = $1', [status]);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting users by registration status:', error);
+      return 0;
     }
   }
 
@@ -285,6 +381,30 @@ class User {
     }
   }
 
+  static async countActiveUsers(timeframe = '30 days') {
+    try {
+      const result = await db.query(`
+        SELECT COUNT(DISTINCT user_id) 
+        FROM hakikisha.points_history 
+        WHERE created_at >= NOW() - INTERVAL '${timeframe}'
+      `);
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting active users:', error);
+      return 0;
+    }
+  }
+
+  static async countVerifiedUsers() {
+    try {
+      const result = await db.query('SELECT COUNT(*) FROM hakikisha.users WHERE is_verified = true');
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error counting verified users:', error);
+      return 0;
+    }
+  }
+
   static async searchUsers(searchTerm, limit = 20, offset = 0) {
     const query = `
       SELECT * FROM hakikisha.users 
@@ -303,28 +423,100 @@ class User {
   }
 
   static async delete(userId) {
-    const query = 'DELETE FROM hakikisha.users WHERE id = $1 RETURNING *';
-    
     try {
-      const result = await db.query(query, [userId]);
-      return result.rows[0];
+      // Delete user points first (due to foreign key constraint)
+      await db.query('DELETE FROM hakikisha.user_points WHERE user_id = $1', [userId]);
+      
+      // Delete user
+      const result = await db.query('DELETE FROM hakikisha.users WHERE id = $1', [userId]);
+      return result.rowCount > 0;
     } catch (error) {
       logger.error('Error deleting user:', error);
       throw error;
     }
   }
 
-  // Add to User model
-  static async countByRegistrationStatus(status) {
+  static async getUserPoints(userId) {
     try {
-      const result = await db.query(
-        'SELECT COUNT(*) FROM hakikisha.users WHERE registration_status = $1',
-        [status]
-      );
+      const result = await db.query('SELECT * FROM hakikisha.user_points WHERE user_id = $1', [userId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Error getting user points:', error);
+      return null;
+    }
+  }
+
+  static async getLastActivity(userId) {
+    try {
+      const result = await db.query(`
+        SELECT created_at 
+        FROM hakikisha.points_history 
+        WHERE user_id = $1 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `, [userId]);
+      
+      return result.rows[0] ? result.rows[0].created_at : null;
+    } catch (error) {
+      logger.error('Error getting last activity:', error);
+      return null;
+    }
+  }
+
+  static async getRecentRegistrations(timeframe = '7 days') {
+    try {
+      const result = await db.query(`
+        SELECT COUNT(*) 
+        FROM hakikisha.users 
+        WHERE created_at >= NOW() - INTERVAL '${timeframe}'
+      `);
       return parseInt(result.rows[0].count);
     } catch (error) {
-      logger.error('Error counting users by registration status:', error);
+      logger.error('Error getting recent registrations:', error);
       return 0;
+    }
+  }
+
+  static async getOverviewStats(timeframe = '30 days') {
+    try {
+      const [
+        totalUsers,
+        newUsers,
+        activeUsers,
+        verifiedUsers,
+        usersByRole
+      ] = await Promise.all([
+        this.countAll(),
+        this.getRecentRegistrations(timeframe),
+        this.countActiveUsers(timeframe),
+        this.countVerifiedUsers(),
+        this.getUsersByRole()
+      ]);
+
+      return {
+        total: totalUsers,
+        new: newUsers,
+        active: activeUsers,
+        verified: verifiedUsers,
+        by_role: usersByRole
+      };
+    } catch (error) {
+      logger.error('Error getting user overview stats:', error);
+      throw error;
+    }
+  }
+
+  static async getUsersByRole() {
+    try {
+      const result = await db.query(`
+        SELECT role, COUNT(*) as count 
+        FROM hakikisha.users 
+        GROUP BY role
+      `);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error getting users by role:', error);
+      return [];
     }
   }
 
@@ -345,7 +537,6 @@ class User {
     }
   }
 
-  // Additional useful methods for admin functionality
   static async getPendingRegistrations(limit = 20, offset = 0) {
     return this.findByRegistrationStatus('pending', limit, offset);
   }

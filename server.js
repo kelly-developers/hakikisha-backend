@@ -280,10 +280,10 @@ const startServer = async () => {
 
     // Load admin routes
     try {
-      app.use('/api/v1/users', require('./src/routes/adminRoutes'));
-      console.log(' Admin user routes loaded: /api/v1/users');
+      app.use('/api/v1/admin', require('./src/routes/adminRoutes'));
+      console.log(' Admin routes loaded: /api/v1/admin');
     } catch (error) {
-      console.error(' Admin user routes failed to load:', error.message);
+      console.error(' Admin routes failed to load:', error.message);
     }
     
     // Load claims routes
@@ -340,15 +340,6 @@ const startServer = async () => {
           message: 'Blog module failed to load properly'
         });
       });
-    }
-
-    // Load admin routes
-    try {
-      const adminRoutes = require('./src/routes/adminRoutes');
-      app.use('/api/v1/admin', adminRoutes);
-      console.log(' Admin routes loaded: /api/v1/admin');
-    } catch (error) {
-      console.error(' Admin routes failed to load:', error.message);
     }
 
     // Load fact-checker route
