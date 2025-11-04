@@ -9,76 +9,29 @@ class PoeAIService {
       baseURL: "https://api.poe.com/v1",
     });
     this.model = "Web-Search";
-    this.systemPrompt = `You are Hakikisha AI, a comprehensive web search and research assistant specializing in:
-
-POLITICS:
-- Government policies and political systems
-- Political parties, leaders, and governance
-- Political analysis and commentary
-- International relations and diplomacy
-- Public administration and policy making
-
-CONSTITUTION AND LAW:
-- Constitutional law and amendments
-- Legal frameworks and jurisprudence
-- Legislative processes and bills
-- Human rights and civil liberties
-- Judicial systems and court rulings
-
-ELECTIONS:
-- Electoral processes and systems
-- Voting procedures and voter education
-- Election monitoring and observation
-- Campaign finance and regulations
-- Election results and analysis
-
-CIVIC SPACE:
-- Civil society organizations
-- Public participation and engagement
-- Freedom of assembly and association
-- Civic education and awareness
-- Community development initiatives
-
-GRAPEVINE:
-- Public discourse and rumors
-- Social media trends and conversations
-- Informal information networks
-- Public sentiment and opinion
-- Community chatter and discussions
-
-Provide accurate, comprehensive, and well-researched information from web sources. Always maintain objectivity and cite relevant information sources when possible.`;
-    this.disclaimer = "\n\n⚠️ This response is AI-generated and based on web search results. Please verify important information with official sources.";
+    this.systemPrompt = "You are Hakikisha AI, fact-checking assistant for Kenya. Provide accurate, helpful information about politics, constitution and law Civic space Grapevine, voting, and claims. Always be professional and unbiased.";
+    this.disclaimer = "\n\n⚠️ This response is AI-generated. CRECO is not responsible for any implications. Please verify important information.";
   }
 
-  async webSearch(query, searchContext = {}, hasAttachments = false, attachmentTypes = []) {
+  async chat(prompt, hasAttachments = false, attachmentTypes = []) {
     try {
-      if (!query || query.trim() === '') {
-        throw new Error('Search query is required');
+      if (!prompt || prompt.trim() === '') {
+        throw new Error('Prompt is required');
       }
 
       // Check cache first
-      const cacheKey = `ai:websearch:${JSON.stringify({ query, searchContext, hasAttachments, attachmentTypes })}`;
+      const cacheKey = `ai:chat:${JSON.stringify({ prompt, hasAttachments, attachmentTypes })}`;
       const cached = await cacheService.get(cacheKey);
       if (cached) {
-        logger.info('Web search cache hit');
+        logger.info('AI chat cache hit');
         return JSON.parse(cached);
       }
 
-      // Enhance query with context and attachment information
-      let enhancedQuery = query;
-      
-      // Add context if provided
-      if (Object.keys(searchContext).length > 0) {
-        const contextStr = Object.entries(searchContext)
-          .map(([key, value]) => `${key}: ${value}`)
-          .join(', ');
-        enhancedQuery = `Context: ${contextStr}\n\nSearch Query: ${query}`;
-      }
-
-      // Add attachment context
+      // Enhance prompt with attachment context
+      let enhancedPrompt = prompt;
       if (hasAttachments && attachmentTypes.length > 0) {
         const types = attachmentTypes.join(', ');
-        enhancedQuery = `[User attached ${types}]\n\n${enhancedQuery}`;
+        enhancedPrompt = `[User attached ${types}]\n\n${prompt}`;
       }
 
       const response = await this.client.chat.completions.create({
@@ -90,31 +43,29 @@ Provide accurate, comprehensive, and well-researched information from web source
           },
           {
             role: "user",
-            content: `Please perform a comprehensive web search and provide detailed information about: ${enhancedQuery}`
+            content: enhancedPrompt
           }
         ],
         temperature: 0.7,
-        max_tokens: 1200,
+        max_tokens: 800,
       });
 
       const responseText = response.choices[0].message.content;
       const result = {
         success: true,
-        query: query,
         response: responseText + this.disclaimer,
         model: this.model,
-        timestamp: new Date().toISOString(),
-        context: searchContext
+        timestamp: new Date().toISOString()
       };
 
-      // Cache for 10 minutes (shorter cache for web search)
-      await cacheService.set(cacheKey, JSON.stringify(result), 600);
+      // Cache for 5 minutes
+      await cacheService.set(cacheKey, JSON.stringify(result), 300);
       
-      logger.info('Web search completed successfully');
+      logger.info('AI chat completed successfully');
       return result;
 
     } catch (error) {
-      logger.error('Web search error:', error);
+      logger.error('AI chat error:', error);
       
       if (error.response?.status === 429) {
         throw new Error('Rate limit exceeded. Please try again later.');
@@ -122,156 +73,7 @@ Provide accurate, comprehensive, and well-researched information from web source
         throw new Error('AI service configuration error');
       }
       
-      throw new Error('Web search service temporarily unavailable');
-    }
-  }
-
-  async researchTopic(topic, category = 'general', depth = 'comprehensive') {
-    try {
-      if (!topic || topic.trim() === '') {
-        throw new Error('Research topic is required');
-      }
-
-      // Check cache
-      const cacheKey = `ai:research:${JSON.stringify({ topic, category, depth })}`;
-      const cached = await cacheService.get(cacheKey);
-      if (cached) {
-        logger.info('Research cache hit');
-        return JSON.parse(cached);
-      }
-
-      const researchPrompt = `
-Perform a detailed web research on the following topic:
-
-TOPIC: "${topic}"
-CATEGORY: ${category}
-DEPTH: ${depth}
-
-Please provide:
-1. Comprehensive overview and key facts
-2. Recent developments and current status
-3. Key stakeholders and involved parties
-4. Relevant legal/policy frameworks (if applicable)
-5. Public discourse and opinions
-6. Potential implications or future developments
-7. Recommended sources for further reading
-
-Structure your response clearly with appropriate sections.
-`;
-
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: "system",
-            content: "You are a professional research assistant. Conduct thorough web research and provide well-structured, comprehensive information on various topics."
-          },
-          {
-            role: "user",
-            content: researchPrompt
-          }
-        ],
-        temperature: 0.6,
-        max_tokens: 1500,
-      });
-
-      const responseText = response.choices[0].message.content;
-
-      const result = {
-        success: true,
-        topic: topic,
-        category: category,
-        research: responseText,
-        depth: depth,
-        timestamp: new Date().toISOString(),
-        disclaimer: "This research is AI-generated based on web sources. Verify critical information with primary sources."
-      };
-
-      // Cache for 30 minutes
-      await cacheService.set(cacheKey, JSON.stringify(result), 1800);
-
-      logger.info(`Research completed for topic: ${topic.substring(0, 50)}...`);
-      return result;
-
-    } catch (error) {
-      logger.error('Research error:', error);
-      
-      if (error.response?.status === 429) {
-        throw new Error('Rate limit exceeded. Please try again later.');
-      } else if (error.response?.status === 401) {
-        throw new Error('AI service configuration error');
-      }
-      
-      throw new Error('Failed to conduct research');
-    }
-  }
-
-  async analyzePublicDiscourse(text, sourceType = 'general') {
-    try {
-      if (!text || text.trim() === '') {
-        throw new Error('Text content is required for analysis');
-      }
-
-      const cacheKey = `ai:discourse:${JSON.stringify({ text: text.substring(0, 100), sourceType })}`;
-      const cached = await cacheService.get(cacheKey);
-      if (cached) {
-        logger.info('Discourse analysis cache hit');
-        return JSON.parse(cached);
-      }
-
-      const analysisPrompt = `
-Analyze this text from public discourse:
-
-TEXT: "${text}"
-SOURCE TYPE: ${sourceType}
-
-Provide analysis covering:
-1. Main themes and topics discussed
-2. Sentiment and tone analysis
-3. Key claims or assertions made
-4. Context and background information
-5. Potential biases or perspectives
-6. Relevance to current events or issues
-7. Suggested fact-checking points if needed
-
-Focus on understanding the discourse within the broader context of public conversation.
-`;
-
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: "system",
-            content: "You are a discourse analysis assistant. Analyze public conversations, social media content, and various forms of public communication to identify patterns, themes, and insights."
-          },
-          {
-            role: "user",
-            content: analysisPrompt
-          }
-        ],
-        temperature: 0.5,
-        max_tokens: 1000,
-      });
-
-      const responseText = response.choices[0].message.content;
-
-      const result = {
-        success: true,
-        analysis: responseText,
-        sourceType: sourceType,
-        timestamp: new Date().toISOString(),
-        disclaimer: "This analysis is AI-generated and should be considered as preliminary insights."
-      };
-
-      // Cache for 15 minutes
-      await cacheService.set(cacheKey, JSON.stringify(result), 900);
-
-      logger.info('Public discourse analysis completed');
-      return result;
-
-    } catch (error) {
-      logger.error('Discourse analysis error:', error);
-      throw new Error('Failed to analyze public discourse');
+      throw new Error('AI service temporarily unavailable');
     }
   }
 
@@ -290,20 +92,19 @@ Focus on understanding the discourse within the broader context of public conver
       }
 
       const factCheckPrompt = `
-Using web search capabilities, analyze this claim and provide a fact-check verdict:
+Analyze this claim and provide a fact-check verdict:
 
 Claim: "${claimText}"
 Category: ${category}
 Source: ${sourceLink || 'Not provided'}
 
 Provide:
-1. Verdict (verified/false/misleading/needs_context/unverified)
-2. Detailed explanation with evidence from web sources
+1. Verdict (verified/false/misleading/needs_context)
+2. Detailed explanation
 3. Confidence level (high/medium/low)
-4. Relevant context and background
-5. Suggested reliable sources to verify this claim
+4. Suggested reliable sources to verify this claim
 
-Format your response clearly and professionally based on comprehensive web research.
+Format your response clearly and professionally.
 `;
 
       const response = await this.client.chat.completions.create({
@@ -311,7 +112,7 @@ Format your response clearly and professionally based on comprehensive web resea
         messages: [
           {
             role: "system",
-            content: "You are a professional fact-checker using web search capabilities. Analyze claims objectively and provide evidence-based verdicts using current information from the web."
+            content: "You are a professional fact-checker. Analyze claims objectively and provide evidence-based verdicts."
           },
           {
             role: "user",
@@ -319,7 +120,7 @@ Format your response clearly and professionally based on comprehensive web resea
           }
         ],
         temperature: 0.5,
-        max_tokens: 1200,
+        max_tokens: 1000,
       });
 
       const responseText = response.choices[0].message.content;
@@ -331,10 +132,9 @@ Format your response clearly and professionally based on comprehensive web resea
           verdict: verdict,
           explanation: responseText,
           confidence: this._extractConfidence(responseText),
-          timestamp: new Date().toISOString(),
-          category: category
+          timestamp: new Date().toISOString()
         },
-        disclaimer: "This is an AI-generated preliminary verdict based on web search. Human verification is recommended for critical claims."
+        disclaimer: "This is an AI-generated preliminary verdict. Human fact-checkers will review this claim."
       };
 
       // Cache for 1 hour
@@ -363,15 +163,15 @@ Format your response clearly and professionally based on comprehensive web resea
       }
 
       const prompt = context 
-        ? `Analyze this image in the context of: ${context}. Consider relevance to politics, law, elections, civic space, or public discourse.`
-        : 'Analyze this image and describe what you see. If it relates to politics, law, elections, civic space, or public discourse, provide relevant insights.';
+        ? `Analyze this image in the context of: ${context}`
+        : 'Analyze this image and describe what you see. If it relates to elections or claims, provide relevant insights.';
 
       const response = await this.client.chat.completions.create({
         model: this.model,
         messages: [
           {
             role: "system",
-            content: "You are an image analysis assistant with web search capabilities. Describe images accurately and identify any content relevant to politics, law, elections, civic space, or public discourse."
+            content: "You are an image analysis assistant. Describe images accurately and identify any election-related or fact-check relevant content."
           },
           {
             role: "user",
@@ -379,13 +179,12 @@ Format your response clearly and professionally based on comprehensive web resea
           }
         ],
         temperature: 0.5,
-        max_tokens: 600,
+        max_tokens: 500,
       });
 
       const result = {
         success: true,
         analysis: response.choices[0].message.content,
-        context: context,
         timestamp: new Date().toISOString()
       };
 
@@ -404,21 +203,13 @@ Format your response clearly and professionally based on comprehensive web resea
     if (lowerText.includes('verdict: verified') || 
         lowerText.includes('verdict: true') || 
         lowerText.includes('this claim is true') ||
-        lowerText.includes('this claim is verified') ||
-        lowerText.includes('accurate')) {
+        lowerText.includes('this claim is verified')) {
       return 'verified';
     } else if (lowerText.includes('verdict: false') || 
-               lowerText.includes('this claim is false') ||
-               lowerText.includes('inaccurate')) {
+               lowerText.includes('this claim is false')) {
       return 'false';
-    } else if (lowerText.includes('misleading') ||
-               lowerText.includes('partially true') ||
-               lowerText.includes('out of context')) {
+    } else if (lowerText.includes('misleading')) {
       return 'misleading';
-    } else if (lowerText.includes('unverified') ||
-               lowerText.includes('cannot verify') ||
-               lowerText.includes('insufficient evidence')) {
-      return 'unverified';
     } else {
       return 'needs_context';
     }
@@ -427,13 +218,9 @@ Format your response clearly and professionally based on comprehensive web resea
   _extractConfidence(text) {
     const lowerText = text.toLowerCase();
     
-    if (lowerText.includes('high confidence') || 
-        lowerText.includes('confidence: high') ||
-        lowerText.includes('strong evidence')) {
+    if (lowerText.includes('high confidence') || lowerText.includes('confidence: high')) {
       return 'high';
-    } else if (lowerText.includes('low confidence') || 
-               lowerText.includes('confidence: low') ||
-               lowerText.includes('limited evidence')) {
+    } else if (lowerText.includes('low confidence') || lowerText.includes('confidence: low')) {
       return 'low';
     }
     
