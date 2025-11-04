@@ -264,7 +264,7 @@ class AIController {
     }
   }
 
-  // New method to handle verdict mapping for frontend
+  // New method tha handle verdict mapping for frontend
   async getVerdictDisplayInfo(verdict) {
     const verdictDisplayMap = {
       'true': {
