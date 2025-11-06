@@ -12,11 +12,10 @@ router.get('/unread-verdicts/count', notificationController.getUnreadVerdictCoun
 router.post('/verdicts/:verdictId/read', notificationController.markVerdictAsRead);
 router.post('/verdicts/read-all', notificationController.markAllVerdictsAsRead);
 
+// Health check
+router.get('/health', notificationController.getNotificationHealth);
+
 // General notifications
 router.get('/', notificationController.getUserNotifications);
-
-// Debug routes
-router.get('/debug/verdict/:verdictId', notificationController.debugVerdict);
-router.get('/debug/my-verdicts', notificationController.getUserVerdicts);
 
 module.exports = router;

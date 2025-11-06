@@ -13,10 +13,15 @@ class NotificationController {
         });
       }
 
-      // First, ensure user has notification settings
-      await this.ensureUserNotificationSettings(req.user.userId);
+      const userId = req.user.userId;
 
-      // Query to get unread verdict notifications
+      // First, ensure all required tables exist
+      await this.ensureRequiredTables();
+      
+      // Ensure user has notification settings
+      await this.ensureUserNotificationSettings(userId);
+
+      // SIMPLIFIED QUERY - Fixed version
       const query = `
         SELECT 
           v.id,
@@ -25,25 +30,30 @@ class NotificationController {
           v.created_at as "verdictDate",
           c.title as "claimTitle",
           c.id as "claimId",
-          fc.username as "factCheckerName",
+          COALESCE(fc.username, 'Fact Checker') as "factCheckerName",
           fc.profile_picture as "factCheckerAvatar",
           'verdict' as type
         FROM hakikisha.verdicts v
         INNER JOIN hakikisha.claims c ON v.claim_id = c.id
         LEFT JOIN hakikisha.users fc ON v.fact_checker_id = fc.id
         WHERE c.user_id = $1 
-          AND v.created_at > COALESCE(
-            (SELECT last_read_verdict FROM hakikisha.user_notification_settings WHERE user_id = $1),
-            '1970-01-01'::timestamp
+          AND (
+            v.created_at > COALESCE(
+              (SELECT last_read_verdict FROM hakikisha.user_notification_settings WHERE user_id = $1),
+              '1970-01-01'::timestamp
+            )
+            OR NOT EXISTS (
+              SELECT 1 FROM hakikisha.user_notification_settings WHERE user_id = $1
+            )
           )
         ORDER BY v.created_at DESC
         LIMIT 50
       `;
 
-      console.log('Executing unread verdicts query for user:', req.user.userId);
-      const result = await db.query(query, [req.user.userId]);
+      console.log('Executing unread verdicts query for user:', userId);
+      const result = await db.query(query, [userId]);
 
-      console.log(`Found ${result.rows.length} unread verdicts for user`);
+      console.log(`Found ${result.rows.length} unread verdicts for user ${userId}`);
 
       const verdicts = result.rows.map(verdict => ({
         id: verdict.id,
@@ -53,7 +63,7 @@ class NotificationController {
         verdictDate: verdict.verdictDate,
         claimTitle: verdict.claimTitle,
         claimId: verdict.claimId,
-        factCheckerName: verdict.factCheckerName || 'Fact Checker',
+        factCheckerName: verdict.factCheckerName,
         factCheckerAvatar: verdict.factCheckerAvatar,
         isRead: false
       }));
@@ -66,13 +76,29 @@ class NotificationController {
 
     } catch (error) {
       console.error('❌ Get unread verdicts error:', error);
-      logger.error('Get unread verdicts error:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        code: error.code,
+        detail: error.detail
+      });
+      
+      // More specific error response
+      if (error.code === '42P01') { // Table doesn't exist
+        return res.status(500).json({
+          success: false,
+          error: 'Database tables not properly initialized',
+          message: 'Please contact administrator to initialize database tables',
+          code: 'TABLE_MISSING'
+        });
+      }
       
       res.status(500).json({
         success: false,
         error: 'Failed to fetch unread verdicts',
-        message: 'Internal server error',
-        path: req.path
+        message: 'Database query failed',
+        path: req.path,
+        code: 'DATABASE_ERROR'
       });
     }
   }
@@ -88,26 +114,34 @@ class NotificationController {
         });
       }
 
-      // Ensure user has notification settings
-      await this.ensureUserNotificationSettings(req.user.userId);
+      const userId = req.user.userId;
 
-      // Query to count unread verdicts
+      // Ensure tables exist
+      await this.ensureRequiredTables();
+      await this.ensureUserNotificationSettings(userId);
+
+      // SIMPLIFIED COUNT QUERY
       const query = `
         SELECT COUNT(*) as count
         FROM hakikisha.verdicts v
         INNER JOIN hakikisha.claims c ON v.claim_id = c.id
         WHERE c.user_id = $1 
-          AND v.created_at > COALESCE(
-            (SELECT last_read_verdict FROM hakikisha.user_notification_settings WHERE user_id = $1),
-            '1970-01-01'::timestamp
+          AND (
+            v.created_at > COALESCE(
+              (SELECT last_read_verdict FROM hakikisha.user_notification_settings WHERE user_id = $1),
+              '1970-01-01'::timestamp
+            )
+            OR NOT EXISTS (
+              SELECT 1 FROM hakikisha.user_notification_settings WHERE user_id = $1
+            )
           )
       `;
 
-      console.log('Executing unread verdict count query for user:', req.user.userId);
-      const result = await db.query(query, [req.user.userId]);
+      console.log('Executing unread verdict count query for user:', userId);
+      const result = await db.query(query, [userId]);
 
       const count = parseInt(result.rows[0].count);
-      console.log(`Unread verdict count: ${count}`);
+      console.log(`Unread verdict count for user ${userId}: ${count}`);
 
       res.json({
         success: true,
@@ -116,7 +150,7 @@ class NotificationController {
 
     } catch (error) {
       console.error('❌ Get unread verdict count error:', error);
-      logger.error('Get unread verdict count error:', error);
+      console.error('Error details:', error.message);
       
       res.status(500).json({
         success: false,
@@ -146,55 +180,31 @@ class NotificationController {
         });
       }
 
-      // First, ensure user has notification settings
-      await this.ensureUserNotificationSettings(req.user.userId);
+      const userId = req.user.userId;
 
-      // Debug: Check if verdict exists and get details
-      const verdictDetailsQuery = `
-        SELECT v.id, v.claim_id, c.user_id as claim_user_id, c.title
+      // Ensure tables exist
+      await this.ensureRequiredTables();
+      await this.ensureUserNotificationSettings(userId);
+
+      // Check if verdict exists and belongs to user
+      const verdictCheckQuery = `
+        SELECT v.id 
         FROM hakikisha.verdicts v
         INNER JOIN hakikisha.claims c ON v.claim_id = c.id
-        WHERE v.id = $1
+        WHERE v.id = $1 AND c.user_id = $2
       `;
 
-      const verdictDetails = await db.query(verdictDetailsQuery, [verdictId]);
+      const verdictCheck = await db.query(verdictCheckQuery, [verdictId, userId]);
       
-      console.log('Verdict details:', {
-        verdictId: verdictId,
-        found: verdictDetails.rows.length > 0,
-        details: verdictDetails.rows[0] || 'Not found'
-      });
-
-      if (verdictDetails.rows.length === 0) {
-        console.log('❌ Verdict not found in database:', verdictId);
+      if (verdictCheck.rows.length === 0) {
+        console.log('Verdict not found or access denied:', { verdictId, userId });
         return res.status(404).json({
           success: false,
-          error: 'Verdict not found'
+          error: 'Verdict not found or access denied'
         });
       }
 
-      const verdict = verdictDetails.rows[0];
-      
-      // Check if the verdict belongs to a claim by this user
-      if (verdict.claim_user_id !== req.user.userId) {
-        console.log('❌ Verdict access denied - User mismatch:', {
-          verdictUserId: verdict.claim_user_id,
-          requestUserId: req.user.userId,
-          verdictId: verdictId
-        });
-        return res.status(403).json({
-          success: false,
-          error: 'Access denied to this verdict'
-        });
-      }
-
-      console.log('✅ Verdict found and access granted:', {
-        verdictId: verdict.id,
-        claimId: verdict.claim_id,
-        claimTitle: verdict.title
-      });
-
-      // Update user's last read verdict timestamp
+      // Update last read timestamp
       const updateQuery = `
         INSERT INTO hakikisha.user_notification_settings (user_id, last_read_verdict, updated_at)
         VALUES ($1, NOW(), NOW())
@@ -204,18 +214,17 @@ class NotificationController {
           updated_at = NOW()
       `;
 
-      await db.query(updateQuery, [req.user.userId]);
-      console.log('✅ Verdict marked as read for user:', req.user.userId);
+      await db.query(updateQuery, [userId]);
+      console.log('✅ Verdict marked as read for user:', userId);
 
       res.json({
         success: true,
-        message: 'Verdict marked as read successfully',
-        verdictId: verdictId
+        message: 'Verdict marked as read successfully'
       });
 
     } catch (error) {
       console.error('❌ Mark verdict as read error:', error);
-      logger.error('Mark verdict as read error:', error);
+      console.error('Error details:', error.message);
       
       res.status(500).json({
         success: false,
@@ -227,19 +236,21 @@ class NotificationController {
 
   async markAllVerdictsAsRead(req, res) {
     try {
-      console.log('📌 Mark All Verdicts as Read - User:', req.user.userId);
+      const userId = req.user.userId;
+      console.log('📌 Mark All Verdicts as Read - User:', userId);
 
-      if (!req.user || !req.user.userId) {
+      if (!userId) {
         return res.status(401).json({
           success: false,
           error: 'Authentication required'
         });
       }
 
-      // Ensure user has notification settings
-      await this.ensureUserNotificationSettings(req.user.userId);
+      // Ensure tables exist
+      await this.ensureRequiredTables();
+      await this.ensureUserNotificationSettings(userId);
 
-      // Update user's last read verdict timestamp to now
+      // Update last read timestamp to now
       const updateQuery = `
         INSERT INTO hakikisha.user_notification_settings (user_id, last_read_verdict, updated_at)
         VALUES ($1, NOW(), NOW())
@@ -249,8 +260,8 @@ class NotificationController {
           updated_at = NOW()
       `;
 
-      await db.query(updateQuery, [req.user.userId]);
-      console.log('✅ All verdicts marked as read for user:', req.user.userId);
+      await db.query(updateQuery, [userId]);
+      console.log('✅ All verdicts marked as read for user:', userId);
 
       res.json({
         success: true,
@@ -259,7 +270,7 @@ class NotificationController {
 
     } catch (error) {
       console.error('❌ Mark all verdicts as read error:', error);
-      logger.error('Mark all verdicts as read error:', error);
+      console.error('Error details:', error.message);
       
       res.status(500).json({
         success: false,
@@ -269,84 +280,67 @@ class NotificationController {
     }
   }
 
-  // Get all notifications (including verdicts, system, etc.)
-  async getUserNotifications(req, res) {
+  // Helper method to ensure required tables exist
+  async ensureRequiredTables() {
     try {
-      console.log('🔔 Get User Notifications - User:', req.user.userId);
+      console.log('🔧 Ensuring required tables exist...');
       
-      const { type, page = 1, limit = 20 } = req.query;
-      const offset = (page - 1) * limit;
+      // Check if verdicts table exists
+      const verdictsCheck = await db.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'hakikisha' 
+          AND table_name = 'verdicts'
+        )
+      `);
+      
+      const claimsCheck = await db.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'hakikisha' 
+          AND table_name = 'claims'
+        )
+      `);
+      
+      const settingsCheck = await db.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'hakikisha' 
+          AND table_name = 'user_notification_settings'
+        )
+      `);
 
-      // Ensure user has notification settings
-      await this.ensureUserNotificationSettings(req.user.userId);
+      console.log('Table existence check:', {
+        verdicts: verdictsCheck.rows[0].exists,
+        claims: claimsCheck.rows[0].exists,
+        notification_settings: settingsCheck.rows[0].exists
+      });
 
-      let notifications = [];
-      let totalCount = 0;
-
-      if (!type || type === 'verdict') {
-        // Get verdict notifications
-        const verdictQuery = `
-          SELECT 
-            v.id,
-            v.verdict,
-            v.explanation,
-            v.created_at as "createdAt",
-            c.title as "claimTitle",
-            c.id as "claimId",
-            fc.username as "senderName",
-            fc.profile_picture as "senderAvatar",
-            'verdict' as type,
-            (v.created_at <= COALESCE(
-              (SELECT last_read_verdict FROM hakikisha.user_notification_settings WHERE user_id = $1),
-              '1970-01-01'::timestamp
-            )) as "isRead"
-          FROM hakikisha.verdicts v
-          INNER JOIN hakikisha.claims c ON v.claim_id = c.id
-          LEFT JOIN hakikisha.users fc ON v.fact_checker_id = fc.id
-          WHERE c.user_id = $1
-          ORDER BY v.created_at DESC
-          LIMIT $2 OFFSET $3
-        `;
-
-        const countQuery = `
-          SELECT COUNT(*) as count
-          FROM hakikisha.verdicts v
-          INNER JOIN hakikisha.claims c ON v.claim_id = c.id
-          WHERE c.user_id = $1
-        `;
-
-        const [verdictResult, countResult] = await Promise.all([
-          db.query(verdictQuery, [req.user.userId, limit, offset]),
-          db.query(countQuery, [req.user.userId])
-        ]);
-
-        notifications = verdictResult.rows;
-        totalCount = parseInt(countResult.rows[0].count);
+      if (!verdictsCheck.rows[0].exists || !claimsCheck.rows[0].exists) {
+        throw new Error('Required database tables are missing. Please run database initialization.');
       }
 
-      console.log(`Found ${notifications.length} notifications for user`);
-
-      res.json({
-        success: true,
-        notifications: notifications,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total: totalCount,
-          pages: Math.ceil(totalCount / limit)
-        }
-      });
+      // Create notification settings table if it doesn't exist
+      if (!settingsCheck.rows[0].exists) {
+        console.log('Creating missing user_notification_settings table...');
+        await db.query(`
+          CREATE TABLE IF NOT EXISTS hakikisha.user_notification_settings (
+            user_id UUID PRIMARY KEY REFERENCES hakikisha.users(id) ON DELETE CASCADE,
+            last_read_verdict TIMESTAMP WITH TIME ZONE DEFAULT '1970-01-01'::timestamp,
+            email_notifications BOOLEAN DEFAULT TRUE,
+            push_notifications BOOLEAN DEFAULT TRUE,
+            verdict_notifications BOOLEAN DEFAULT TRUE,
+            system_notifications BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+          )
+        `);
+        console.log('✅ user_notification_settings table created');
+      }
 
     } catch (error) {
-      console.error('❌ Get user notifications error:', error);
-      logger.error('Get user notifications error:', error);
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch notifications',
-        message: 'Internal server error',
-        path: req.path
-      });
+      console.error('❌ Error ensuring required tables:', error);
+      throw error;
     }
   }
 
@@ -372,104 +366,64 @@ class NotificationController {
     }
   }
 
-  // Debug endpoint to check verdict existence
-  async debugVerdict(req, res) {
-    try {
-      const { verdictId } = req.params;
-      console.log('🔍 Debug Verdict - ID:', verdictId);
-
-      if (!verdictId) {
-        return res.status(400).json({
-          success: false,
-          error: 'Verdict ID is required'
-        });
-      }
-
-      // Check if verdict exists
-      const verdictQuery = `
-        SELECT 
-          v.id,
-          v.verdict,
-          v.created_at,
-          c.id as claim_id,
-          c.title as claim_title,
-          c.user_id as claim_user_id,
-          u.email as claim_user_email
-        FROM hakikisha.verdicts v
-        LEFT JOIN hakikisha.claims c ON v.claim_id = c.id
-        LEFT JOIN hakikisha.users u ON c.user_id = u.id
-        WHERE v.id = $1
-      `;
-
-      const verdictResult = await db.query(verdictQuery, [verdictId]);
-
-      if (verdictResult.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          error: 'Verdict not found in database',
-          verdictId: verdictId
-        });
-      }
-
-      const verdict = verdictResult.rows[0];
-
-      res.json({
-        success: true,
-        verdict: verdict,
-        exists: true,
-        claim: {
-          id: verdict.claim_id,
-          title: verdict.claim_title,
-          user_id: verdict.claim_user_id,
-          user_email: verdict.claim_user_email
-        }
-      });
-
-    } catch (error) {
-      console.error('Debug verdict error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Debug failed',
-        message: error.message
-      });
-    }
-  }
-
-  // Get user's all verdicts for debugging
-  async getUserVerdicts(req, res) {
+  // Health check endpoint for notifications
+  async getNotificationHealth(req, res) {
     try {
       const userId = req.user.userId;
-      console.log('🔍 Get User Verdicts - User:', userId);
+      
+      const healthChecks = {
+        user_exists: false,
+        tables_exist: false,
+        notification_settings_exist: false,
+        user_has_claims: false,
+        user_has_verdicts: false
+      };
 
-      const query = `
-        SELECT 
-          v.id,
-          v.verdict,
-          v.created_at,
-          c.id as claim_id,
-          c.title as claim_title
-        FROM hakikisha.verdicts v
-        INNER JOIN hakikisha.claims c ON v.claim_id = c.id
+      // Check user exists
+      const userCheck = await db.query('SELECT id FROM hakikisha.users WHERE id = $1', [userId]);
+      healthChecks.user_exists = userCheck.rows.length > 0;
+
+      // Check tables exist
+      const tables = ['verdicts', 'claims', 'user_notification_settings'];
+      for (const table of tables) {
+        const tableCheck = await db.query(`
+          SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = 'hakikisha' AND table_name = $1
+          )
+        `, [table]);
+        healthChecks.tables_exist = tableCheck.rows[0].exists;
+        if (!healthChecks.tables_exist) break;
+      }
+
+      // Check notification settings
+      const settingsCheck = await db.query('SELECT user_id FROM hakikisha.user_notification_settings WHERE user_id = $1', [userId]);
+      healthChecks.notification_settings_exist = settingsCheck.rows.length > 0;
+
+      // Check user claims
+      const claimsCheck = await db.query('SELECT COUNT(*) FROM hakikisha.claims WHERE user_id = $1', [userId]);
+      healthChecks.user_has_claims = parseInt(claimsCheck.rows[0].count) > 0;
+
+      // Check user verdicts
+      const verdictsCheck = await db.query(`
+        SELECT COUNT(*) 
+        FROM hakikisha.verdicts v 
+        INNER JOIN hakikisha.claims c ON v.claim_id = c.id 
         WHERE c.user_id = $1
-        ORDER BY v.created_at DESC
-        LIMIT 50
-      `;
-
-      const result = await db.query(query, [userId]);
-
-      console.log(`Found ${result.rows.length} verdicts for user ${userId}`);
+      `, [userId]);
+      healthChecks.user_has_verdicts = parseInt(verdictsCheck.rows[0].count) > 0;
 
       res.json({
         success: true,
-        verdicts: result.rows,
-        count: result.rows.length
+        health: healthChecks,
+        user_id: userId
       });
 
     } catch (error) {
-      console.error('Get user verdicts error:', error);
+      console.error('Notification health check error:', error);
       res.status(500).json({
         success: false,
-        error: 'Failed to get user verdicts',
+        error: 'Health check failed',
         message: error.message
       });
     }
