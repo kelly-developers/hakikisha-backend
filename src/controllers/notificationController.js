@@ -1,268 +1,309 @@
-const Notification = require('../models/Notification');
-const User = require('../models/User');
+const db = require('../config/database');
 const logger = require('../utils/logger');
-const Constants = require('../config/constants');
 
 class NotificationController {
-  async getUserNotifications(req, res, next) {
+  async getUnreadVerdicts(req, res) {
     try {
-      const { unread, type, page = 1, limit = 20 } = req.query;
-      const offset = (page - 1) * limit;
-
-      let notifications;
-      let total;
-
-      if (unread === 'true') {
-        notifications = await Notification.findUnreadByUserId(req.user.userId, limit, offset, type);
-        total = await Notification.countUnreadByUserId(req.user.userId, type);
-      } else {
-        notifications = await Notification.findByUserId(req.user.userId, limit, offset, type);
-        total = await Notification.countByUserId(req.user.userId, type);
+      console.log('🔔 Get Unread Verdicts - User:', req.user.userId);
+      
+      if (!req.user || !req.user.userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
       }
 
+      // Query to get unread verdict notifications
+      const query = `
+        SELECT 
+          v.id,
+          v.verdict,
+          v.explanation,
+          v.created_at as "verdictDate",
+          c.title as "claimTitle",
+          c.id as "claimId",
+          fc.username as "factCheckerName",
+          fc.profile_picture as "factCheckerAvatar",
+          'verdict' as type
+        FROM hakikisha.verdicts v
+        INNER JOIN hakikisha.claims c ON v.claim_id = c.id
+        LEFT JOIN hakikisha.users fc ON v.fact_checker_id = fc.id
+        WHERE c.user_id = $1 
+          AND v.created_at > COALESCE(
+            (SELECT last_read_verdict FROM hakikisha.user_notification_settings WHERE user_id = $1),
+            '1970-01-01'::timestamp
+          )
+        ORDER BY v.created_at DESC
+        LIMIT 50
+      `;
+
+      console.log('Executing unread verdicts query for user:', req.user.userId);
+      const result = await db.query(query, [req.user.userId]);
+
+      console.log(`Found ${result.rows.length} unread verdicts for user`);
+
+      const verdicts = result.rows.map(verdict => ({
+        id: verdict.id,
+        type: verdict.type,
+        verdict: verdict.verdict,
+        explanation: verdict.explanation,
+        verdictDate: verdict.verdictDate,
+        claimTitle: verdict.claimTitle,
+        claimId: verdict.claimId,
+        factCheckerName: verdict.factCheckerName || 'Fact Checker',
+        factCheckerAvatar: verdict.factCheckerAvatar,
+        isRead: false
+      }));
+
       res.json({
-        notifications,
+        success: true,
+        verdicts: verdicts,
+        count: verdicts.length
+      });
+
+    } catch (error) {
+      console.error('❌ Get unread verdicts error:', error);
+      logger.error('Get unread verdicts error:', error);
+      
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch unread verdicts',
+        message: 'Internal server error',
+        path: req.path
+      });
+    }
+  }
+
+  async getUnreadVerdictCount(req, res) {
+    try {
+      console.log('🔔 Get Unread Verdict Count - User:', req.user.userId);
+      
+      if (!req.user || !req.user.userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+      }
+
+      // Query to count unread verdicts
+      const query = `
+        SELECT COUNT(*) as count
+        FROM hakikisha.verdicts v
+        INNER JOIN hakikisha.claims c ON v.claim_id = c.id
+        WHERE c.user_id = $1 
+          AND v.created_at > COALESCE(
+            (SELECT last_read_verdict FROM hakikisha.user_notification_settings WHERE user_id = $1),
+            '1970-01-01'::timestamp
+          )
+      `;
+
+      console.log('Executing unread verdict count query for user:', req.user.userId);
+      const result = await db.query(query, [req.user.userId]);
+
+      const count = parseInt(result.rows[0].count);
+      console.log(`Unread verdict count: ${count}`);
+
+      res.json({
+        success: true,
+        count: count
+      });
+
+    } catch (error) {
+      console.error('❌ Get unread verdict count error:', error);
+      logger.error('Get unread verdict count error:', error);
+      
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch unread verdict count',
+        message: 'Internal server error',
+        path: req.path
+      });
+    }
+  }
+
+  async markVerdictAsRead(req, res) {
+    try {
+      const { verdictId } = req.params;
+      console.log('📌 Mark Verdict as Read - User:', req.user.userId, 'Verdict:', verdictId);
+
+      if (!req.user || !req.user.userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+      }
+
+      if (!verdictId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Verdict ID is required'
+        });
+      }
+
+      // Verify the verdict belongs to a claim by this user
+      const verifyQuery = `
+        SELECT v.id 
+        FROM hakikisha.verdicts v
+        INNER JOIN hakikisha.claims c ON v.claim_id = c.id
+        WHERE v.id = $1 AND c.user_id = $2
+      `;
+
+      const verifyResult = await db.query(verifyQuery, [verdictId, req.user.userId]);
+      
+      if (verifyResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'Verdict not found or access denied'
+        });
+      }
+
+      // Update user's last read verdict timestamp
+      const updateQuery = `
+        INSERT INTO hakikisha.user_notification_settings (user_id, last_read_verdict, updated_at)
+        VALUES ($1, NOW(), NOW())
+        ON CONFLICT (user_id) 
+        DO UPDATE SET 
+          last_read_verdict = NOW(),
+          updated_at = NOW()
+      `;
+
+      await db.query(updateQuery, [req.user.userId]);
+      console.log('✅ Verdict marked as read for user:', req.user.userId);
+
+      res.json({
+        success: true,
+        message: 'Verdict marked as read successfully'
+      });
+
+    } catch (error) {
+      console.error('❌ Mark verdict as read error:', error);
+      logger.error('Mark verdict as read error:', error);
+      
+      res.status(500).json({
+        success: false,
+        error: 'Failed to mark verdict as read',
+        message: 'Internal server error'
+      });
+    }
+  }
+
+  async markAllVerdictsAsRead(req, res) {
+    try {
+      console.log('📌 Mark All Verdicts as Read - User:', req.user.userId);
+
+      if (!req.user || !req.user.userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'Authentication required'
+        });
+      }
+
+      // Update user's last read verdict timestamp to now
+      const updateQuery = `
+        INSERT INTO hakikisha.user_notification_settings (user_id, last_read_verdict, updated_at)
+        VALUES ($1, NOW(), NOW())
+        ON CONFLICT (user_id) 
+        DO UPDATE SET 
+          last_read_verdict = NOW(),
+          updated_at = NOW()
+      `;
+
+      await db.query(updateQuery, [req.user.userId]);
+      console.log('✅ All verdicts marked as read for user:', req.user.userId);
+
+      res.json({
+        success: true,
+        message: 'All verdicts marked as read successfully'
+      });
+
+    } catch (error) {
+      console.error('❌ Mark all verdicts as read error:', error);
+      logger.error('Mark all verdicts as read error:', error);
+      
+      res.status(500).json({
+        success: false,
+        error: 'Failed to mark all verdicts as read',
+        message: 'Internal server error'
+      });
+    }
+  }
+
+  // Get all notifications (including verdicts, system, etc.)
+  async getUserNotifications(req, res) {
+    try {
+      console.log('🔔 Get User Notifications - User:', req.user.userId);
+      
+      const { type, page = 1, limit = 20 } = req.query;
+      const offset = (page - 1) * limit;
+
+      let notifications = [];
+      let totalCount = 0;
+
+      if (!type || type === 'verdict') {
+        // Get verdict notifications
+        const verdictQuery = `
+          SELECT 
+            v.id,
+            v.verdict,
+            v.explanation,
+            v.created_at as "createdAt",
+            c.title as "claimTitle",
+            c.id as "claimId",
+            fc.username as "senderName",
+            fc.profile_picture as "senderAvatar",
+            'verdict' as type,
+            (v.created_at <= COALESCE(
+              (SELECT last_read_verdict FROM hakikisha.user_notification_settings WHERE user_id = $1),
+              '1970-01-01'::timestamp
+            )) as "isRead"
+          FROM hakikisha.verdicts v
+          INNER JOIN hakikisha.claims c ON v.claim_id = c.id
+          LEFT JOIN hakikisha.users fc ON v.fact_checker_id = fc.id
+          WHERE c.user_id = $1
+          ORDER BY v.created_at DESC
+          LIMIT $2 OFFSET $3
+        `;
+
+        const countQuery = `
+          SELECT COUNT(*) as count
+          FROM hakikisha.verdicts v
+          INNER JOIN hakikisha.claims c ON v.claim_id = c.id
+          WHERE c.user_id = $1
+        `;
+
+        const [verdictResult, countResult] = await Promise.all([
+          db.query(verdictQuery, [req.user.userId, limit, offset]),
+          db.query(countQuery, [req.user.userId])
+        ]);
+
+        notifications = verdictResult.rows;
+        totalCount = parseInt(countResult.rows[0].count);
+      }
+
+      console.log(`Found ${notifications.length} notifications for user`);
+
+      res.json({
+        success: true,
+        notifications: notifications,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
-          total,
-          pages: Math.ceil(total / limit)
+          total: totalCount,
+          pages: Math.ceil(totalCount / limit)
         }
       });
 
     } catch (error) {
+      console.error('❌ Get user notifications error:', error);
       logger.error('Get user notifications error:', error);
-      next(error);
-    }
-  }
-
-  async getNotification(req, res, next) {
-    try {
-      const { id } = req.params;
-
-      const notification = await Notification.findById(id);
-      if (!notification) {
-        return res.status(404).json({ error: Constants.ERROR_MESSAGES.NOT_FOUND });
-      }
-
-      // Verify ownership
-      if (notification.user_id !== req.user.userId) {
-        return res.status(403).json({ error: Constants.ERROR_MESSAGES.FORBIDDEN });
-      }
-
-      res.json({
-        notification
+      
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch notifications',
+        message: 'Internal server error',
+        path: req.path
       });
-
-    } catch (error) {
-      logger.error('Get notification error:', error);
-      next(error);
     }
-  }
-
-  async markAsRead(req, res, next) {
-    try {
-      const { id } = req.params;
-
-      const notification = await Notification.markAsRead(id);
-      if (!notification) {
-        return res.status(404).json({ error: 'Notification not found' });
-      }
-
-      // Verify ownership
-      if (notification.user_id !== req.user.userId) {
-        return res.status(403).json({ error: Constants.ERROR_MESSAGES.FORBIDDEN });
-      }
-
-      res.json({
-        message: 'Notification marked as read',
-        notification
-      });
-
-    } catch (error) {
-      logger.error('Mark notification as read error:', error);
-      next(error);
-    }
-  }
-
-  async markAllAsRead(req, res, next) {
-    try {
-      const { type } = req.body;
-
-      const updatedCount = await Notification.markAllAsRead(req.user.userId, type);
-
-      res.json({
-        message: `Marked ${updatedCount} notifications as read`,
-        updated_count: updatedCount
-      });
-
-    } catch (error) {
-      logger.error('Mark all notifications as read error:', error);
-      next(error);
-    }
-  }
-
-  async getUnreadCount(req, res, next) {
-    try {
-      const { type } = req.query;
-
-      const unreadCount = await Notification.getUnreadCount(req.user.userId, type);
-
-      res.json({
-        unread_count: unreadCount
-      });
-
-    } catch (error) {
-      logger.error('Get unread notification count error:', error);
-      next(error);
-    }
-  }
-
-  async deleteNotification(req, res, next) {
-    try {
-      const { id } = req.params;
-
-      const notification = await Notification.findById(id);
-      if (!notification) {
-        return res.status(404).json({ error: Constants.ERROR_MESSAGES.NOT_FOUND });
-      }
-
-      // Verify ownership
-      if (notification.user_id !== req.user.userId) {
-        return res.status(403).json({ error: Constants.ERROR_MESSAGES.FORBIDDEN });
-      }
-
-      await Notification.delete(id);
-
-      res.json({
-        message: 'Notification deleted successfully'
-      });
-
-    } catch (error) {
-      logger.error('Delete notification error:', error);
-      next(error);
-    }
-  }
-
-  async clearAllNotifications(req, res, next) {
-    try {
-      const { type } = req.body;
-
-      const deletedCount = await Notification.clearAllByUserId(req.user.userId, type);
-
-      res.json({
-        message: `Cleared ${deletedCount} notifications`,
-        deleted_count: deletedCount
-      });
-
-    } catch (error) {
-      logger.error('Clear all notifications error:', error);
-      next(error);
-    }
-  }
-
-  async getNotificationPreferences(req, res, next) {
-    try {
-      const user = await User.findById(req.user.userId);
-      const preferences = await Notification.getUserPreferences(req.user.userId);
-
-      res.json({
-        preferences: preferences || this.getDefaultPreferences(),
-        email: user.email,
-        push_enabled: true // This would come from a separate configuration
-      });
-
-    } catch (error) {
-      logger.error('Get notification preferences error:', error);
-      next(error);
-    }
-  }
-
-  async updateNotificationPreferences(req, res, next) {
-    try {
-      const { preferences } = req.body;
-
-      if (!preferences || typeof preferences !== 'object') {
-        return res.status(400).json({ error: 'Valid preferences object is required' });
-      }
-
-      await Notification.updateUserPreferences(req.user.userId, preferences);
-
-      res.json({
-        message: 'Notification preferences updated successfully',
-        preferences
-      });
-
-    } catch (error) {
-      logger.error('Update notification preferences error:', error);
-      next(error);
-    }
-  }
-
-  async createNotification(req, res, next) {
-    try {
-      // This endpoint is typically for admins to send system-wide notifications
-      if (req.user.role !== Constants.ROLES.ADMIN) {
-        return res.status(403).json({ error: Constants.ERROR_MESSAGES.FORBIDDEN });
-      }
-
-      const { user_ids, type, title, message, related_entity_type, related_entity_id } = req.body;
-
-      if (!title || !message || !type) {
-        return res.status(400).json({ error: 'Title, message, and type are required' });
-      }
-
-      const notifications = [];
-      const batchSize = 100; // Process in batches to avoid overwhelming the system
-
-      // If user_ids is provided, send to specific users, otherwise send to all users
-      const targetUserIds = user_ids || await this.getAllUserIds();
-
-      for (let i = 0; i < targetUserIds.length; i += batchSize) {
-        const batch = targetUserIds.slice(i, i + batchSize);
-        const batchNotifications = batch.map(user_id => ({
-          user_id,
-          type,
-          title,
-          message,
-          related_entity_type,
-          related_entity_id
-        }));
-
-        const created = await Notification.createBatch(batchNotifications);
-        notifications.push(...created);
-      }
-
-      logger.info(`Admin created ${notifications.length} notifications of type: ${type}`);
-
-      res.status(201).json({
-        message: `Notifications created successfully for ${notifications.length} users`,
-        notifications_count: notifications.length,
-        type
-      });
-
-    } catch (error) {
-      logger.error('Create notification error:', error);
-      next(error);
-    }
-  }
-
-  async getAllUserIds() {
-    // This would typically query the database for all active user IDs
-    // For now, return an empty array as a placeholder
-    return [];
-  }
-
-  getDefaultPreferences() {
-    return {
-      verdict_ready: true,
-      claim_assigned: true,
-      system_alert: true,
-      blog_published: true,
-      trending_topic: true,
-      email_notifications: true,
-      push_notifications: true
-    };
   }
 }
 

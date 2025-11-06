@@ -47,6 +47,7 @@ class DatabaseInitializer {
       await this.createAIVerdictsTable();
       await this.createVerdictsTable();
       await this.createFactCheckerActivitiesTable();
+      await this.createNotificationSettingsTable(); // ADDED: Notification settings table
       
       console.log('✅ Essential tables created/verified successfully!');
     } catch (error) {
@@ -120,6 +121,52 @@ class DatabaseInitializer {
     } catch (error) {
       console.error('❌ Error creating users table:', error);
       throw error;
+    }
+  }
+
+  static async createNotificationSettingsTable() {
+    try {
+      const query = `
+        CREATE TABLE IF NOT EXISTS hakikisha.user_notification_settings (
+          user_id UUID PRIMARY KEY REFERENCES hakikisha.users(id) ON DELETE CASCADE,
+          last_read_verdict TIMESTAMP WITH TIME ZONE DEFAULT '1970-01-01'::timestamp,
+          email_notifications BOOLEAN DEFAULT TRUE,
+          push_notifications BOOLEAN DEFAULT TRUE,
+          verdict_notifications BOOLEAN DEFAULT TRUE,
+          system_notifications BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await db.query(query);
+      console.log('✅ User notification settings table created/verified');
+
+      // Initialize notification settings for existing users
+      await this.initializeNotificationSettings();
+      
+    } catch (error) {
+      console.error('❌ Error creating notification settings table:', error);
+      throw error;
+    }
+  }
+
+  static async initializeNotificationSettings() {
+    try {
+      console.log('Initializing notification settings for existing users...');
+      
+      const users = await db.query('SELECT id FROM hakikisha.users');
+      
+      for (const user of users.rows) {
+        await db.query(`
+          INSERT INTO hakikisha.user_notification_settings (user_id)
+          VALUES ($1)
+          ON CONFLICT (user_id) DO NOTHING
+        `, [user.id]);
+      }
+
+      console.log(`✅ Notification settings initialized for ${users.rows.length} users`);
+    } catch (error) {
+      console.error('❌ Error initializing notification settings:', error);
     }
   }
 
@@ -487,7 +534,12 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_blog_comments_blog_id ON hakikisha.blog_comments(blog_id)',
       'CREATE INDEX IF NOT EXISTS idx_blog_comments_user_id ON hakikisha.blog_comments(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_blog_likes_blog_id ON hakikisha.blog_likes(blog_id)',
-      'CREATE INDEX IF NOT EXISTS idx_blog_likes_user_id ON hakikisha.blog_likes(user_id)'
+      'CREATE INDEX IF NOT EXISTS idx_blog_likes_user_id ON hakikisha.blog_likes(user_id)',
+      
+      // NEW: Notification indexes
+      'CREATE INDEX IF NOT EXISTS idx_user_notification_settings_user ON hakikisha.user_notification_settings(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_user ON hakikisha.verdicts(claim_id) INCLUDE (fact_checker_id, created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_claims_user_created ON hakikisha.claims(user_id, created_at)'
     ];
 
     for (const indexQuery of essentialIndexes) {
@@ -642,6 +694,19 @@ class DatabaseInitializer {
                                      pointsColumns.rows.some(col => col.column_name === 'longest_streak');
       console.log(`✅ User points has required columns: ${hasRequiredPointsColumns}`);
 
+      // Check notification settings table
+      const notificationSettingsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'user_notification_settings'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`Notification settings table columns: ${notificationSettingsColumns.rows.length}`);
+      const hasRequiredNotificationColumns = notificationSettingsColumns.rows.some(col => col.column_name === 'last_read_verdict') &&
+                                           notificationSettingsColumns.rows.some(col => col.column_name === 'email_notifications');
+      console.log(`✅ Notification settings has required columns: ${hasRequiredNotificationColumns}`);
+
       // Initialize points for users without points records
       const usersWithoutPoints = await db.query(`
         SELECT u.id, u.email 
@@ -661,12 +726,33 @@ class DatabaseInitializer {
         }
       }
 
+      // Initialize notification settings for users without settings
+      const usersWithoutNotificationSettings = await db.query(`
+        SELECT u.id, u.email 
+        FROM hakikisha.users u 
+        LEFT JOIN hakikisha.user_notification_settings uns ON u.id = uns.user_id 
+        WHERE uns.user_id IS NULL
+      `);
+      
+      if (usersWithoutNotificationSettings.rows.length > 0) {
+        console.log(`Found ${usersWithoutNotificationSettings.rows.length} users without notification settings`);
+        for (const user of usersWithoutNotificationSettings.rows) {
+          await db.query(
+            'INSERT INTO hakikisha.user_notification_settings (user_id) VALUES ($1)',
+            [user.id]
+          );
+          console.log(`✅ Initialized notification settings for user: ${user.email}`);
+        }
+      }
+
       return {
         verdictsTableHasBasedOnAI: hasBasedOnAIVerdictColumn,
         aiVerdictsTablesExist: hasRequiredAIVerdictsColumns,
         factCheckerActivitiesExist: hasRequiredActivitiesColumns,
         pointsTablesExist: hasRequiredPointsColumns,
-        usersWithPoints: usersWithoutPoints.rows.length === 0
+        notificationSettingsExist: hasRequiredNotificationColumns,
+        usersWithPoints: usersWithoutPoints.rows.length === 0,
+        usersWithNotificationSettings: usersWithoutNotificationSettings.rows.length === 0
       };
     } catch (error) {
       console.error('❌ Error verifying database state:', error);
@@ -773,6 +859,7 @@ class DatabaseInitializer {
       console.log('Resetting database...');
       
       const tables = [
+        'user_notification_settings', // ADDED: Include notification settings table
         'points_history',
         'user_points',
         'blog_likes',
@@ -836,6 +923,7 @@ class DatabaseInitializer {
       await this.createBlogTables();
       await this.createAIVerdictsTable();
       await this.createFactCheckerActivitiesTable();
+      await this.createNotificationSettingsTable(); // ADDED: Create notification settings table
       await this.ensureVerdictsColumns(); // Ensure verdicts columns are properly set
       await this.ensureFactCheckersColumns();
       await this.ensureAdminActivitiesColumns();
@@ -918,8 +1006,34 @@ class DatabaseInitializer {
       await this.ensureUserColumns();
       await this.ensureVerdictsColumns(); // Make sure this is called
       await this.ensureAIVerdictsColumns();
+      await this.ensureNotificationSettingsColumns(); // ADDED: Ensure notification settings columns
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
+      throw error;
+    }
+  }
+
+  static async ensureNotificationSettingsColumns() {
+    try {
+      console.log('Checking for missing columns in user_notification_settings table...');
+      
+      const requiredColumns = [
+        { name: 'last_read_verdict', type: 'TIMESTAMP WITH TIME ZONE', defaultValue: "'1970-01-01'::timestamp", isUnique: false },
+        { name: 'email_notifications', type: 'BOOLEAN', defaultValue: 'TRUE', isUnique: false },
+        { name: 'push_notifications', type: 'BOOLEAN', defaultValue: 'TRUE', isUnique: false },
+        { name: 'verdict_notifications', type: 'BOOLEAN', defaultValue: 'TRUE', isUnique: false },
+        { name: 'system_notifications', type: 'BOOLEAN', defaultValue: 'TRUE', isUnique: false },
+        { name: 'created_at', type: 'TIMESTAMP', defaultValue: 'NOW()', isUnique: false },
+        { name: 'updated_at', type: 'TIMESTAMP', defaultValue: 'NOW()', isUnique: false }
+      ];
+
+      for (const column of requiredColumns) {
+        await this.ensureColumnExists('user_notification_settings', column);
+      }
+      
+      console.log('✅ All required columns verified in user_notification_settings table');
+    } catch (error) {
+      console.error('❌ Error ensuring notification settings columns:', error);
       throw error;
     }
   }
@@ -935,6 +1049,10 @@ class DatabaseInitializer {
       // Run username unique constraint migration
       const usernameUniqueMigration = require('../../migrations/023_add_username_unique_constraint');
       await usernameUniqueMigration.up();
+      
+      // ADDED: Run notification settings migration
+      const notificationSettingsMigration = require('../../migrations/024_add_notification_settings_table');
+      await notificationSettingsMigration.up();
       
       console.log('✅ All migrations completed successfully');
     } catch (error) {
