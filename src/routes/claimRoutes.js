@@ -24,6 +24,10 @@ router.get('/my-claims', claimController.getMyClaims);
 router.post('/', claimController.submitClaim);
 router.post('/upload-evidence', upload.single('evidence'), claimController.uploadEvidence);
 
+// Verdict response routes
+router.post('/:claimId/verdict-response', claimController.submitVerdictResponse);
+router.get('/:claimId/verdict-responses', claimController.getVerdictResponses);
+
 // Parameterized routes LAST
 router.get('/:claimId', claimController.getClaimDetails);
 

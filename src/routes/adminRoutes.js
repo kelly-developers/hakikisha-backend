@@ -20,6 +20,7 @@ router.post('/users/approve-pending-fact-checkers', adminController.approvePendi
 // Fact Checker Management Routes
 router.get('/fact-checkers', adminController.getAllFactCheckers);
 router.get('/fact-checkers/:userId', adminController.getFactCheckerDetails);
+router.get('/fact-checkers/:userId/claims', adminController.getFactCheckerClaims);
 router.post('/fact-checkers/:userId/reset-password', adminController.resetFactCheckerPassword);
 router.delete('/fact-checkers/:userId', adminController.deleteFactChecker);
 

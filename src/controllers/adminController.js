@@ -339,6 +339,85 @@ exports.deleteFactChecker = async (req, res, next) => {
   }
 };
 
+// Get fact checker's claims and activity
+exports.getFactCheckerClaims = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 20, status } = req.query;
+    const offset = (page - 1) * limit;
+
+    const db = require('../config/database');
+
+    // Get claims verified by this fact checker
+    let query = `
+      SELECT 
+        c.id,
+        c.title,
+        c.description,
+        c.category,
+        c.status,
+        c.created_at as submitted_date,
+        v.verdict,
+        v.explanation,
+        v.created_at as verdict_date,
+        v.time_spent,
+        u.username as submitter_username,
+        u.email as submitter_email
+      FROM hakikisha.claims c
+      JOIN hakikisha.verdicts v ON c.id = v.claim_id
+      JOIN hakikisha.users u ON c.user_id = u.id
+      WHERE v.fact_checker_id = $1
+    `;
+
+    const params = [userId];
+
+    if (status) {
+      query += ` AND c.status = $${params.length + 1}`;
+      params.push(status);
+    }
+
+    query += ` ORDER BY v.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await db.query(query, params);
+
+    // Get total count
+    let countQuery = `
+      SELECT COUNT(*) 
+      FROM hakikisha.claims c
+      JOIN hakikisha.verdicts v ON c.id = v.claim_id
+      WHERE v.fact_checker_id = $1
+    `;
+    const countParams = [userId];
+
+    if (status) {
+      countQuery += ` AND c.status = $2`;
+      countParams.push(status);
+    }
+
+    const countResult = await db.query(countQuery, countParams);
+    const total = parseInt(countResult.rows[0].count);
+
+    res.json({
+      success: true,
+      claims: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    logger.error('Get fact checker claims error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch fact checker claims: ' + error.message
+    });
+  }
+};
+
 // Admin Management
 exports.getAllAdmins = async (req, res, next) => {
   try {

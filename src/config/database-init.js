@@ -14,6 +14,7 @@ class DatabaseInitializer {
       await this.createSchema();
       await this.initializeEssentialTables();
       await this.createIndexes();
+      await this.runMigrations();
       await this.createDefaultAdmin();
       await this.verifyDatabaseState();
       
@@ -920,6 +921,24 @@ class DatabaseInitializer {
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
       throw error;
+    }
+  }
+
+  static async runMigrations() {
+    try {
+      console.log('Running database migrations...');
+      
+      // Run verdict_responses table migration
+      const verdictResponsesMigration = require('../../migrations/022_create_verdict_responses_table');
+      await verdictResponsesMigration.up();
+      
+      // Run username unique constraint migration
+      const usernameUniqueMigration = require('../../migrations/023_add_username_unique_constraint');
+      await usernameUniqueMigration.up();
+      
+      console.log('✅ All migrations completed successfully');
+    } catch (error) {
+      console.log('ℹ️ Migrations might have already run:', error.message);
     }
   }
 

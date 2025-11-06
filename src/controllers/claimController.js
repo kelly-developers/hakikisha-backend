@@ -737,6 +737,75 @@ class ClaimController {
       throw error;
     }
   }
+
+  // Submit user response to verdict
+  async submitVerdictResponse(req, res) {
+    try {
+      const { claimId } = req.params;
+      const { response, responseType } = req.body;
+
+      if (!response || !responseType) {
+        return res.status(400).json({
+          success: false,
+          error: 'Response and response type are required'
+        });
+      }
+
+      const responseId = require('uuid').v4();
+
+      await db.query(
+        `INSERT INTO hakikisha.verdict_responses 
+         (id, claim_id, user_id, response, response_type, created_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [responseId, claimId, req.user.userId, response, responseType]
+      );
+
+      res.status(201).json({
+        success: true,
+        message: 'Response submitted successfully',
+        response_id: responseId
+      });
+    } catch (error) {
+      console.error('Submit verdict response error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to submit response'
+      });
+    }
+  }
+
+  // Get verdict responses for a claim
+  async getVerdictResponses(req, res) {
+    try {
+      const { claimId } = req.params;
+
+      const result = await db.query(
+        `SELECT 
+          vr.id,
+          vr.response,
+          vr.response_type,
+          vr.created_at,
+          u.username,
+          u.profile_picture
+         FROM hakikisha.verdict_responses vr
+         JOIN hakikisha.users u ON vr.user_id = u.id
+         WHERE vr.claim_id = $1
+         ORDER BY vr.created_at DESC`,
+        [claimId]
+      );
+
+      res.json({
+        success: true,
+        responses: result.rows
+      });
+    } catch (error) {
+      console.error('Get verdict responses error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get responses'
+      });
+    }
+  }
 }
 
 const claimController = new ClaimController();

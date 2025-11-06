@@ -371,6 +371,14 @@ const startServer = async () => {
       console.error(' AI routes failed to load:', error.message);
     }
 
+    // Load notification routes
+    try {
+      app.use('/api/v1/notifications', require('./src/routes/notificationRoutes'));
+      console.log(' Notification routes loaded: /api/v1/notifications');
+    } catch (error) {
+      console.error(' Notification routes failed to load:', error.message);
+    }
+
     // Test endpoints
     app.get('/api/test', (req, res) => {
       res.json({
@@ -473,7 +481,8 @@ const startServer = async () => {
           '/api/v1/blogs/*',
           '/api/v1/admin/*',
           '/api/v1/fact-checker/*',
-          '/api/v1/dashboard/*'
+          '/api/v1/dashboard/*',
+          '/api/v1/notifications/*'
         ]
       });
     });
