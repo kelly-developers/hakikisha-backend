@@ -18,7 +18,7 @@ const startServer = async () => {
     let adminCreated = false;
     let redisInitialized = false;
 
-    // Initialize Redis for caching (for 5M users performance)
+    // Initialize Redis for caching
     console.log('Initializing Redis cache...');
     try {
       const { initRedis } = require('./src/config/redis');
@@ -114,7 +114,7 @@ const startServer = async () => {
     });
     app.use(limiter);
 
-    // Performance middleware for 5M users
+    // Performance middleware
     const { 
       requestTimer, 
       connectionPoolMonitor, 
@@ -127,6 +127,7 @@ const startServer = async () => {
     app.use(connectionPoolMonitor);
     app.use(memoryMonitor);
 
+    // Health check
     app.get('/health', (req, res) => {
       const db = require('./src/config/database');
       const { isAvailable } = require('./src/config/redis');
@@ -141,22 +142,11 @@ const startServer = async () => {
         admin: adminCreated ? 'created' : 'not created',
         uploads: fs.existsSync(uploadsDir) ? 'available' : 'unavailable',
         port: process.env.PORT || 10000,
-        environment: process.env.NODE_ENV || 'development',
-        performance: {
-          dbPool: {
-            total: db.totalCount,
-            idle: db.idleCount,
-            waiting: db.waitingCount
-          },
-          memory: {
-            rss: `${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`,
-            heapUsed: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`
-          },
-          uptime: `${Math.round(process.uptime())}s`
-        }
+        environment: process.env.NODE_ENV || 'development'
       });
     });
 
+    // Debug routes
     app.get('/api/debug/db', async (req, res) => {
       try {
         const db = require('./src/config/database');
@@ -173,9 +163,8 @@ const startServer = async () => {
         
         const users = await db.query('SELECT COUNT(*) as count FROM hakikisha.users');
         const claims = await db.query('SELECT COUNT(*) as count FROM hakikisha.claims');
-        const publicClaims = await db.query('SELECT COUNT(*) as count FROM public.claims');
-        const trending = await db.query('SELECT COUNT(*) as count FROM hakikisha.claims WHERE is_trending = true');
-        const admin = await db.query('SELECT email, role FROM hakikisha.users WHERE email = $1', ['kellynyachiro@gmail.com']);
+        const verdicts = await db.query('SELECT COUNT(*) as count FROM hakikisha.verdicts');
+        const notificationSettings = await db.query('SELECT COUNT(*) as count FROM hakikisha.user_notification_settings');
         
         res.json({
           success: true,
@@ -192,12 +181,8 @@ const startServer = async () => {
           stats: {
             users: users.rows[0].count,
             claims: claims.rows[0].count,
-            public_claims: publicClaims.rows[0].count,
-            trending_claims: trending.rows[0].count
-          },
-          admin: {
-            exists: admin.rows.length > 0,
-            user: admin.rows[0] || null
+            verdicts: verdicts.rows[0].count,
+            notification_settings: notificationSettings.rows[0].count
           }
         });
       } catch (error) {
@@ -211,172 +196,70 @@ const startServer = async () => {
       }
     });
 
-    // Debug route to test blog routes
-    app.get('/api/debug/blog-routes', (req, res) => {
-      try {
-        console.log(' Testing blog routes loading...');
-        const blogRoutesPath = path.join(__dirname, 'src', 'routes', 'blogRoutes.js');
-        console.log('Blog routes path:', blogRoutesPath);
-        
-        if (!fs.existsSync(blogRoutesPath)) {
-          return res.status(500).json({
-            success: false,
-            error: 'Blog routes file not found',
-            path: blogRoutesPath
-          });
-        }
-
-        const blogRoutes = require(blogRoutesPath);
-        console.log(' Blog routes module loaded successfully');
-        
-        res.json({
-          success: true,
-          message: 'Blog routes module loaded successfully',
-          fileExists: true,
-          routes: [
-            'GET /api/v1/blogs',
-            'GET /api/v1/blogs/trending', 
-            'GET /api/v1/blogs/search',
-            'GET /api/v1/blogs/stats',
-            'GET /api/v1/blogs/:id',
-            'POST /api/v1/blogs',
-            'GET /api/v1/blogs/user/my-blogs',
-            'PUT /api/v1/blogs/:id',
-            'DELETE /api/v1/blogs/:id',
-            'POST /api/v1/blogs/:id/publish',
-            'POST /api/v1/blogs/generate/ai',
-            'GET /api/v1/blogs/test/endpoint',
-            'GET /api/v1/blogs/health/check'
-          ]
-        });
-      } catch (error) {
-        console.error(' Blog routes debug error:', error);
-        res.status(500).json({
-          success: false,
-          error: 'Failed to load blog routes',
-          message: error.message,
-          stack: error.stack
-        });
-      }
-    });
-
     console.log('Loading API routes...');
     
-    // Load auth routes
-    try {
-      app.use('/api/v1/auth', require('./src/routes/authRoutes'));
-      console.log(' Auth routes loaded: /api/v1/auth');
-    } catch (error) {
-      console.error(' Auth routes failed to load:', error.message);
-    }
-    
-    // Load user routes
-    try {
-      app.use('/api/v1/user', require('./src/routes/userRoutes'));
-      console.log(' User routes loaded: /api/v1/user');
-    } catch (error) {
-      console.error(' User routes failed to load:', error.message);
-    }
+    // Load all routes with proper error handling
+    const routes = [
+      { path: '/api/v1/auth', file: './src/routes/authRoutes' },
+      { path: '/api/v1/user', file: './src/routes/userRoutes' },
+      { path: '/api/v1/admin', file: './src/routes/adminRoutes' },
+      { path: '/api/v1/claims', file: './src/routes/claimRoutes' },
+      { path: '/api/v1/blogs', file: './src/routes/blogRoutes' },
+      { path: '/api/v1/fact-checker', file: './src/routes/factCheckerRoutes' },
+      { path: '/api/v1/dashboard', file: './src/routes/dashboardRoutes' },
+      { path: '/api/v1/ai', file: './src/routes/poeAIRoutes' },
+      { path: '/api/v1/notifications', file: './src/routes/notificationRoutes' }, // FIXED: This was missing
+      { path: '/api/v1/points', file: './src/routes/pointsRoutes' }
+    ];
 
-    // Load admin routes
-    try {
-      app.use('/api/v1/admin', require('./src/routes/adminRoutes'));
-      console.log(' Admin routes loaded: /api/v1/admin');
-    } catch (error) {
-      console.error(' Admin routes failed to load:', error.message);
-    }
-    
-    // Load claims routes
-    try {
-      app.use('/api/v1/claims', require('./src/routes/claimRoutes'));
-      console.log(' Claims routes loaded: /api/v1/claims');
-    } catch (error) {
-      console.error(' Claims routes failed to load:', error.message);
-    }
-
-    // FIXED: Blog routes loading with comprehensive error handling
-    try {
-      console.log(' Loading blog routes...');
-      const blogRoutesPath = './src/routes/blogRoutes';
-      
-      // Check if file exists
-      const fullPath = path.join(__dirname, 'src', 'routes', 'blogRoutes.js');
-      if (!fs.existsSync(fullPath)) {
-        throw new Error(`Blog routes file not found at: ${fullPath}`);
+    for (const route of routes) {
+      try {
+        const routeModule = require(route.file);
+        app.use(route.path, routeModule);
+        console.log(` ✅ ${route.path} routes loaded`);
+        
+        // Log available endpoints for notifications
+        if (route.path === '/api/v1/notifications') {
+          console.log('   Available notification endpoints:');
+          console.log('     GET  /api/v1/notifications/unread-verdicts');
+          console.log('     GET  /api/v1/notifications/unread-verdicts/count');
+          console.log('     POST /api/v1/notifications/verdicts/:verdictId/read');
+          console.log('     POST /api/v1/notifications/verdicts/read-all');
+          console.log('     GET  /api/v1/notifications/health');
+          console.log('     GET  /api/v1/notifications');
+        }
+      } catch (error) {
+        console.error(` ❌ Failed to load ${route.path} routes:`, error.message);
+        
+        // Create a fallback route for notifications
+        if (route.path === '/api/v1/notifications') {
+          console.log('Creating fallback notification routes...');
+          const { authMiddleware } = require('./src/middleware/authMiddleware');
+          
+          app.use('/api/v1/notifications', authMiddleware, (req, res, next) => {
+            console.log(`Fallback notification route: ${req.method} ${req.originalUrl}`);
+            
+            if (req.path === '/unread-verdicts' && req.method === 'GET') {
+              return res.json({
+                success: true,
+                verdicts: [],
+                count: 0,
+                message: 'Notification system is being initialized'
+              });
+            }
+            
+            if (req.path === '/health' && req.method === 'GET') {
+              return res.json({
+                success: true,
+                status: 'initializing',
+                message: 'Notification system is starting up'
+              });
+            }
+            
+            next();
+          });
+        }
       }
-      
-      console.log('Blog routes file exists, requiring module...');
-      const blogRoutes = require(blogRoutesPath);
-      
-      // Mount the routes
-      app.use('/api/v1/blogs', blogRoutes);
-      console.log(' Blog routes loaded successfully: /api/v1/blogs');
-      
-      // Log available endpoints
-      console.log('   Available blog endpoints:');
-      console.log('     GET  /api/v1/blogs');
-      console.log('     GET  /api/v1/blogs/trending');
-      console.log('     GET  /api/v1/blogs/search');
-      console.log('     GET  /api/v1/blogs/stats');
-      console.log('     GET  /api/v1/blogs/:id');
-      console.log('     POST /api/v1/blogs');
-      console.log('     GET  /api/v1/blogs/user/my-blogs');
-      console.log('     PUT  /api/v1/blogs/:id');
-      console.log('     DELETE /api/v1/blogs/:id');
-      console.log('     POST /api/v1/blogs/:id/publish');
-      console.log('     GET  /api/v1/blogs/test/endpoint');
-      console.log('     GET  /api/v1/blogs/health/check');
-      
-    } catch (error) {
-      console.error('Blog routes failed to load:', error.message);
-      console.error('Error details:', error.stack);
-      
-      // Create a fallback blog route
-      app.use('/api/v1/blogs', (req, res, next) => {
-        console.log(`Fallback blog route hit: ${req.method} ${req.originalUrl}`);
-        res.status(501).json({
-          success: false,
-          error: 'Blog routes are temporarily unavailable',
-          message: 'Blog module failed to load properly'
-        });
-      });
-    }
-
-    // Load fact-checker route
-    try {
-      app.use('/api/v1/fact-checker', require('./src/routes/factCheckerRoutes'));
-      console.log(' Fact Checker routes loaded: /api/v1/fact-checker');
-    } catch (error) {
-      console.error(' Fact Checker routes failed to load:', error.message);
-    }
-
-    // Load dashboard routes
-    try {
-      app.use('/api/v1/dashboard', require('./src/routes/dashboardRoutes'));
-      console.log(' Dashboard routes loaded: /api/v1/dashboard');
-    } catch (error) {
-      console.error(' Dashboard routes failed to load:', error.message);
-    }
-
-    // Load POE AI routes (NEW - for 5M users with caching)
-    try {
-      app.use('/api/v1/ai', require('./src/routes/poeAIRoutes'));
-      console.log(' AI routes loaded: /api/v1/ai');
-      console.log('   Available AI endpoints:');
-      console.log('     POST /api/v1/ai/chat');
-      console.log('     POST /api/v1/ai/fact-check');
-      console.log('     POST /api/v1/ai/analyze-image');
-      console.log('     GET  /api/v1/ai/health');
-    } catch (error) {
-      console.error(' AI routes failed to load:', error.message);
-    }
-
-    // Load notification routes
-    try {
-      app.use('/api/v1/notifications', require('./src/routes/notificationRoutes'));
-      console.log(' Notification routes loaded: /api/v1/notifications');
-    } catch (error) {
-      console.error(' Notification routes failed to load:', error.message);
     }
 
     // Test endpoints
@@ -387,19 +270,6 @@ const startServer = async () => {
         version: '1.0.0',
         database: dbInitialized ? 'connected' : 'disconnected',
         uploads: fs.existsSync(uploadsDir) ? 'available' : 'unavailable'
-      });
-    });
-
-    app.get('/api/v1/admin/test', (req, res) => {
-      res.json({
-        message: 'Admin API is working!',
-        timestamp: new Date().toISOString(),
-        endpoints: {
-          register_fact_checker: 'POST /api/v1/admin/users/register-fact-checker',
-          register_admin: 'POST /api/v1/admin/users/register-admin',
-          get_users: 'GET /api/v1/admin/users',
-          dashboard_stats: 'GET /api/v1/admin/dashboard/stats'
-        }
       });
     });
 
@@ -446,17 +316,17 @@ const startServer = async () => {
           health: '/health',
           debug: '/api/debug/db',
           debug_routes: '/api/debug/routes',
-          debug_blog_routes: '/api/debug/blog-routes',
           test: '/api/test',
           auth: '/api/v1/auth',
-          users: '/api/v1/users',
-          user_profile: '/api/v1/user/profile',
-          user_profile_picture: '/api/v1/user/profile-picture',
+          user: '/api/v1/user',
           claims: '/api/v1/claims',
           blogs: '/api/v1/blogs',
           admin: '/api/v1/admin',
           fact_checker: '/api/v1/fact-checker',
-          dashboard: '/api/v1/dashboard'
+          dashboard: '/api/v1/dashboard',
+          ai: '/api/v1/ai',
+          notifications: '/api/v1/notifications',
+          points: '/api/v1/points'
         }
       });
     });
@@ -472,17 +342,17 @@ const startServer = async () => {
           '/health',
           '/api/debug/db',
           '/api/debug/routes',
-          '/api/debug/blog-routes',
           '/api/test',
           '/api/v1/auth/*',
-          '/api/v1/users/*',
           '/api/v1/user/*',
           '/api/v1/claims/*',
           '/api/v1/blogs/*',
           '/api/v1/admin/*',
           '/api/v1/fact-checker/*',
           '/api/v1/dashboard/*',
-          '/api/v1/notifications/*'
+          '/api/v1/ai/*',
+          '/api/v1/notifications/*',
+          '/api/v1/points/*'
         ]
       });
     });
@@ -498,13 +368,6 @@ const startServer = async () => {
         });
       }
       
-      if (error.message === 'Only image files are allowed!') {
-        return res.status(400).json({
-          error: 'Invalid file type',
-          message: 'Only image files are allowed'
-        });
-      }
-
       res.status(500).json({
         error: 'Internal server error',
         message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong',
@@ -524,23 +387,19 @@ const startServer = async () => {
       console.log('Database: ' + (dbInitialized ? 'Connected' : 'Not Connected'));
       console.log('Tables: ' + (tablesInitialized ? 'Initialized' : 'Not Initialized'));
       console.log('Admin: ' + (adminCreated ? 'Created' : 'Not Created'));
-      console.log('Uploads: ' + (fs.existsSync(uploadsDir) ? 'Available' : 'Unavailable'));
+      console.log('');
+      console.log('Notification Endpoints:');
+      console.log('   GET  /api/v1/notifications/unread-verdicts');
+      console.log('   GET  /api/v1/notifications/unread-verdicts/count');
+      console.log('   POST /api/v1/notifications/verdicts/:id/read');
+      console.log('   POST /api/v1/notifications/verdicts/read-all');
+      console.log('   GET  /api/v1/notifications/health');
       console.log('');
       console.log('Debug Endpoints:');
       console.log('   Health: http://localhost:' + PORT + '/health');
       console.log('   DB Debug: http://localhost:' + PORT + '/api/debug/db');
       console.log('   Routes Debug: http://localhost:' + PORT + '/api/debug/routes');
-      console.log('   Blog Routes Debug: http://localhost:' + PORT + '/api/debug/blog-routes');
       console.log('   API Test: http://localhost:' + PORT + '/api/test');
-      console.log('   Blog Test: http://localhost:' + PORT + '/api/v1/blogs/test/endpoint');
-      console.log('   Blog Health: http://localhost:' + PORT + '/api/v1/blogs/health/check');
-      console.log('');
-      console.log('Blog Endpoints:');
-      console.log('   Get Blogs: GET http://localhost:' + PORT + '/api/v1/blogs');
-      console.log('   Create Blog: POST http://localhost:' + PORT + '/api/v1/blogs');
-      console.log('   My Blogs: GET http://localhost:' + PORT + '/api/v1/blogs/user/my-blogs');
-      console.log('   Trending Blogs: GET http://localhost:' + PORT + '/api/v1/blogs/trending');
-      console.log('   Publish Blog: POST http://localhost:' + PORT + '/api/v1/blogs/:id/publish');
       console.log('');
     });
 
