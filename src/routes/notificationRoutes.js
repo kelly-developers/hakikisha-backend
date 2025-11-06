@@ -15,4 +15,8 @@ router.post('/verdicts/read-all', notificationController.markAllVerdictsAsRead);
 // General notifications
 router.get('/', notificationController.getUserNotifications);
 
+// Debug routes
+router.get('/debug/verdict/:verdictId', notificationController.debugVerdict);
+router.get('/debug/my-verdicts', notificationController.getUserVerdicts);
+
 module.exports = router;
