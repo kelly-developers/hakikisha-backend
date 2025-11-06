@@ -198,7 +198,7 @@ const startServer = async () => {
 
     console.log('Loading API routes...');
     
-    // Load all routes with proper error handling
+    // Load all routes with improved error handling
     const routes = [
       { path: '/api/v1/auth', file: './src/routes/authRoutes' },
       { path: '/api/v1/user', file: './src/routes/userRoutes' },
@@ -208,56 +208,47 @@ const startServer = async () => {
       { path: '/api/v1/fact-checker', file: './src/routes/factCheckerRoutes' },
       { path: '/api/v1/dashboard', file: './src/routes/dashboardRoutes' },
       { path: '/api/v1/ai', file: './src/routes/poeAIRoutes' },
-      { path: '/api/v1/notifications', file: './src/routes/notificationRoutes' }, // FIXED: This was missing
+      { path: '/api/v1/notifications', file: './src/routes/notificationRoutes' },
       { path: '/api/v1/points', file: './src/routes/pointsRoutes' }
     ];
 
     for (const route of routes) {
       try {
+        // Clear the require cache for this route to ensure fresh load
+        delete require.cache[require.resolve(route.file)];
+        
         const routeModule = require(route.file);
         app.use(route.path, routeModule);
         console.log(` ✅ ${route.path} routes loaded`);
         
-        // Log available endpoints for notifications
-        if (route.path === '/api/v1/notifications') {
-          console.log('   Available notification endpoints:');
-          console.log('     GET  /api/v1/notifications/unread-verdicts');
-          console.log('     GET  /api/v1/notifications/unread-verdicts/count');
-          console.log('     POST /api/v1/notifications/verdicts/:verdictId/read');
-          console.log('     POST /api/v1/notifications/verdicts/read-all');
-          console.log('     GET  /api/v1/notifications/health');
-          console.log('     GET  /api/v1/notifications');
-        }
       } catch (error) {
         console.error(` ❌ Failed to load ${route.path} routes:`, error.message);
+        console.error(`    Error details:`, error.stack);
         
-        // Create a fallback route for notifications
+        // Only create fallback for critical routes, but NOT for notifications
+        // Let the actual notification routes handle their own errors
         if (route.path === '/api/v1/notifications') {
-          console.log('Creating fallback notification routes...');
-          const { authMiddleware } = require('./src/middleware/authMiddleware');
+          console.log('⚠️  Notification routes failed to load - this will cause issues');
+          console.log('   Attempting to debug notification routes...');
           
-          app.use('/api/v1/notifications', authMiddleware, (req, res, next) => {
-            console.log(`Fallback notification route: ${req.method} ${req.originalUrl}`);
-            
-            if (req.path === '/unread-verdicts' && req.method === 'GET') {
-              return res.json({
-                success: true,
-                verdicts: [],
-                count: 0,
-                message: 'Notification system is being initialized'
-              });
+          // Try to debug what's wrong with the notification routes
+          try {
+            const notificationRoutesPath = path.join(__dirname, 'src', 'routes', 'notificationRoutes.js');
+            if (fs.existsSync(notificationRoutesPath)) {
+              console.log('   Notification routes file exists at:', notificationRoutesPath);
+              const fileStats = fs.statSync(notificationRoutesPath);
+              console.log('   File size:', fileStats.size, 'bytes');
+              console.log('   Last modified:', fileStats.mtime);
+              
+              // Try to read and parse the file to check for syntax errors
+              const fileContent = fs.readFileSync(notificationRoutesPath, 'utf8');
+              console.log('   File starts with:', fileContent.substring(0, 200));
+            } else {
+              console.log('   ❌ Notification routes file does not exist!');
             }
-            
-            if (req.path === '/health' && req.method === 'GET') {
-              return res.json({
-                success: true,
-                status: 'initializing',
-                message: 'Notification system is starting up'
-              });
-            }
-            
-            next();
-          });
+          } catch (debugError) {
+            console.log('   Debug error:', debugError.message);
+          }
         }
       }
     }
@@ -388,14 +379,7 @@ const startServer = async () => {
       console.log('Tables: ' + (tablesInitialized ? 'Initialized' : 'Not Initialized'));
       console.log('Admin: ' + (adminCreated ? 'Created' : 'Not Created'));
       console.log('');
-      console.log('Notification Endpoints:');
-      console.log('   GET  /api/v1/notifications/unread-verdicts');
-      console.log('   GET  /api/v1/notifications/unread-verdicts/count');
-      console.log('   POST /api/v1/notifications/verdicts/:id/read');
-      console.log('   POST /api/v1/notifications/verdicts/read-all');
-      console.log('   GET  /api/v1/notifications/health');
-      console.log('');
-      console.log('Debug Endpoints:');
+      console.log('Available Endpoints:');
       console.log('   Health: http://localhost:' + PORT + '/health');
       console.log('   DB Debug: http://localhost:' + PORT + '/api/debug/db');
       console.log('   Routes Debug: http://localhost:' + PORT + '/api/debug/routes');
