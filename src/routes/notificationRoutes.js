@@ -22,7 +22,7 @@ router.get('/unread-verdicts', async (req, res) => {
     const db = require('../config/database');
     const result = await db.query(
       `SELECT COUNT(*) as count 
-       FROM hakikisha.notifications 
+       FROM notifications 
        WHERE user_id = $1 
        AND type = 'verdict_ready' 
        AND is_read = false`,
@@ -49,7 +49,7 @@ router.post('/verdicts/:claimId/read', async (req, res) => {
     const db = require('../config/database');
     
     await db.query(
-      `UPDATE hakikisha.notifications 
+      `UPDATE notifications 
        SET is_read = true, read_at = NOW() 
        WHERE user_id = $1 
        AND related_entity_id = $2 

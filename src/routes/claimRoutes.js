@@ -23,6 +23,7 @@ router.use(authMiddleware);
 router.get('/my-claims', claimController.getMyClaims);
 router.post('/', claimController.submitClaim);
 router.post('/upload-evidence', upload.single('evidence'), claimController.uploadEvidence);
+router.get('/verified', claimController.getVerifiedClaims);
 
 // Verdict response routes
 router.post('/:claimId/verdict-response', claimController.submitVerdictResponse);

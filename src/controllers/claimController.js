@@ -806,6 +806,41 @@ class ClaimController {
       });
     }
   }
+
+  // Get verified claims (claims with final human verdict or published)
+  async getVerifiedClaims(req, res) {
+    try {
+      const result = await db.query(
+        `SELECT 
+          c.id,
+          c.title,
+          c.category,
+          c.status,
+          c.created_at as "submittedDate",
+          v.verdict,
+          v.explanation as "verdictText",
+          v.created_at as "verdictDate"
+         FROM hakikisha.claims c
+         LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
+         WHERE c.status IN ('human_approved','published') OR c.human_verdict_id IS NOT NULL
+         ORDER BY c.created_at DESC
+         LIMIT 50`
+      );
+
+      res.json({
+        success: true,
+        claims: result.rows
+      });
+    } catch (error) {
+      console.error('Get verified claims error:', error);
+      logger.error('Get verified claims error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get verified claims',
+        code: 'SERVER_ERROR'
+      });
+    }
+  }
 }
 
 const claimController = new ClaimController();

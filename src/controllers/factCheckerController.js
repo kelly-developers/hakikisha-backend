@@ -144,6 +144,23 @@ class FactCheckerController {
 
       console.log('Verdict submitted successfully for claim:', claimId);
 
+      // Send user notification about verdict ready
+      try {
+        const claimRes = await db.query(
+          `SELECT id, user_id, title FROM hakikisha.claims WHERE id = $1`,
+          [claimId]
+        );
+        if (claimRes.rows.length > 0) {
+          const notificationService = require('../services/notificationService');
+          await notificationService.sendVerdictReadyNotification(
+            { id: claimRes.rows[0].id, user_id: claimRes.rows[0].user_id, title: claimRes.rows[0].title },
+            { verdict: normalizedVerdict }
+          );
+        }
+      } catch (notifyError) {
+        console.log('Failed to send verdict notification:', notifyError.message);
+      }
+
       // Log activity
       try {
         await db.query(
