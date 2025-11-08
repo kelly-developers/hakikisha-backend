@@ -27,7 +27,7 @@ class FactCheckerController {
          FROM hakikisha.claims c
          LEFT JOIN hakikisha.users u ON c.user_id = u.id
          LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
-         WHERE c.status IN ('pending', 'ai_processing', 'human_review', 'completed')
+         WHERE c.status IN ('pending', 'ai_processing', 'ai_processing_failed', 'human_review', 'completed')
          ORDER BY c.priority DESC, c.created_at ASC
          LIMIT 50`
       );
@@ -205,7 +205,7 @@ class FactCheckerController {
         db.query(
           `SELECT COUNT(*) as total
            FROM hakikisha.claims 
-           WHERE status IN ('pending', 'ai_processing', 'human_review', 'completed')`
+           WHERE status IN ('pending', 'ai_processing', 'ai_processing_failed', 'human_review', 'completed')`
         ),
         db.query(
           `SELECT 
@@ -568,7 +568,7 @@ class FactCheckerController {
           av.evidence_sources as "aiSources"
          FROM hakikisha.claims c
          JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
-         WHERE c.status = 'completed'
+         WHERE c.status IN ('completed', 'ai_processing_failed', 'human_review')
          AND c.human_verdict_id IS NULL
          ORDER BY av.confidence_score ASC, c.created_at ASC
          LIMIT 20`
@@ -841,7 +841,7 @@ class FactCheckerController {
         db.query(
           `SELECT 
             (SELECT COUNT(*) FROM hakikisha.verdicts WHERE fact_checker_id = $1) as total_verdicts,
-            (SELECT COUNT(*) FROM hakikisha.claims WHERE assigned_fact_checker_id = $1 AND status IN ('pending', 'human_review', 'completed')) as pending_claims,
+            (SELECT COUNT(*) FROM hakikisha.claims WHERE assigned_fact_checker_id = $1 AND status IN ('pending', 'ai_processing', 'ai_processing_failed', 'human_review', 'completed')) as pending_claims,
             (SELECT COUNT(*) FROM hakikisha.blog_articles WHERE author_id = $1 AND status = 'published') as published_blogs,
             (SELECT COALESCE(AVG(time_spent), 0) FROM hakikisha.verdicts WHERE fact_checker_id = $1) as avg_review_time`,
           [req.user.userId]

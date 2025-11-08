@@ -16,8 +16,8 @@ class Notification {
 
     const id = uuidv4();
     const query = `
-      INSERT INTO notifications (id, user_id, type, title, message, related_entity_type, related_entity_id, is_read, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      INSERT INTO hakikisha.notifications (id, user_id, type, title, message, related_entity_type, related_entity_id, is_read, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW() AT TIME ZONE 'Africa/Nairobi')
       RETURNING *
     `;
 
@@ -34,7 +34,7 @@ class Notification {
 
   static async findByUserId(userId, limit = 20, offset = 0) {
     const query = `
-      SELECT * FROM notifications 
+      SELECT * FROM hakikisha.notifications 
       WHERE user_id = $1 
       ORDER BY created_at DESC 
       LIMIT $2 OFFSET $3
@@ -51,8 +51,8 @@ class Notification {
 
   static async markAsRead(notificationId) {
     const query = `
-      UPDATE notifications 
-      SET is_read = true, read_at = NOW()
+      UPDATE hakikisha.notifications 
+      SET is_read = true, read_at = NOW() AT TIME ZONE 'Africa/Nairobi'
       WHERE id = $1
       RETURNING *
     `;
@@ -68,8 +68,8 @@ class Notification {
 
   static async markAllAsRead(userId) {
     const query = `
-      UPDATE notifications 
-      SET is_read = true, read_at = NOW()
+      UPDATE hakikisha.notifications 
+      SET is_read = true, read_at = NOW() AT TIME ZONE 'Africa/Nairobi'
       WHERE user_id = $1 AND is_read = false
       RETURNING COUNT(*) as updated_count
     `;
@@ -86,7 +86,7 @@ class Notification {
   static async getUnreadCount(userId) {
     const query = `
       SELECT COUNT(*) as unread_count 
-      FROM notifications 
+      FROM hakikisha.notifications 
       WHERE user_id = $1 AND is_read = false
     `;
 
@@ -108,8 +108,8 @@ class Notification {
 
     notificationsData.forEach((notification, index) => {
       const id = uuidv4();
-      const base = index * 7;
-      placeholders.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, NOW())`);
+      const base = index * 8;
+      placeholders.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, NOW() AT TIME ZONE 'Africa/Nairobi')`);
       
       values.push(
         id,
@@ -121,11 +121,11 @@ class Notification {
         notification.related_entity_id,
         notification.is_read || false
       );
-      paramCount += 7;
+      paramCount += 8;
     });
 
     const query = `
-      INSERT INTO notifications (id, user_id, type, title, message, related_entity_type, related_entity_id, is_read, created_at)
+      INSERT INTO hakikisha.notifications (id, user_id, type, title, message, related_entity_type, related_entity_id, is_read, created_at)
       VALUES ${placeholders.join(', ')}
       RETURNING *
     `;
