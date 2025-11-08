@@ -125,7 +125,7 @@ class DatabaseInitializer {
     }
   }
 
-  // NEW: Create notifications table
+  // UPDATED: Create notifications table with related_entity_id and claim_id columns
   static async createNotificationsTable() {
     try {
       const query = `
@@ -136,6 +136,8 @@ class DatabaseInitializer {
           title VARCHAR(500) NOT NULL,
           message TEXT NOT NULL,
           data JSONB DEFAULT '{}',
+          related_entity_id UUID, -- ADDED: For linking to claims, verdicts, etc.
+          claim_id UUID REFERENCES hakikisha.claims(id) ON DELETE CASCADE, -- ADDED: Direct link to claims
           is_read BOOLEAN DEFAULT FALSE,
           read_at TIMESTAMP WITH TIME ZONE,
           created_at TIMESTAMP DEFAULT NOW()
@@ -149,6 +151,8 @@ class DatabaseInitializer {
       await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON hakikisha.notifications(is_read)');
       await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON hakikisha.notifications(created_at)');
       await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_type ON hakikisha.notifications(type)');
+      await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_related_entity ON hakikisha.notifications(related_entity_id)'); // ADDED
+      await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_claim_id ON hakikisha.notifications(claim_id)'); // ADDED
       
       console.log('✅ Notifications table indexes created');
     } catch (error) {
@@ -571,11 +575,13 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_user ON hakikisha.verdicts(claim_id) INCLUDE (fact_checker_id, created_at)',
       'CREATE INDEX IF NOT EXISTS idx_claims_user_created ON hakikisha.claims(user_id, created_at)',
       
-      // NEW: Notifications table indexes
+      // UPDATED: Notifications table indexes with new columns
       'CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON hakikisha.notifications(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON hakikisha.notifications(is_read)',
       'CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON hakikisha.notifications(created_at)',
-      'CREATE INDEX IF NOT EXISTS idx_notifications_type ON hakikisha.notifications(type)'
+      'CREATE INDEX IF NOT EXISTS idx_notifications_type ON hakikisha.notifications(type)',
+      'CREATE INDEX IF NOT EXISTS idx_notifications_related_entity ON hakikisha.notifications(related_entity_id)',
+      'CREATE INDEX IF NOT EXISTS idx_notifications_claim_id ON hakikisha.notifications(claim_id)'
     ];
 
     for (const indexQuery of essentialIndexes) {
@@ -743,7 +749,7 @@ class DatabaseInitializer {
                                            notificationSettingsColumns.rows.some(col => col.column_name === 'email_notifications');
       console.log(`✅ Notification settings has required columns: ${hasRequiredNotificationColumns}`);
 
-      // NEW: Check notifications table
+      // UPDATED: Check notifications table with new columns
       const notificationsColumns = await db.query(`
         SELECT column_name, data_type, is_nullable, column_default
         FROM information_schema.columns 
@@ -754,7 +760,9 @@ class DatabaseInitializer {
       console.log(`Notifications table columns: ${notificationsColumns.rows.length}`);
       const hasRequiredNotificationsColumns = notificationsColumns.rows.some(col => col.column_name === 'user_id') &&
                                             notificationsColumns.rows.some(col => col.column_name === 'type') &&
-                                            notificationsColumns.rows.some(col => col.column_name === 'is_read');
+                                            notificationsColumns.rows.some(col => col.column_name === 'is_read') &&
+                                            notificationsColumns.rows.some(col => col.column_name === 'related_entity_id') && // ADDED
+                                            notificationsColumns.rows.some(col => col.column_name === 'claim_id'); // ADDED
       console.log(`✅ Notifications table has required columns: ${hasRequiredNotificationsColumns}`);
 
       // Initialize points for users without points records
@@ -801,7 +809,7 @@ class DatabaseInitializer {
         factCheckerActivitiesExist: hasRequiredActivitiesColumns,
         pointsTablesExist: hasRequiredPointsColumns,
         notificationSettingsExist: hasRequiredNotificationColumns,
-        notificationsTableExist: hasRequiredNotificationsColumns, // NEW
+        notificationsTableExist: hasRequiredNotificationsColumns,
         usersWithPoints: usersWithoutPoints.rows.length === 0,
         usersWithNotificationSettings: usersWithoutNotificationSettings.rows.length === 0
       };
@@ -980,6 +988,7 @@ class DatabaseInitializer {
       await this.ensureVerdictsColumns();
       await this.ensureFactCheckersColumns();
       await this.ensureAdminActivitiesColumns();
+      await this.ensureNotificationsColumns(); // ADDED: Ensure notifications columns are properly set
       await this.createIndexes();
       
       console.log('✅ Existing database fixed successfully!');
@@ -1067,7 +1076,7 @@ class DatabaseInitializer {
     }
   }
 
-  // NEW: Ensure notifications table columns
+  // UPDATED: Ensure notifications table columns with related_entity_id and claim_id
   static async ensureNotificationsColumns() {
     try {
       console.log('Checking for missing columns in notifications table...');
@@ -1078,6 +1087,8 @@ class DatabaseInitializer {
         { name: 'title', type: 'VARCHAR(500)', defaultValue: "''", isUnique: false },
         { name: 'message', type: 'TEXT', defaultValue: "''", isUnique: false },
         { name: 'data', type: 'JSONB', defaultValue: "'{}'::jsonb", isUnique: false },
+        { name: 'related_entity_id', type: 'UUID', defaultValue: 'NULL', isUnique: false }, // ADDED
+        { name: 'claim_id', type: 'UUID', defaultValue: 'NULL', isUnique: false }, // ADDED
         { name: 'is_read', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
         { name: 'read_at', type: 'TIMESTAMP WITH TIME ZONE', defaultValue: 'NULL', isUnique: false },
         { name: 'created_at', type: 'TIMESTAMP', defaultValue: 'NOW()', isUnique: false }
