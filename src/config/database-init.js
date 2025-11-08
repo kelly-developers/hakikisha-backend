@@ -48,7 +48,7 @@ class DatabaseInitializer {
       await this.createVerdictsTable();
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
-      await this.createNotificationsTable(); // ADDED: Notifications table
+      await this.createNotificationsTable();
       
       console.log('✅ Essential tables created/verified successfully!');
     } catch (error) {
@@ -125,7 +125,7 @@ class DatabaseInitializer {
     }
   }
 
-  // UPDATED: Create notifications table with related_entity_id and claim_id columns
+  // FIXED: Create notifications table without related_entity_type column
   static async createNotificationsTable() {
     try {
       const query = `
@@ -136,8 +136,8 @@ class DatabaseInitializer {
           title VARCHAR(500) NOT NULL,
           message TEXT NOT NULL,
           data JSONB DEFAULT '{}',
-          related_entity_id UUID, -- ADDED: For linking to claims, verdicts, etc.
-          claim_id UUID REFERENCES hakikisha.claims(id) ON DELETE CASCADE, -- ADDED: Direct link to claims
+          related_entity_id UUID,
+          claim_id UUID REFERENCES hakikisha.claims(id) ON DELETE CASCADE,
           is_read BOOLEAN DEFAULT FALSE,
           read_at TIMESTAMP WITH TIME ZONE,
           created_at TIMESTAMP DEFAULT NOW()
@@ -151,8 +151,8 @@ class DatabaseInitializer {
       await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON hakikisha.notifications(is_read)');
       await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON hakikisha.notifications(created_at)');
       await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_type ON hakikisha.notifications(type)');
-      await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_related_entity ON hakikisha.notifications(related_entity_id)'); // ADDED
-      await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_claim_id ON hakikisha.notifications(claim_id)'); // ADDED
+      await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_related_entity ON hakikisha.notifications(related_entity_id)');
+      await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_claim_id ON hakikisha.notifications(claim_id)');
       
       console.log('✅ Notifications table indexes created');
     } catch (error) {
@@ -575,7 +575,7 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_user ON hakikisha.verdicts(claim_id) INCLUDE (fact_checker_id, created_at)',
       'CREATE INDEX IF NOT EXISTS idx_claims_user_created ON hakikisha.claims(user_id, created_at)',
       
-      // UPDATED: Notifications table indexes with new columns
+      // Notifications table indexes
       'CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON hakikisha.notifications(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON hakikisha.notifications(is_read)',
       'CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON hakikisha.notifications(created_at)',
@@ -749,7 +749,7 @@ class DatabaseInitializer {
                                            notificationSettingsColumns.rows.some(col => col.column_name === 'email_notifications');
       console.log(`✅ Notification settings has required columns: ${hasRequiredNotificationColumns}`);
 
-      // UPDATED: Check notifications table with new columns
+      // FIXED: Check notifications table structure
       const notificationsColumns = await db.query(`
         SELECT column_name, data_type, is_nullable, column_default
         FROM information_schema.columns 
@@ -758,11 +758,20 @@ class DatabaseInitializer {
       `);
       
       console.log(`Notifications table columns: ${notificationsColumns.rows.length}`);
+      
+      // Check for deprecated related_entity_type column and remove it
+      const hasRelatedEntityType = notificationsColumns.rows.some(col => col.column_name === 'related_entity_type');
+      if (hasRelatedEntityType) {
+        console.log('⚠️ Removing deprecated related_entity_type column from notifications table...');
+        await db.query('ALTER TABLE hakikisha.notifications DROP COLUMN IF EXISTS related_entity_type');
+        console.log('✅ Removed related_entity_type column');
+      }
+
       const hasRequiredNotificationsColumns = notificationsColumns.rows.some(col => col.column_name === 'user_id') &&
                                             notificationsColumns.rows.some(col => col.column_name === 'type') &&
                                             notificationsColumns.rows.some(col => col.column_name === 'is_read') &&
-                                            notificationsColumns.rows.some(col => col.column_name === 'related_entity_id') && // ADDED
-                                            notificationsColumns.rows.some(col => col.column_name === 'claim_id'); // ADDED
+                                            notificationsColumns.rows.some(col => col.column_name === 'related_entity_id') &&
+                                            notificationsColumns.rows.some(col => col.column_name === 'claim_id');
       console.log(`✅ Notifications table has required columns: ${hasRequiredNotificationsColumns}`);
 
       // Initialize points for users without points records
@@ -918,7 +927,7 @@ class DatabaseInitializer {
       console.log('Resetting database...');
       
       const tables = [
-        'notifications', // ADDED: Include notifications table
+        'notifications',
         'user_notification_settings',
         'points_history',
         'user_points',
@@ -984,11 +993,11 @@ class DatabaseInitializer {
       await this.createAIVerdictsTable();
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
-      await this.createNotificationsTable(); // ADDED: Create notifications table
+      await this.createNotificationsTable();
       await this.ensureVerdictsColumns();
       await this.ensureFactCheckersColumns();
       await this.ensureAdminActivitiesColumns();
-      await this.ensureNotificationsColumns(); // ADDED: Ensure notifications columns are properly set
+      await this.ensureNotificationsColumns();
       await this.createIndexes();
       
       console.log('✅ Existing database fixed successfully!');
@@ -1069,14 +1078,14 @@ class DatabaseInitializer {
       await this.ensureVerdictsColumns();
       await this.ensureAIVerdictsColumns();
       await this.ensureNotificationSettingsColumns();
-      await this.ensureNotificationsColumns(); // ADDED: Ensure notifications columns
+      await this.ensureNotificationsColumns();
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
       throw error;
     }
   }
 
-  // UPDATED: Ensure notifications table columns with related_entity_id and claim_id
+  // FIXED: Ensure notifications table columns without related_entity_type
   static async ensureNotificationsColumns() {
     try {
       console.log('Checking for missing columns in notifications table...');
@@ -1087,8 +1096,8 @@ class DatabaseInitializer {
         { name: 'title', type: 'VARCHAR(500)', defaultValue: "''", isUnique: false },
         { name: 'message', type: 'TEXT', defaultValue: "''", isUnique: false },
         { name: 'data', type: 'JSONB', defaultValue: "'{}'::jsonb", isUnique: false },
-        { name: 'related_entity_id', type: 'UUID', defaultValue: 'NULL', isUnique: false }, // ADDED
-        { name: 'claim_id', type: 'UUID', defaultValue: 'NULL', isUnique: false }, // ADDED
+        { name: 'related_entity_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
+        { name: 'claim_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
         { name: 'is_read', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
         { name: 'read_at', type: 'TIMESTAMP WITH TIME ZONE', defaultValue: 'NULL', isUnique: false },
         { name: 'created_at', type: 'TIMESTAMP', defaultValue: 'NOW()', isUnique: false }
@@ -1146,7 +1155,7 @@ class DatabaseInitializer {
       const notificationSettingsMigration = require('../../migrations/024_add_notification_settings_table');
       await notificationSettingsMigration.up();
       
-      // ADDED: Run notifications table migration
+      // Run notifications table migration
       const notificationsMigration = require('../../migrations/025_add_notifications_table');
       await notificationsMigration.up();
       
@@ -1245,6 +1254,29 @@ class DatabaseInitializer {
     } catch (error) {
       console.error('Error checking admin_activities table:', error);
       return false;
+    }
+  }
+
+  // ADDED: Method to fix database schema issues
+  static async fixDatabaseSchema() {
+    try {
+      console.log('Fixing database schema issues...');
+      
+      // Remove deprecated related_entity_type column if it exists
+      try {
+        await db.query('ALTER TABLE hakikisha.notifications DROP COLUMN IF EXISTS related_entity_type');
+        console.log('✅ Removed deprecated related_entity_type column from notifications table');
+      } catch (error) {
+        console.log('ℹ️ related_entity_type column might not exist:', error.message);
+      }
+      
+      // Ensure all required columns exist
+      await this.ensureNotificationsColumns();
+      
+      console.log('✅ Database schema fixes applied successfully');
+    } catch (error) {
+      console.error('❌ Error fixing database schema:', error);
+      throw error;
     }
   }
 }
