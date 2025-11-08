@@ -99,12 +99,17 @@ Category: ${category}
 Source: ${sourceLink || 'Not provided'}
 
 Provide:
-1. Verdict (verified/false/misleading/needs_context)
-2. Detailed explanation
+1. Verdict: Choose ONLY ONE from: true, false, misleading, satire, or needs_context
+   - Use "true" if the claim is accurate and verified
+   - Use "false" if the claim is inaccurate or debunked
+   - Use "misleading" if the claim has some truth but is presented misleadingly
+   - Use "satire" if the claim is satire or parody
+   - Use "needs_context" if more information is needed to verify
+2. Detailed explanation with evidence
 3. Confidence level (high/medium/low)
 4. Suggested reliable sources to verify this claim
 
-Format your response clearly and professionally.
+Format your response clearly and professionally. Start with "Verdict: [your verdict]" on the first line.
 `;
 
       const response = await this.client.chat.completions.create({
@@ -200,16 +205,24 @@ Format your response clearly and professionally.
   _extractVerdict(text) {
     const lowerText = text.toLowerCase();
     
+    // Return 'true' instead of 'verified' to match database schema
     if (lowerText.includes('verdict: verified') || 
         lowerText.includes('verdict: true') || 
         lowerText.includes('this claim is true') ||
-        lowerText.includes('this claim is verified')) {
-      return 'verified';
+        lowerText.includes('this claim is verified') ||
+        lowerText.includes('verdict is true')) {
+      return 'true';
     } else if (lowerText.includes('verdict: false') || 
+               lowerText.includes('verdict is false') ||
                lowerText.includes('this claim is false')) {
       return 'false';
-    } else if (lowerText.includes('misleading')) {
+    } else if (lowerText.includes('misleading') || 
+               lowerText.includes('partially true') ||
+               lowerText.includes('partially false')) {
       return 'misleading';
+    } else if (lowerText.includes('satire') || 
+               lowerText.includes('parody')) {
+      return 'satire';
     } else {
       return 'needs_context';
     }

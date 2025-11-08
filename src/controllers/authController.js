@@ -93,11 +93,39 @@ const register = async (req, res) => {
     const registrationStatus = role === 'fact_checker' ? 'pending' : 'approved';
     const isVerified = role !== 'fact_checker';
 
+    // Generate unique username if not provided
+    let finalUsername = username;
+    if (!finalUsername) {
+      const baseUsername = email.split('@')[0];
+      let counter = 0;
+      let usernameExists = true;
+      
+      while (usernameExists && counter < 100) {
+        const testUsername = counter === 0 ? baseUsername : `${baseUsername}${counter}`;
+        const existingUsernameCheck = await db.query(
+          'SELECT id FROM hakikisha.users WHERE username = $1',
+          [testUsername]
+        );
+        
+        if (existingUsernameCheck.rows.length === 0) {
+          finalUsername = testUsername;
+          usernameExists = false;
+        } else {
+          counter++;
+        }
+      }
+      
+      if (usernameExists) {
+        // Last resort: append UUID fragment
+        finalUsername = `${baseUsername}_${userId.substring(0, 8)}`;
+      }
+    }
+
     const result = await db.query(
       `INSERT INTO hakikisha.users (id, email, username, password_hash, phone, role, registration_status, is_verified, status, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', NOW(), NOW())
        RETURNING id, email, username, role, registration_status, is_verified, created_at`,
-      [userId, email, username || email.split('@')[0], password_hash, phone || null, role, registrationStatus, isVerified]
+      [userId, email, finalUsername, password_hash, phone || null, role, registrationStatus, isVerified]
     );
 
     const user = result.rows[0];

@@ -68,14 +68,15 @@ class VerdictController {
         end_time: new Date()
       });
 
-      // Notify user
+      // Notify user with verdict details
       await Notification.create({
         user_id: claim.user_id,
         type: 'verdict_ready',
         title: 'Your claim has been verified',
-        message: `Fact-checkers have reviewed your claim: "${claim.title}"`,
+        message: `A fact-checker has reviewed your claim: "${claim.title}". Verdict: ${verdict}`,
         related_entity_type: 'claim',
-        related_entity_id: claim_id
+        related_entity_id: claim_id,
+        is_read: false
       });
 
       logger.info(`Verdict submitted for claim ${claim_id} by fact-checker ${req.user.userId}`);
@@ -224,14 +225,15 @@ class VerdictController {
       // Update claim status
       await Claim.updateStatus(claimId, 'verified', req.user.userId);
 
-      // Send notification to user
+      // Send notification to user with verdict details
       await Notification.create({
         user_id: claim.user_id,
         type: 'verdict_ready',
         title: 'Your claim has been verified',
-        message: `A fact-checker has reviewed and updated the verdict for your claim: "${claim.title}"`,
+        message: `A fact-checker has reviewed and updated the verdict for your claim: "${claim.title}". Verdict: ${verdict}`,
         related_entity_type: 'claim',
-        related_entity_id: claimId
+        related_entity_id: claimId,
+        is_read: false
       });
 
       logger.info(`AI verdict edited for claim ${claimId} by fact-checker ${req.user.userId}`);

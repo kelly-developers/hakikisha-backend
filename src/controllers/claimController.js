@@ -68,15 +68,29 @@ class ClaimController {
         if (aiFactCheckResult.success && aiFactCheckResult.aiVerdict) {
           const aiVerdictId = uuidv4();
           
+          // Map verdict to ensure it's in correct format
+          const verdictMapping = {
+            'verified': 'true',
+            'true': 'true',
+            'false': 'false',
+            'misleading': 'misleading',
+            'satire': 'satire',
+            'needs_context': 'needs_context'
+          };
+          
+          const mappedVerdict = verdictMapping[aiFactCheckResult.aiVerdict.verdict] || 'needs_context';
+          
+          console.log(`AI verdict extracted: ${aiFactCheckResult.aiVerdict.verdict}, mapped to: ${mappedVerdict}`);
+          
           await db.query(
             `INSERT INTO hakikisha.ai_verdicts (
               id, claim_id, verdict, confidence_score, explanation, 
               evidence_sources, ai_model_version, disclaimer, is_edited_by_human, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, NOW())`,
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, NOW() AT TIME ZONE 'Africa/Nairobi')`,
             [
               aiVerdictId,
               claimId,
-              aiFactCheckResult.aiVerdict.verdict,
+              mappedVerdict,
               aiFactCheckResult.aiVerdict.confidence === 'high' ? 0.9 : 
                 aiFactCheckResult.aiVerdict.confidence === 'low' ? 0.5 : 0.7,
               aiFactCheckResult.aiVerdict.explanation,
@@ -86,23 +100,33 @@ class ClaimController {
             ]
           );
           
-          // ✅ FIXED: Update claim with AI verdict AND status to 'completed'
+          // Update claim with AI verdict AND status to 'completed'
           await db.query(
             `UPDATE hakikisha.claims 
              SET ai_verdict_id = $1, 
                  status = 'completed', 
-                 updated_at = NOW()
+                 updated_at = NOW() AT TIME ZONE 'Africa/Nairobi'
              WHERE id = $2`,
             [aiVerdictId, claimId]
           );
           
+          // Create notification for user
+          const Notification = require('../models/Notification');
+          await Notification.create({
+            user_id: req.user.userId,
+            type: 'verdict_ready',
+            title: 'AI Verdict Ready',
+            message: `Your claim has been analyzed by AI. Verdict: ${mappedVerdict}`,
+            related_entity_type: 'claim',
+            related_entity_id: claimId
+          });
+          
           console.log('✅ AI verdict created and claim status updated to completed:', claimId);
         } else {
-          // ✅ FIXED: If AI processing fails, still update status to indicate processing is done
           await db.query(
             `UPDATE hakikisha.claims 
              SET status = 'ai_processing_failed', 
-                 updated_at = NOW()
+                 updated_at = NOW() AT TIME ZONE 'Africa/Nairobi'
              WHERE id = $1`,
             [claimId]
           );
@@ -110,11 +134,10 @@ class ClaimController {
         }
       } catch (aiError) {
         console.log('AI processing failed, updating claim status:', aiError.message);
-        // ✅ FIXED: Update status even if AI fails
         await db.query(
           `UPDATE hakikisha.claims 
            SET status = 'ai_processing_failed', 
-               updated_at = NOW()
+               updated_at = NOW() AT TIME ZONE 'Africa/Nairobi'
            WHERE id = $1`,
           [claimId]
         );
