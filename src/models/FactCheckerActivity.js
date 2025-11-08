@@ -146,6 +146,8 @@ class FactCheckerActivity {
     }
   }
 
+  //hhh
+
   static async getLeaderboard(timeframe = '30 days', limit = 10) {
     const query = `
       SELECT 
