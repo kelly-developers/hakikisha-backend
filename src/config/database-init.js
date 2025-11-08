@@ -1225,9 +1225,9 @@ class DatabaseInitializer {
         await this.ensureColumnExists('verdicts', column);
       }
       
-      console.log('✅ All required columns verified in verdicts table');
+      console.log('All required columns verified in verdicts table');
     } catch (error) {
-      console.error('❌ Error ensuring verdicts columns:', error);
+      console.error(' Error ensuring verdicts columns:', error);
       throw error;
     }
   }
@@ -1243,7 +1243,7 @@ class DatabaseInitializer {
       `);
       return result.rows[0].exists;
     } catch (error) {
-      console.error('❌ Error checking admin_activities table:', error);
+      console.error('Error checking admin_activities table:', error);
       return false;
     }
   }
