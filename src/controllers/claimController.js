@@ -57,16 +57,20 @@ class ClaimController {
 
       console.log('Claim inserted successfully:', result.rows[0]);
 
-      // Automatically process claim with AI
+      // Automatically process claim with AI - FIXED VERSION
       const poeAIService = require('../services/poeAIService');
-      const AIVerdict = require('../models/AIVerdict');
       
       try {
         console.log('Starting automatic AI processing for claim:', claimId);
         const aiFactCheckResult = await poeAIService.factCheck(claimText, category, sourceLink);
         
+        console.log('AI Fact Check Result:', JSON.stringify(aiFactCheckResult, null, 2));
+        
         if (aiFactCheckResult.success && aiFactCheckResult.aiVerdict) {
           const aiVerdictId = uuidv4();
+          
+          // ✅ FIXED: Use structured verdict detection instead of unreliable confidence mapping
+          const { finalVerdict, confidenceScore } = this.determineAIVerdict(aiFactCheckResult.aiVerdict);
           
           await db.query(
             `INSERT INTO hakikisha.ai_verdicts (
@@ -76,27 +80,33 @@ class ClaimController {
             [
               aiVerdictId,
               claimId,
-              aiFactCheckResult.aiVerdict.verdict,
-              aiFactCheckResult.aiVerdict.confidence === 'high' ? 0.9 : 
-                aiFactCheckResult.aiVerdict.confidence === 'low' ? 0.5 : 0.7,
+              finalVerdict, // Use the properly determined verdict
+              confidenceScore,
               aiFactCheckResult.aiVerdict.explanation,
-              JSON.stringify([]),
+              JSON.stringify(aiFactCheckResult.aiVerdict.sources || []),
               'Web-Search-POE',
               'This is an AI-generated response. CRECO is not responsible for any implications. Please verify with fact-checkers.'
             ]
           );
           
-          // ✅ FIXED: Update claim with AI verdict AND status to 'completed'
+          // ✅ FIXED: Update claim with AI verdict AND proper status
+          const claimStatus = this.getClaimStatusFromAIVerdict(finalVerdict, confidenceScore);
+          
           await db.query(
             `UPDATE hakikisha.claims 
              SET ai_verdict_id = $1, 
-                 status = 'completed', 
+                 status = $2, 
                  updated_at = NOW()
-             WHERE id = $2`,
-            [aiVerdictId, claimId]
+             WHERE id = $3`,
+            [aiVerdictId, claimStatus, claimId]
           );
           
-          console.log('✅ AI verdict created and claim status updated to completed:', claimId);
+          console.log('✅ AI verdict created and claim status updated:', {
+            claimId,
+            verdict: finalVerdict,
+            confidence: confidenceScore,
+            status: claimStatus
+          });
         } else {
           // ✅ FIXED: If AI processing fails, still update status to indicate processing is done
           await db.query(
@@ -198,6 +208,128 @@ class ClaimController {
     }
   }
 
+  // ✅ NEW: Improved AI verdict determination logic
+  determineAIVerdict(aiVerdict) {
+    const verdictText = (aiVerdict.verdict || '').toLowerCase();
+    const explanation = (aiVerdict.explanation || '').toLowerCase();
+    
+    console.log('Analyzing AI verdict:', { verdictText, explanation: explanation.substring(0, 200) + '...' });
+
+    // Combine both verdict and explanation for analysis
+    const combinedText = verdictText + ' ' + explanation;
+
+    // STRONG FALSE INDICATORS - Check these first (HIGHEST PRIORITY)
+    const strongFalseIndicators = [
+      'false', 'incorrect', 'not true', 'inaccurate', 'untrue', 'wrong',
+      'debunk', 'disproven', 'misinformation', 'no evidence', 'lack of evidence',
+      'contradict', 'refut', 'fabricat', 'hoax', 'myth', 'baseless', 'no support',
+      'false claim', 'is false', 'was false', 'are false', 'proven false'
+    ];
+
+    // STRONG TRUE INDICATORS
+    const strongTrueIndicators = [
+      'true', 'correct', 'accurate', 'verified', 'valid', 'supported by evidence',
+      'evidence confirms', 'consistent with', 'accurate portrayal', 'factual',
+      'is true', 'was true', 'are true', 'confirmed true'
+    ];
+
+    // MISLEADING INDICATORS
+    const misleadingIndicators = [
+      'misleading', 'exaggerat', 'distort', 'partial', 'out of context',
+      'oversimplif', 'misrepresent', 'half-truth', 'cherry-pick', 'deceptive'
+    ];
+
+    // NEEDS CONTEXT INDICATORS
+    const needsContextIndicators = [
+      'needs context', 'needs_context', 'additional information', 'more information',
+      'unverifiable', 'insufficient', 'uncertain', 'unclear', 'requires context',
+      'context needed', 'more context'
+    ];
+
+    // Check for strong false indicators first (highest priority)
+    for (const indicator of strongFalseIndicators) {
+      if (combinedText.includes(indicator)) {
+        console.log(`✅ Detected FALSE verdict with indicator: ${indicator}`);
+        return { 
+          finalVerdict: 'false', 
+          confidenceScore: 0.9 
+        };
+      }
+    }
+
+    // Check for strong true indicators
+    for (const indicator of strongTrueIndicators) {
+      if (combinedText.includes(indicator)) {
+        console.log(`✅ Detected TRUE verdict with indicator: ${indicator}`);
+        return { 
+          finalVerdict: 'true', 
+          confidenceScore: 0.9 
+        };
+      }
+    }
+
+    // Check for misleading indicators
+    for (const indicator of misleadingIndicators) {
+      if (combinedText.includes(indicator)) {
+        console.log(`✅ Detected MISLEADING verdict with indicator: ${indicator}`);
+        return { 
+          finalVerdict: 'misleading', 
+          confidenceScore: 0.8 
+        };
+      }
+    }
+
+    // Check for needs context indicators
+    for (const indicator of needsContextIndicators) {
+      if (combinedText.includes(indicator)) {
+        console.log(`✅ Detected NEEDS_CONTEXT verdict with indicator: ${indicator}`);
+        return { 
+          finalVerdict: 'needs_context', 
+          confidenceScore: 0.6 
+        };
+      }
+    }
+
+    // FALLBACK: If no clear indicators found, analyze the overall sentiment
+    const negativeWords = ['not', 'no', 'never', 'nothing', 'without', 'lack', 'false', 'incorrect'];
+    const positiveWords = ['yes', 'confirm', 'support', 'valid', 'true', 'accurate', 'correct'];
+    
+    const negativeCount = negativeWords.filter(word => combinedText.includes(word)).length;
+    const positiveCount = positiveWords.filter(word => combinedText.includes(word)).length;
+
+    if (negativeCount > positiveCount + 1) {
+      console.log('🔄 Fallback: Detected FALSE based on negative sentiment');
+      return { finalVerdict: 'false', confidenceScore: 0.7 };
+    } else if (positiveCount > negativeCount + 1) {
+      console.log('🔄 Fallback: Detected TRUE based on positive sentiment');
+      return { finalVerdict: 'true', confidenceScore: 0.7 };
+    }
+
+    // FINAL FALLBACK: Default to needs_context
+    console.log('❓ No clear verdict detected, defaulting to NEEDS_CONTEXT');
+    return { finalVerdict: 'needs_context', confidenceScore: 0.5 };
+  }
+
+  // ✅ NEW: Get proper claim status from AI verdict
+  getClaimStatusFromAIVerdict(verdict, confidenceScore) {
+    if (confidenceScore >= 0.7) {
+      switch (verdict) {
+        case 'true':
+          return 'ai_verified';
+        case 'false':
+          return 'ai_false';
+        case 'misleading':
+          return 'ai_misleading';
+        case 'needs_context':
+          return 'needs_human_review';
+        default:
+          return 'needs_human_review';
+      }
+    } else {
+      return 'needs_human_review';
+    }
+  }
+
   async uploadEvidence(req, res) {
     try {
       if (!req.file) {
@@ -241,12 +373,16 @@ class ClaimController {
           v.explanation as "verdictText",
           v.evidence_sources as sources,
           u.email as "factCheckerName",
-          fc.username as "factCheckerUsername"
+          fc.username as "factCheckerUsername",
+          av.verdict as "ai_verdict",
+          av.explanation as "ai_explanation",
+          av.confidence_score as "ai_confidence"
         FROM hakikisha.claims c
         LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
         LEFT JOIN hakikisha.users u ON v.fact_checker_id = u.id
         LEFT JOIN hakikisha.fact_checkers fc_profile ON u.id = fc_profile.user_id
         LEFT JOIN hakikisha.users fc ON fc_profile.user_id = fc.id
+        LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
         WHERE c.user_id = $1
       `;
 
@@ -264,18 +400,7 @@ class ClaimController {
 
       console.log(`Found ${result.rows.length} claims for user`);
       
-      const claims = result.rows.map(claim => ({
-        id: claim.id,
-        title: claim.title,
-        category: claim.category,
-        status: claim.status,
-        submittedDate: claim.submittedDate,
-        verdictDate: claim.verdictDate,
-        verdict: claim.verdict,
-        verdictText: claim.verdictText,
-        sources: claim.sources || [],
-        factCheckerName: claim.factCheckerUsername || claim.factCheckerName || 'Fact Checker'
-      }));
+      const claims = result.rows.map(claim => this.normalizeClaimForList(claim));
 
       res.json({
         success: true,
@@ -290,6 +415,35 @@ class ClaimController {
         code: 'SERVER_ERROR'
       });
     }
+  }
+
+  // ✅ NEW: Normalize claim for list view
+  normalizeClaimForList(claim) {
+    // Determine final verdict (human takes precedence over AI)
+    let finalVerdict = claim.verdict;
+    let finalVerdictText = claim.verdictText;
+    let isAI = false;
+
+    if (!finalVerdict && claim.ai_verdict) {
+      finalVerdict = claim.ai_verdict;
+      finalVerdictText = claim.ai_explanation;
+      isAI = true;
+    }
+
+    return {
+      id: claim.id,
+      title: claim.title,
+      category: claim.category,
+      status: claim.status,
+      submittedDate: claim.submittedDate,
+      verdictDate: claim.verdictDate,
+      verdict: finalVerdict,
+      verdictText: finalVerdictText,
+      sources: claim.sources || [],
+      factCheckerName: claim.factCheckerUsername || claim.factCheckerName || 'Fact Checker',
+      verified_by_ai: isAI,
+      ai_confidence: claim.ai_confidence
+    };
   }
 
   async getClaimDetails(req, res) {
@@ -480,6 +634,11 @@ class ClaimController {
         ...aiSources.map(source => ({ ...source, type: 'ai' }))
       ];
 
+      // ✅ FIXED: Determine final verdict properly
+      let finalVerdict = claim.human_verdict || claim.ai_verdict;
+      let finalVerdictText = claim.human_explanation || claim.ai_explanation;
+      let verified_by_ai = !claim.human_verdict && !!claim.ai_verdict;
+
       const responseData = {
         id: claim.id,
         title: claim.title,
@@ -489,10 +648,10 @@ class ClaimController {
         submittedBy: claim.submittedBy,
         submittedDate: claim.created_at,
         verdictDate: claim.verdictDate,
-        verdict: claim.human_verdict || claim.ai_verdict,
+        verdict: finalVerdict,
         human_verdict: claim.human_verdict,
         ai_verdict: claim.ai_verdict,
-        verdictText: claim.human_explanation || claim.ai_explanation,
+        verdictText: finalVerdictText,
         human_explanation: claim.human_explanation,
         ai_explanation: claim.ai_explanation,
         sources: allSources,
@@ -509,17 +668,17 @@ class ClaimController {
         verdict_responsibility: claim.verdict_responsibility || 'ai',
         review_time: claim.review_time,
         imageUrl: claim.media_url,
-        videoLink: claim.media_type === 'video' ? claim.media_url : null
+        videoLink: claim.media_type === 'video' ? claim.media_url : null,
+        verified_by_ai: verified_by_ai
       };
 
       console.log('Processed claim data for frontend:', {
         id: responseData.id,
         status: responseData.status,
+        verdict: responseData.verdict,
         hasVerdict: !!responseData.verdict,
-        sourcesCount: responseData.sources.length,
-        humanSourcesCount: humanSources.length,
-        aiSourcesCount: aiSources.length,
-        factChecker: responseData.factChecker
+        verified_by_ai: responseData.verified_by_ai,
+        sourcesCount: responseData.sources.length
       });
 
       res.json({
@@ -596,12 +755,13 @@ class ClaimController {
           c.is_trending,
           c.trending_score as "trendingScore",
           fc.username as "factCheckerName",
-          av.confidence_score as "ai_confidence"
+          av.confidence_score as "ai_confidence",
+          CASE WHEN v.id IS NOT NULL THEN false ELSE true END as "verified_by_ai"
         FROM hakikisha.claims c
         LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
         LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
         LEFT JOIN hakikisha.users fc ON v.fact_checker_id = fc.id
-        WHERE c.status IN ('completed', 'human_approved', 'published', 'resolved')
+        WHERE c.status IN ('completed', 'human_approved', 'published', 'resolved', 'ai_verified', 'ai_false', 'ai_misleading')
         ORDER BY 
           c.is_trending DESC,
           c.trending_score DESC,
@@ -629,7 +789,8 @@ class ClaimController {
         return {
           ...claim,
           sources: sources,
-          ai_confidence: claim.ai_confidence
+          ai_confidence: claim.ai_confidence,
+          verified_by_ai: claim.verified_by_ai
         };
       });
 
@@ -650,7 +811,8 @@ class ClaimController {
             c.submission_count,
             c.is_trending,
             fc.username as "factCheckerName",
-            av.confidence_score as "ai_confidence"
+            av.confidence_score as "ai_confidence",
+            CASE WHEN v.id IS NOT NULL THEN false ELSE true END as "verified_by_ai"
           FROM hakikisha.claims c
           LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
           LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
@@ -674,7 +836,8 @@ class ClaimController {
           return {
             ...claim,
             sources: sources,
-            ai_confidence: claim.ai_confidence
+            ai_confidence: claim.ai_confidence,
+            verified_by_ai: claim.verified_by_ai
           };
         });
         
@@ -819,10 +982,15 @@ class ClaimController {
           c.created_at as "submittedDate",
           v.verdict,
           v.explanation as "verdictText",
-          v.created_at as "verdictDate"
+          v.created_at as "verdictDate",
+          av.verdict as "ai_verdict",
+          av.confidence_score as "ai_confidence",
+          CASE WHEN v.id IS NOT NULL THEN false ELSE true END as "verified_by_ai"
          FROM hakikisha.claims c
          LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
-         WHERE c.status IN ('human_approved','published') OR c.human_verdict_id IS NOT NULL
+         LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
+         WHERE c.status IN ('human_approved','published', 'ai_verified', 'ai_false', 'ai_misleading') 
+            OR c.human_verdict_id IS NOT NULL
          ORDER BY c.created_at DESC
          LIMIT 50`
       );
