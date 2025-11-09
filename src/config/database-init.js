@@ -1148,7 +1148,7 @@ class DatabaseInitializer {
       `);
       return result.rows[0].exists;
     } catch (error) {
-      console.error('❌ Error checking admin_activities table:', error);
+      console.error('Error checking admin_activities table:', error);
       return false;
     }
   }
