@@ -583,7 +583,7 @@ class DatabaseInitializer {
         console.log(`ℹ️ Index might already exist: ${error.message}`);
       }
     }
-    console.log('✅ All essential indexes created/verified');
+    console.log('All essential indexes created/verified');
   }
 
   static async checkDatabaseConnection() {
