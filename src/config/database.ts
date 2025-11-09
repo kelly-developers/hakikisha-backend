@@ -1,6 +1,6 @@
 import { Pool, PoolClient, QueryResult } from 'pg';
 
-console.log('🔧 Loading database configuration...');
+console.log('Loading database configuration...');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
