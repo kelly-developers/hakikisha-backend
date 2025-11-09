@@ -47,8 +47,7 @@ class DatabaseInitializer {
       await this.createAIVerdictsTable();
       await this.createVerdictsTable();
       await this.createFactCheckerActivitiesTable();
-      await this.createNotificationSettingsTable();
-      await this.createNotificationsTable(); // ADDED: Main notifications table
+      await this.createNotificationSettingsTable(); // ADDED: Notification settings table
       
       console.log('✅ Essential tables created/verified successfully!');
     } catch (error) {
@@ -121,32 +120,6 @@ class DatabaseInitializer {
       console.log('✅ Users table created/verified');
     } catch (error) {
       console.error('❌ Error creating users table:', error);
-      throw error;
-    }
-  }
-
-  // ADDED: Main notifications table
-  static async createNotificationsTable() {
-    try {
-      const query = `
-        CREATE TABLE IF NOT EXISTS hakikisha.notifications (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
-          type VARCHAR(50) NOT NULL CHECK (type IN ('verdict', 'system', 'points', 'general')),
-          title VARCHAR(255),
-          message TEXT,
-          related_entity_type VARCHAR(50),
-          verdict_id UUID REFERENCES hakikisha.verdicts(id) ON DELETE CASCADE,
-          claim_id UUID REFERENCES hakikisha.claims(id) ON DELETE CASCADE,
-          is_read BOOLEAN DEFAULT FALSE,
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
-        )
-      `;
-      await db.query(query);
-      console.log('✅ Notifications table created/verified');
-    } catch (error) {
-      console.error('❌ Error creating notifications table:', error);
       throw error;
     }
   }
@@ -455,7 +428,7 @@ class DatabaseInitializer {
           explanation TEXT NOT NULL,
           evidence_sources JSONB,
           ai_verdict_id UUID REFERENCES hakikisha.ai_verdicts(id),
-          based_on_ai_verdict BOOLEAN DEFAULT false, // NEW: Added this column
+          based_on_ai_verdict BOOLEAN DEFAULT false, -- NEW: Added this column
           is_final BOOLEAN DEFAULT TRUE,
           approval_status VARCHAR(50) DEFAULT 'approved' CHECK (approval_status IN ('pending', 'approved', 'rejected')),
           review_notes TEXT,
@@ -519,7 +492,7 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_verdicts_fact_checker_id ON hakikisha.verdicts(fact_checker_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_verdict ON hakikisha.verdicts(verdict)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_is_final ON hakikisha.verdicts(is_final)',
-      'CREATE INDEX IF NOT EXISTS idx_verdicts_based_on_ai ON hakikisha.verdicts(based_on_ai_verdict)',
+      'CREATE INDEX IF NOT EXISTS idx_verdicts_based_on_ai ON hakikisha.verdicts(based_on_ai_verdict)', // NEW: Index for based_on_ai_verdict
       
       // Fact Checker Activities indexes
       'CREATE INDEX IF NOT EXISTS idx_fact_checker_activities_fact_checker_id ON hakikisha.fact_checker_activities(fact_checker_id)',
@@ -563,14 +536,8 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_blog_likes_blog_id ON hakikisha.blog_likes(blog_id)',
       'CREATE INDEX IF NOT EXISTS idx_blog_likes_user_id ON hakikisha.blog_likes(user_id)',
       
-      // UPDATED: Notification indexes
+      // NEW: Notification indexes
       'CREATE INDEX IF NOT EXISTS idx_user_notification_settings_user ON hakikisha.user_notification_settings(user_id)',
-      'CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON hakikisha.notifications(user_id)',
-      'CREATE INDEX IF NOT EXISTS idx_notifications_type ON hakikisha.notifications(type)',
-      'CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON hakikisha.notifications(is_read)',
-      'CREATE INDEX IF NOT EXISTS idx_notifications_verdict_id ON hakikisha.notifications(verdict_id)',
-      'CREATE INDEX IF NOT EXISTS idx_notifications_claim_id ON hakikisha.notifications(claim_id)',
-      'CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON hakikisha.notifications(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_user ON hakikisha.verdicts(claim_id) INCLUDE (fact_checker_id, created_at)',
       'CREATE INDEX IF NOT EXISTS idx_claims_user_created ON hakikisha.claims(user_id, created_at)'
     ];
@@ -583,7 +550,7 @@ class DatabaseInitializer {
         console.log(`ℹ️ Index might already exist: ${error.message}`);
       }
     }
-    console.log('All essential indexes created/verified');
+    console.log('✅ All essential indexes created/verified');
   }
 
   static async checkDatabaseConnection() {
@@ -740,20 +707,6 @@ class DatabaseInitializer {
                                            notificationSettingsColumns.rows.some(col => col.column_name === 'email_notifications');
       console.log(`✅ Notification settings has required columns: ${hasRequiredNotificationColumns}`);
 
-      // ADDED: Check notifications table
-      const notificationsColumns = await db.query(`
-        SELECT column_name, data_type, is_nullable, column_default
-        FROM information_schema.columns 
-        WHERE table_schema = 'hakikisha' AND table_name = 'notifications'
-        ORDER BY ordinal_position
-      `);
-      
-      console.log(`Notifications table columns: ${notificationsColumns.rows.length}`);
-      const hasRequiredNotificationsColumns = notificationsColumns.rows.some(col => col.column_name === 'user_id') &&
-                                            notificationsColumns.rows.some(col => col.column_name === 'type') &&
-                                            notificationsColumns.rows.some(col => col.column_name === 'is_read');
-      console.log(`✅ Notifications table has required columns: ${hasRequiredNotificationsColumns}`);
-
       // Initialize points for users without points records
       const usersWithoutPoints = await db.query(`
         SELECT u.id, u.email 
@@ -798,7 +751,6 @@ class DatabaseInitializer {
         factCheckerActivitiesExist: hasRequiredActivitiesColumns,
         pointsTablesExist: hasRequiredPointsColumns,
         notificationSettingsExist: hasRequiredNotificationColumns,
-        notificationsTableExist: hasRequiredNotificationsColumns,
         usersWithPoints: usersWithoutPoints.rows.length === 0,
         usersWithNotificationSettings: usersWithoutNotificationSettings.rows.length === 0
       };
@@ -907,8 +859,7 @@ class DatabaseInitializer {
       console.log('Resetting database...');
       
       const tables = [
-        'notifications', // ADDED: Include notifications table
-        'user_notification_settings',
+        'user_notification_settings', // ADDED: Include notification settings table
         'points_history',
         'user_points',
         'blog_likes',
@@ -972,9 +923,8 @@ class DatabaseInitializer {
       await this.createBlogTables();
       await this.createAIVerdictsTable();
       await this.createFactCheckerActivitiesTable();
-      await this.createNotificationSettingsTable();
-      await this.createNotificationsTable(); // ADDED: Create notifications table
-      await this.ensureVerdictsColumns();
+      await this.createNotificationSettingsTable(); // ADDED: Create notification settings table
+      await this.ensureVerdictsColumns(); // Ensure verdicts columns are properly set
       await this.ensureFactCheckersColumns();
       await this.ensureAdminActivitiesColumns();
       await this.createIndexes();
@@ -1054,41 +1004,11 @@ class DatabaseInitializer {
     try {
       console.log('Ensuring all required columns exist...');
       await this.ensureUserColumns();
-      await this.ensureVerdictsColumns();
+      await this.ensureVerdictsColumns(); // Make sure this is called
       await this.ensureAIVerdictsColumns();
-      await this.ensureNotificationSettingsColumns();
-      await this.ensureNotificationsColumns(); // ADDED: Ensure notifications columns
+      await this.ensureNotificationSettingsColumns(); // ADDED: Ensure notification settings columns
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
-      throw error;
-    }
-  }
-
-  // ADDED: Ensure notifications table columns
-  static async ensureNotificationsColumns() {
-    try {
-      console.log('Checking for missing columns in notifications table...');
-      
-      const requiredColumns = [
-        { name: 'user_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
-        { name: 'type', type: 'VARCHAR(50)', defaultValue: "'general'", isUnique: false },
-        { name: 'title', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: false },
-        { name: 'message', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
-        { name: 'related_entity_type', type: 'VARCHAR(50)', defaultValue: 'NULL', isUnique: false },
-        { name: 'verdict_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
-        { name: 'claim_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
-        { name: 'is_read', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
-        { name: 'created_at', type: 'TIMESTAMP', defaultValue: 'NOW()', isUnique: false },
-        { name: 'updated_at', type: 'TIMESTAMP', defaultValue: 'NOW()', isUnique: false }
-      ];
-
-      for (const column of requiredColumns) {
-        await this.ensureColumnExists('notifications', column);
-      }
-      
-      console.log('✅ All required columns verified in notifications table');
-    } catch (error) {
-      console.error('❌ Error ensuring notifications columns:', error);
       throw error;
     }
   }
@@ -1130,7 +1050,7 @@ class DatabaseInitializer {
       const usernameUniqueMigration = require('../../migrations/023_add_username_unique_constraint');
       await usernameUniqueMigration.up();
       
-      // Run notification settings migration
+      // ADDED: Run notification settings migration
       const notificationSettingsMigration = require('../../migrations/024_add_notification_settings_table');
       await notificationSettingsMigration.up();
       
@@ -1191,6 +1111,7 @@ class DatabaseInitializer {
     }
   }
 
+  // UPDATED: Fixed ensureVerdictsColumns method
   static async ensureVerdictsColumns() {
     try {
       console.log('Checking for missing columns in verdicts table...');
@@ -1201,7 +1122,7 @@ class DatabaseInitializer {
         { name: 'review_notes', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
         { name: 'time_spent', type: 'INTEGER', defaultValue: '0', isUnique: false },
         { name: 'ai_verdict_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
-        { name: 'based_on_ai_verdict', type: 'BOOLEAN', defaultValue: 'false', isUnique: false },
+        { name: 'based_on_ai_verdict', type: 'BOOLEAN', defaultValue: 'false', isUnique: false }, // This is the missing column
         { name: 'responsibility', type: 'VARCHAR(20)', defaultValue: "'creco'", isUnique: false }
       ];
 
