@@ -48,7 +48,7 @@ class DatabaseInitializer {
       await this.createVerdictsTable();
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
-      await this.createNotificationsTable(); // ADDED: Notifications table
+      await this.createNotificationsTable();
       
       console.log('✅ Essential tables created/verified successfully!');
     } catch (error) {
@@ -57,7 +57,6 @@ class DatabaseInitializer {
     }
   }
 
-  // ADDED: Create notifications table
   static async createNotificationsTable() {
     try {
       const query = `
@@ -81,7 +80,6 @@ class DatabaseInitializer {
       await db.query(query);
       console.log('✅ Notifications table created/verified');
 
-      // Create indexes for notifications table
       await this.createNotificationsIndexes();
       
     } catch (error) {
@@ -90,7 +88,6 @@ class DatabaseInitializer {
     }
   }
 
-  // ADDED: Create indexes for notifications table
   static async createNotificationsIndexes() {
     try {
       const indexes = [
@@ -201,7 +198,6 @@ class DatabaseInitializer {
       await db.query(query);
       console.log('✅ User notification settings table created/verified');
 
-      // Initialize notification settings for existing users
       await this.initializeNotificationSettings();
       
     } catch (error) {
@@ -448,7 +444,6 @@ class DatabaseInitializer {
     }
   }
 
-  // UPDATED: AI Verdicts table with fact checker editing capabilities
   static async createAIVerdictsTable() {
     try {
       const query = `
@@ -476,7 +471,6 @@ class DatabaseInitializer {
     }
   }
 
-  // UPDATED: Verdicts table with based_on_ai_verdict column
   static async createVerdictsTable() {
     try {
       const query = `
@@ -488,7 +482,7 @@ class DatabaseInitializer {
           explanation TEXT NOT NULL,
           evidence_sources JSONB,
           ai_verdict_id UUID REFERENCES hakikisha.ai_verdicts(id),
-          based_on_ai_verdict BOOLEAN DEFAULT false, // NEW: Added this column
+          based_on_ai_verdict BOOLEAN DEFAULT false,
           is_final BOOLEAN DEFAULT TRUE,
           approval_status VARCHAR(50) DEFAULT 'approved' CHECK (approval_status IN ('pending', 'approved', 'rejected')),
           review_notes TEXT,
@@ -506,7 +500,6 @@ class DatabaseInitializer {
     }
   }
 
-  // NEW: Fact Checker Activities table for tracking fact checker actions
   static async createFactCheckerActivitiesTable() {
     try {
       const query = `
@@ -539,7 +532,6 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_claims_trending_score ON hakikisha.claims(trending_score)',
       'CREATE INDEX IF NOT EXISTS idx_claims_created_at ON hakikisha.claims(created_at)',
       
-      // AI Verdicts indexes
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_claim_id ON hakikisha.ai_verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_verdict ON hakikisha.ai_verdicts(verdict)',
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_confidence ON hakikisha.ai_verdicts(confidence_score)',
@@ -547,27 +539,23 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_edited_by ON hakikisha.ai_verdicts(edited_by_fact_checker_id)',
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_created_at ON hakikisha.ai_verdicts(created_at)',
       
-      // Verdicts indexes
       'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_id ON hakikisha.verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_fact_checker_id ON hakikisha.verdicts(fact_checker_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_verdict ON hakikisha.verdicts(verdict)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_is_final ON hakikisha.verdicts(is_final)',
-      'CREATE INDEX IF NOT EXISTS idx_verdicts_based_on_ai ON hakikisha.verdicts(based_on_ai_verdict)', // NEW: Index for based_on_ai_verdict
+      'CREATE INDEX IF NOT EXISTS idx_verdicts_based_on_ai ON hakikisha.verdicts(based_on_ai_verdict)',
       
-      // Fact Checker Activities indexes
       'CREATE INDEX IF NOT EXISTS idx_fact_checker_activities_fact_checker_id ON hakikisha.fact_checker_activities(fact_checker_id)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checker_activities_activity_type ON hakikisha.fact_checker_activities(activity_type)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checker_activities_claim_id ON hakikisha.fact_checker_activities(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checker_activities_created_at ON hakikisha.fact_checker_activities(created_at)',
       
-      // Users indexes
       'CREATE INDEX IF NOT EXISTS idx_users_email ON hakikisha.users(email)',
       'CREATE INDEX IF NOT EXISTS idx_users_username ON hakikisha.users(username)',
       'CREATE INDEX IF NOT EXISTS idx_users_role ON hakikisha.users(role)',
       'CREATE INDEX IF NOT EXISTS idx_users_status ON hakikisha.users(status)',
       'CREATE INDEX IF NOT EXISTS idx_users_registration_status ON hakikisha.users(registration_status)',
       
-      // Admin indexes
       'CREATE INDEX IF NOT EXISTS idx_admin_activities_admin_id ON hakikisha.admin_activities(admin_id)',
       'CREATE INDEX IF NOT EXISTS idx_admin_activities_created_at ON hakikisha.admin_activities(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_registration_requests_user_id ON hakikisha.registration_requests(user_id)',
@@ -575,7 +563,6 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_fact_checkers_status ON hakikisha.fact_checkers(verification_status)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checkers_active ON hakikisha.fact_checkers(is_active)',
       
-      // Points indexes
       'CREATE INDEX IF NOT EXISTS idx_user_points_user_id ON hakikisha.user_points(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_user_points_total ON hakikisha.user_points(total_points)',
       'CREATE INDEX IF NOT EXISTS idx_user_points_streak ON hakikisha.user_points(current_streak)',
@@ -583,7 +570,6 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_points_history_created_at ON hakikisha.points_history(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_points_history_activity_type ON hakikisha.points_history(activity_type)',
       
-      // Blog indexes
       'CREATE INDEX IF NOT EXISTS idx_blog_articles_author_id ON hakikisha.blog_articles(author_id)',
       'CREATE INDEX IF NOT EXISTS idx_blog_articles_status ON hakikisha.blog_articles(status)',
       'CREATE INDEX IF NOT EXISTS idx_blog_articles_category ON hakikisha.blog_articles(category)',
@@ -596,7 +582,6 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_blog_likes_blog_id ON hakikisha.blog_likes(blog_id)',
       'CREATE INDEX IF NOT EXISTS idx_blog_likes_user_id ON hakikisha.blog_likes(user_id)',
       
-      // Notification indexes
       'CREATE INDEX IF NOT EXISTS idx_user_notification_settings_user ON hakikisha.user_notification_settings(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_user ON hakikisha.verdicts(claim_id) INCLUDE (fact_checker_id, created_at)',
       'CREATE INDEX IF NOT EXISTS idx_claims_user_created ON hakikisha.claims(user_id, created_at)'
@@ -631,6 +616,7 @@ class DatabaseInitializer {
       
       console.log('Setting up admin user: ' + adminEmail);
       
+      // First check if admin exists and get current state
       const existingAdmin = await db.query(
         'SELECT id, email, username, password_hash, role, registration_status, status FROM hakikisha.users WHERE email = $1',
         [adminEmail]
@@ -640,7 +626,13 @@ class DatabaseInitializer {
         const admin = existingAdmin.rows[0];
         console.log('Found existing admin: ' + admin.email + ', role: ' + admin.role + ', status: ' + admin.registration_status);
         
-        if (admin.registration_status !== 'approved' || !admin.password_hash) {
+        // Verify the password matches
+        let passwordValid = false;
+        if (admin.password_hash) {
+          passwordValid = await bcrypt.compare(adminPassword, admin.password_hash);
+        }
+        
+        if (!passwordValid || admin.registration_status !== 'approved' || admin.role !== 'admin') {
           console.log('Fixing admin user status and password...');
           
           const saltRounds = 12;
@@ -767,7 +759,7 @@ class DatabaseInitializer {
                                            notificationSettingsColumns.rows.some(col => col.column_name === 'email_notifications');
       console.log(`✅ Notification settings has required columns: ${hasRequiredNotificationColumns}`);
 
-      // ADDED: Check notifications table
+      // Check notifications table
       const notificationsColumns = await db.query(`
         SELECT column_name, data_type, is_nullable, column_default
         FROM information_schema.columns 
@@ -826,7 +818,7 @@ class DatabaseInitializer {
         factCheckerActivitiesExist: hasRequiredActivitiesColumns,
         pointsTablesExist: hasRequiredPointsColumns,
         notificationSettingsExist: hasRequiredNotificationColumns,
-        notificationsTableExist: hasRequiredNotificationsColumns, // ADDED
+        notificationsTableExist: hasRequiredNotificationsColumns,
         usersWithPoints: usersWithoutPoints.rows.length === 0,
         usersWithNotificationSettings: usersWithoutNotificationSettings.rows.length === 0
       };
@@ -935,7 +927,7 @@ class DatabaseInitializer {
       console.log('Resetting database...');
       
       const tables = [
-        'notifications', // ADDED: Include notifications table
+        'notifications',
         'user_notification_settings',
         'points_history',
         'user_points',
@@ -1001,8 +993,8 @@ class DatabaseInitializer {
       await this.createAIVerdictsTable();
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
-      await this.createNotificationsTable(); // ADDED: Create notifications table
-      await this.ensureVerdictsColumns(); // Ensure verdicts columns are properly set
+      await this.createNotificationsTable();
+      await this.ensureVerdictsColumns();
       await this.ensureFactCheckersColumns();
       await this.ensureAdminActivitiesColumns();
       await this.createIndexes();
@@ -1082,17 +1074,16 @@ class DatabaseInitializer {
     try {
       console.log('Ensuring all required columns exist...');
       await this.ensureUserColumns();
-      await this.ensureVerdictsColumns(); // Make sure this is called
+      await this.ensureVerdictsColumns();
       await this.ensureAIVerdictsColumns();
       await this.ensureNotificationSettingsColumns();
-      await this.ensureNotificationsColumns(); // ADDED: Ensure notifications columns
+      await this.ensureNotificationsColumns();
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
       throw error;
     }
   }
 
-  // ADDED: Ensure notifications table columns
   static async ensureNotificationsColumns() {
     try {
       console.log('Checking for missing columns in notifications table...');
@@ -1165,7 +1156,7 @@ class DatabaseInitializer {
       const notificationSettingsMigration = require('../../migrations/024_add_notification_settings_table');
       await notificationSettingsMigration.up();
       
-      // ADDED: Run notifications table migration
+      // Run notifications table migration
       const notificationsMigration = require('../../migrations/025_add_notifications_table');
       await notificationsMigration.up();
       
@@ -1226,7 +1217,6 @@ class DatabaseInitializer {
     }
   }
 
-  // UPDATED: Fixed ensureVerdictsColumns method
   static async ensureVerdictsColumns() {
     try {
       console.log('Checking for missing columns in verdicts table...');
@@ -1237,7 +1227,7 @@ class DatabaseInitializer {
         { name: 'review_notes', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
         { name: 'time_spent', type: 'INTEGER', defaultValue: '0', isUnique: false },
         { name: 'ai_verdict_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
-        { name: 'based_on_ai_verdict', type: 'BOOLEAN', defaultValue: 'false', isUnique: false }, // This is the missing column
+        { name: 'based_on_ai_verdict', type: 'BOOLEAN', defaultValue: 'false', isUnique: false },
         { name: 'responsibility', type: 'VARCHAR(20)', defaultValue: "'creco'", isUnique: false }
       ];
 
@@ -1245,7 +1235,7 @@ class DatabaseInitializer {
         await this.ensureColumnExists('verdicts', column);
       }
       
-      console.log('All required columns verified in verdicts table');
+      console.log('✅ All required columns verified in verdicts table');
     } catch (error) {
       console.error('❌ Error ensuring verdicts columns:', error);
       throw error;
