@@ -250,43 +250,13 @@ class NotificationService {
   }
 
   async maybeSendEmailNotification(notification) {
-    try {
-      const preferences = await this.getNotificationPreferences(notification.user_id);
-      
-      if (!preferences.email_notifications) {
-        return;
-      }
-
-      // Check if this notification type should trigger email
-      const emailEnabledTypes = ['verdict_ready', 'system_alert', 'claim_assigned'];
-      if (!emailEnabledTypes.includes(notification.type)) {
-        return;
-      }
-
-      // Get user email
-      const user = await User.findById(notification.user_id);
-      if (!user || !user.email) {
-        return;
-      }
-
-      // Send email
-      await emailService.sendNotificationEmail(
-        user.email,
-        notification.title,
-        notification.message,
-        this.getNotificationContext(notification)
-      );
-
-      logger.debug('Email notification sent', {
-        notificationId: notification.id,
-        userId: notification.user_id,
-        email: user.email
-      });
-
-    } catch (error) {
-      logger.error('Email notification failed:', error);
-      // Don't throw error to avoid affecting main notification flow
-    }
+    // DISABLED: In-app notifications only, no email sending
+    logger.debug('Email notifications disabled - using in-app only', {
+      notificationId: notification.id,
+      userId: notification.user_id,
+      type: notification.type
+    });
+    return;
   }
 
   async maybeSendPushNotification(notification) {

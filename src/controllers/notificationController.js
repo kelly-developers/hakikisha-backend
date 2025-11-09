@@ -8,7 +8,7 @@ class NotificationController {
       
       const userId = req.user.userId;
 
-      // Query using notifications table for proper read tracking
+      // Query ONLY human verdicts (not AI verdicts)
       const query = `
         SELECT 
           n.id as notification_id,
@@ -20,18 +20,18 @@ class NotificationController {
           n.related_entity_id as "claimId",
           c.title as "claimTitle",
           c.category,
-          COALESCE(av.verdict, v.verdict) as verdict,
-          COALESCE(av.explanation, v.explanation) as explanation,
-          COALESCE(fc.username, 'AI Assistant') as "factCheckerName",
+          v.verdict as verdict,
+          v.explanation as explanation,
+          fc.username as "factCheckerName",
           fc.profile_picture as "factCheckerAvatar"
         FROM hakikisha.notifications n
         LEFT JOIN hakikisha.claims c ON n.related_entity_id::uuid = c.id
-        LEFT JOIN hakikisha.ai_verdicts av ON c.ai_verdict_id = av.id
         LEFT JOIN hakikisha.verdicts v ON c.human_verdict_id = v.id
         LEFT JOIN hakikisha.users fc ON v.fact_checker_id = fc.id
         WHERE n.user_id = $1 
           AND n.type = 'verdict_ready'
           AND n.is_read = false
+          AND c.human_verdict_id IS NOT NULL
         ORDER BY n.created_at DESC
         LIMIT 50
       `;

@@ -45,13 +45,17 @@ class FactCheckerController {
           aiSources = [];
         }
 
+        // Format date properly in EAT (Africa/Nairobi timezone)
+        const submittedDate = new Date(claim.submittedDate);
+        const eatDate = new Date(submittedDate.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
+        
         return {
           id: claim.id,
           title: claim.title,
           description: claim.description,
           category: claim.category,
           submittedBy: claim.submitterEmail || claim.submittedBy,
-          submittedDate: new Date(claim.submittedDate).toISOString().split('T')[0],
+          submittedDate: eatDate.toISOString(),
           imageUrl: claim.imageUrl,
           videoLink: claim.media_type === 'video' ? claim.imageUrl : null,
           sourceLink: null,
@@ -273,7 +277,7 @@ class FactCheckerController {
           c.description,
           c.category,
           c.status as claim_status,
-          c.created_at as claim_date,
+          c.created_at AT TIME ZONE 'Africa/Nairobi' as claim_date,
           u.email as submitted_by,
           av.id as ai_verdict_id,
           av.verdict as ai_verdict,
@@ -283,7 +287,7 @@ class FactCheckerController {
           av.disclaimer as ai_disclaimer,
           av.is_edited_by_human as is_edited,
           av.edited_by_fact_checker_id as edited_by,
-          av.edited_at as edited_date,
+          av.edited_at AT TIME ZONE 'Africa/Nairobi' as edited_date,
           fc.username as editor_name,
           COUNT(*) OVER() as total_count
          FROM hakikisha.claims c
