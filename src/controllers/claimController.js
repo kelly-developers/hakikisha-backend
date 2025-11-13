@@ -43,7 +43,7 @@ class ClaimController {
 
       console.log('Inserting claim into database...');
       
-      // First ensure the database has the required columns
+      // First ensure the database has the required columns - FIXED: Use the class method properly
       await this.ensureClaimsTableColumns();
       
       const result = await db.query(
@@ -226,7 +226,7 @@ class ClaimController {
       logger.error('Submit claim error:', error);
       
       // Handle missing column error specifically
-      if (error.message && error.message.includes('source_url')) {
+      if (error.message && error.message.includes('source_url') || error.message.includes('video_url')) {
         console.log('Database schema issue detected, attempting to fix...');
         try {
           await this.fixClaimsTableSchema();
@@ -264,6 +264,8 @@ class ClaimController {
 
   async ensureClaimsTableColumns() {
     try {
+      console.log('Checking for required columns in claims table...');
+      
       // Check if source_url column exists
       const checkQuery = `
         SELECT column_name 
@@ -282,6 +284,8 @@ class ClaimController {
           ADD COLUMN source_url TEXT
         `);
         console.log('✅ source_url column added to claims table');
+      } else {
+        console.log('✅ source_url column already exists in claims table');
       }
       
       // Also check for video_url column
@@ -302,6 +306,8 @@ class ClaimController {
           ADD COLUMN video_url TEXT
         `);
         console.log('✅ video_url column added to claims table');
+      } else {
+        console.log('✅ video_url column already exists in claims table');
       }
     } catch (error) {
       console.error('Error ensuring claims table columns:', error);
@@ -1094,5 +1100,6 @@ class ClaimController {
   }
 }
 
+// Create and export the instance
 const claimController = new ClaimController();
 module.exports = claimController;
