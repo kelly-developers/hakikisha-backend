@@ -181,8 +181,17 @@ const register = async (req, res) => {
 const login = async (req, res) => {
   try {
     console.log('Login Request Received');
+    console.log('Login attempt:', { 
+      email: req.body.email, 
+      identifier: req.body.identifier,
+      hasPassword: !!req.body.password 
+    });
+    
     // TRIM input to handle spaces and normalize email to lowercase
-    const emailOrUsername = req.body.email ? req.body.email.trim().toLowerCase() : '';
+    // Accept both 'email' and 'identifier' fields for backward compatibility
+    const emailOrUsername = req.body.identifier 
+      ? req.body.identifier.trim().toLowerCase() 
+      : (req.body.email ? req.body.email.trim().toLowerCase() : '');
     const password = req.body.password || '';
 
     if (!emailOrUsername || !password) {
@@ -213,10 +222,12 @@ const login = async (req, res) => {
 
     const user = userResult.rows[0];
 
+    // Check if account is suspended, inactive, or deactivated
     if (user.status !== 'active') {
+      logger.warn(`Login attempt for suspended/inactive account: ${user.email}`);
       return res.status(403).json({
         success: false,
-        error: 'Your account has been suspended or deactivated. Please contact support.',
+        error: 'Your account has been suspended or deactivated. Please contact support for assistance.',
         code: 'ACCOUNT_SUSPENDED'
       });
     }
