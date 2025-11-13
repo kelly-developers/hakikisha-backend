@@ -42,6 +42,10 @@ class ClaimController {
       const mediaUrl = imageUrl || videoLink || null;
 
       console.log('Inserting claim into database...');
+      
+      // First ensure the database has the required columns
+      await this.ensureClaimsTableColumns();
+      
       const result = await db.query(
         `INSERT INTO hakikisha.claims (
           id, user_id, title, description, category, media_type, media_url,
@@ -65,10 +69,10 @@ class ClaimController {
       console.log('Claim inserted successfully:', result.rows[0]);
 
       // Automatically process claim with AI
-      const poeAIService = require('../services/poeAIService');
-      const AIVerdict = require('../models/AIVerdict');
-      
       try {
+        const poeAIService = require('../services/poeAIService');
+        const AIVerdict = require('../models/AIVerdict');
+        
         console.log('Starting automatic AI processing for claim:', claimId);
         const aiFactCheckResult = await poeAIService.factCheck(claimText, category, sourceLink);
         
@@ -221,6 +225,18 @@ class ClaimController {
       console.error('Submit claim error:', error);
       logger.error('Submit claim error:', error);
       
+      // Handle missing column error specifically
+      if (error.message && error.message.includes('source_url')) {
+        console.log('Database schema issue detected, attempting to fix...');
+        try {
+          await this.fixClaimsTableSchema();
+          // Retry the operation after fixing schema
+          return this.submitClaim(req, res);
+        } catch (fixError) {
+          console.error('Failed to fix database schema:', fixError);
+        }
+      }
+      
       if (error.code === '23503') {
         return res.status(400).json({
           success: false,
@@ -240,8 +256,70 @@ class ClaimController {
       res.status(500).json({
         success: false,
         error: 'Claim submission failed',
-        code: 'SERVER_ERROR'
+        code: 'SERVER_ERROR',
+        details: error.message
       });
+    }
+  }
+
+  async ensureClaimsTableColumns() {
+    try {
+      // Check if source_url column exists
+      const checkQuery = `
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' 
+        AND table_name = 'claims' 
+        AND column_name = 'source_url'
+      `;
+      
+      const result = await db.query(checkQuery);
+      
+      if (result.rows.length === 0) {
+        console.log('Adding missing source_url column to claims table...');
+        await db.query(`
+          ALTER TABLE hakikisha.claims 
+          ADD COLUMN source_url TEXT
+        `);
+        console.log('✅ source_url column added to claims table');
+      }
+      
+      // Also check for video_url column
+      const videoCheckQuery = `
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' 
+        AND table_name = 'claims' 
+        AND column_name = 'video_url'
+      `;
+      
+      const videoResult = await db.query(videoCheckQuery);
+      
+      if (videoResult.rows.length === 0) {
+        console.log('Adding missing video_url column to claims table...');
+        await db.query(`
+          ALTER TABLE hakikisha.claims 
+          ADD COLUMN video_url TEXT
+        `);
+        console.log('✅ video_url column added to claims table');
+      }
+    } catch (error) {
+      console.error('Error ensuring claims table columns:', error);
+      throw error;
+    }
+  }
+
+  async fixClaimsTableSchema() {
+    try {
+      console.log('Fixing claims table schema...');
+      
+      // Add missing columns if they don't exist
+      await this.ensureClaimsTableColumns();
+      
+      console.log('✅ Claims table schema fixed successfully');
+    } catch (error) {
+      console.error('Error fixing claims table schema:', error);
+      throw error;
     }
   }
 
@@ -275,6 +353,9 @@ class ClaimController {
     try {
       console.log('Get My Claims - User:', req.user.userId);
       const { status } = req.query;
+
+      // Ensure database schema is correct before querying
+      await this.ensureClaimsTableColumns();
 
       let query = `
         SELECT 
@@ -339,10 +420,23 @@ class ClaimController {
     } catch (error) {
       console.error('Get my claims error:', error);
       logger.error('Get my claims error:', error);
+      
+      // Handle schema issues
+      if (error.message && error.message.includes('source_url') || error.message.includes('video_url')) {
+        try {
+          await this.fixClaimsTableSchema();
+          // Retry the operation after fixing schema
+          return this.getMyClaims(req, res);
+        } catch (fixError) {
+          console.error('Failed to fix database schema:', fixError);
+        }
+      }
+      
       res.status(500).json({
         success: false,
         error: 'Failed to get claims',
-        code: 'SERVER_ERROR'
+        code: 'SERVER_ERROR',
+        details: error.message
       });
     }
   }
@@ -360,6 +454,9 @@ class ClaimController {
           code: 'VALIDATION_ERROR'
         });
       }
+
+      // Ensure database schema is correct before querying
+      await this.ensureClaimsTableColumns();
 
       const result = await db.query(
         `SELECT 
@@ -595,10 +692,23 @@ class ClaimController {
     } catch (error) {
       console.error('Get claim details error:', error);
       logger.error('Get claim details error:', error);
+      
+      // Handle schema issues
+      if (error.message && error.message.includes('source_url') || error.message.includes('video_url')) {
+        try {
+          await this.fixClaimsTableSchema();
+          // Retry the operation after fixing schema
+          return this.getClaimDetails(req, res);
+        } catch (fixError) {
+          console.error('Failed to fix database schema:', fixError);
+        }
+      }
+      
       res.status(500).json({
         success: false,
         error: 'Failed to get claim details',
-        code: 'SERVER_ERROR'
+        code: 'SERVER_ERROR',
+        details: error.message
       });
     }
   }
@@ -614,6 +724,9 @@ class ClaimController {
           code: 'VALIDATION_ERROR'
         });
       }
+
+      // Ensure database schema is correct before querying
+      await this.ensureClaimsTableColumns();
 
       console.log('Search claims:', q);
       const result = await db.query(
@@ -637,10 +750,23 @@ class ClaimController {
       });
     } catch (error) {
       logger.error('Search claims error:', error);
+      
+      // Handle schema issues
+      if (error.message && error.message.includes('source_url') || error.message.includes('video_url')) {
+        try {
+          await this.fixClaimsTableSchema();
+          // Retry the operation after fixing schema
+          return this.searchClaims(req, res);
+        } catch (fixError) {
+          console.error('Failed to fix database schema:', fixError);
+        }
+      }
+      
       res.status(500).json({
         success: false,
         error: 'Search failed',
-        code: 'SERVER_ERROR'
+        code: 'SERVER_ERROR',
+        details: error.message
       });
     }
   }
@@ -650,6 +776,9 @@ class ClaimController {
       const { limit = 10 } = req.query;
       
       console.log('Getting trending claims with limit:', limit);
+
+      // Ensure database schema is correct before querying
+      await this.ensureClaimsTableColumns();
 
       const query = `
         SELECT 
@@ -780,10 +909,22 @@ class ClaimController {
       console.error('Get trending claims error:', error);
       logger.error('Get trending claims error:', error);
       
+      // Handle schema issues
+      if (error.message && error.message.includes('source_url') || error.message.includes('video_url')) {
+        try {
+          await this.fixClaimsTableSchema();
+          // Retry the operation after fixing schema
+          return this.getTrendingClaims(req, res);
+        } catch (fixError) {
+          console.error('Failed to fix database schema:', fixError);
+        }
+      }
+      
       res.status(500).json({
         success: false,
         error: 'Failed to get trending claims: ' + error.message,
-        code: 'SERVER_ERROR'
+        code: 'SERVER_ERROR',
+        details: error.message
       });
     }
   }
@@ -895,6 +1036,9 @@ class ClaimController {
   // Get verified claims (claims with final human verdict or published)
   async getVerifiedClaims(req, res) {
     try {
+      // Ensure database schema is correct before querying
+      await this.ensureClaimsTableColumns();
+
       const result = await db.query(
         `SELECT 
           c.id,
@@ -928,10 +1072,23 @@ class ClaimController {
     } catch (error) {
       console.error('Get verified claims error:', error);
       logger.error('Get verified claims error:', error);
+      
+      // Handle schema issues
+      if (error.message && error.message.includes('source_url') || error.message.includes('video_url')) {
+        try {
+          await this.fixClaimsTableSchema();
+          // Retry the operation after fixing schema
+          return this.getVerifiedClaims(req, res);
+        } catch (fixError) {
+          console.error('Failed to fix database schema:', fixError);
+        }
+      }
+      
       res.status(500).json({
         success: false,
         error: 'Failed to get verified claims',
-        code: 'SERVER_ERROR'
+        code: 'SERVER_ERROR',
+        details: error.message
       });
     }
   }

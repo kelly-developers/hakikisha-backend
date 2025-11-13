@@ -380,7 +380,8 @@ class DatabaseInitializer {
           category VARCHAR(100),
           media_type VARCHAR(50) DEFAULT 'text',
           media_url TEXT,
-          video_url TEXT, -- Added video_url column to fix the error
+          video_url TEXT,
+          source_url TEXT, -- ADDED THIS MISSING COLUMN
           status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed')),
           priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
           submission_count INTEGER DEFAULT 1,
@@ -425,7 +426,8 @@ class DatabaseInitializer {
             category VARCHAR(100),
             media_type VARCHAR(50) DEFAULT 'text',
             media_url TEXT,
-            video_url TEXT, -- Added video_url column to fix the error
+            video_url TEXT,
+            source_url TEXT, -- ADDED THIS MISSING COLUMN
             status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed')),
             priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
             submission_count INTEGER DEFAULT 1,
@@ -533,7 +535,8 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_claims_trending ON hakikisha.claims(is_trending)',
       'CREATE INDEX IF NOT EXISTS idx_claims_trending_score ON hakikisha.claims(trending_score)',
       'CREATE INDEX IF NOT EXISTS idx_claims_created_at ON hakikisha.claims(created_at)',
-      'CREATE INDEX IF NOT EXISTS idx_claims_video_url ON hakikisha.claims(video_url) WHERE video_url IS NOT NULL', // Added index for video_url
+      'CREATE INDEX IF NOT EXISTS idx_claims_video_url ON hakikisha.claims(video_url) WHERE video_url IS NOT NULL',
+      'CREATE INDEX IF NOT EXISTS idx_claims_source_url ON hakikisha.claims(source_url) WHERE source_url IS NOT NULL', // ADDED INDEX FOR SOURCE_URL
       
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_claim_id ON hakikisha.ai_verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_verdict ON hakikisha.ai_verdicts(verdict)',
@@ -692,7 +695,7 @@ class DatabaseInitializer {
     try {
       console.log('Verifying database state...');
       
-      // Check claims table for the video_url column
+      // Check claims table for the source_url column
       const claimsColumns = await db.query(`
         SELECT column_name, data_type, is_nullable, column_default
         FROM information_schema.columns 
@@ -702,10 +705,12 @@ class DatabaseInitializer {
       
       console.log(`Claims table columns: ${claimsColumns.rows.length}`);
       const hasVideoUrlColumn = claimsColumns.rows.some(col => col.column_name === 'video_url');
+      const hasSourceUrlColumn = claimsColumns.rows.some(col => col.column_name === 'source_url'); // CHECK FOR SOURCE_URL
       console.log(`✅ Claims has video_url column: ${hasVideoUrlColumn}`);
+      console.log(`✅ Claims has source_url column: ${hasSourceUrlColumn}`);
       
-      if (!hasVideoUrlColumn) {
-        console.log('⚠️ video_url column missing, adding it now...');
+      if (!hasVideoUrlColumn || !hasSourceUrlColumn) {
+        console.log('⚠️ Missing columns detected, adding them now...');
         await this.ensureClaimsColumns();
       }
       
@@ -834,6 +839,7 @@ class DatabaseInitializer {
 
       return {
         claimsTableHasVideoUrl: hasVideoUrlColumn,
+        claimsTableHasSourceUrl: hasSourceUrlColumn, // ADDED THIS
         verdictsTableHasBasedOnAI: hasBasedOnAIVerdictColumn,
         aiVerdictsTablesExist: hasRequiredAIVerdictsColumns,
         factCheckerActivitiesExist: hasRequiredActivitiesColumns,
@@ -1095,7 +1101,7 @@ class DatabaseInitializer {
     try {
       console.log('Ensuring all required columns exist...');
       await this.ensureUserColumns();
-      await this.ensureClaimsColumns(); // Added this line
+      await this.ensureClaimsColumns(); // This will now add source_url
       await this.ensureVerdictsColumns();
       await this.ensureAIVerdictsColumns();
       await this.ensureNotificationSettingsColumns();
@@ -1111,7 +1117,8 @@ class DatabaseInitializer {
       console.log('Checking for missing columns in claims table...');
       
       const requiredColumns = [
-        { name: 'video_url', type: 'TEXT', defaultValue: 'NULL', isUnique: false } // Added video_url column
+        { name: 'video_url', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
+        { name: 'source_url', type: 'TEXT', defaultValue: 'NULL', isUnique: false } // ADDED THIS COLUMN
       ];
 
       for (const column of requiredColumns) {
