@@ -1073,7 +1073,7 @@ class ClaimController {
       console.error('Get verified claims error:', error);
       logger.error('Get verified claims error:', error);
       
-      // Handle schema issues
+      // schema issues
       if (error.message && error.message.includes('source_url') || error.message.includes('video_url')) {
         try {
           await this.fixClaimsTableSchema();
