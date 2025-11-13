@@ -43,8 +43,8 @@ class ClaimController {
 
       console.log('Inserting claim into database...');
       
-      // First ensure the database has the required columns - FIXED: Use the class method properly
-      await this.ensureClaimsTableColumns();
+      // REMOVED THE PROBLEMATIC ensureClaimsTableColumns CALL
+      // Since we verified the columns already exist in the database
       
       const result = await db.query(
         `INSERT INTO hakikisha.claims (
@@ -226,7 +226,7 @@ class ClaimController {
       logger.error('Submit claim error:', error);
       
       // Handle missing column error specifically
-      if (error.message && error.message.includes('source_url') || error.message.includes('video_url')) {
+      if (error.message && (error.message.includes('source_url') || error.message.includes('video_url'))) {
         console.log('Database schema issue detected, attempting to fix...');
         try {
           await this.fixClaimsTableSchema();
@@ -262,6 +262,7 @@ class ClaimController {
     }
   }
 
+  // Keep this method for other methods that might call it, but remove the call in submitClaim
   async ensureClaimsTableColumns() {
     try {
       console.log('Checking for required columns in claims table...');
@@ -360,9 +361,6 @@ class ClaimController {
       console.log('Get My Claims - User:', req.user.userId);
       const { status } = req.query;
 
-      // Ensure database schema is correct before querying
-      await this.ensureClaimsTableColumns();
-
       let query = `
         SELECT 
           c.id, 
@@ -428,7 +426,7 @@ class ClaimController {
       logger.error('Get my claims error:', error);
       
       // Handle schema issues
-      if (error.message && error.message.includes('source_url') || error.message.includes('video_url')) {
+      if (error.message && (error.message.includes('source_url') || error.message.includes('video_url'))) {
         try {
           await this.fixClaimsTableSchema();
           // Retry the operation after fixing schema
@@ -460,9 +458,6 @@ class ClaimController {
           code: 'VALIDATION_ERROR'
         });
       }
-
-      // Ensure database schema is correct before querying
-      await this.ensureClaimsTableColumns();
 
       const result = await db.query(
         `SELECT 
@@ -700,7 +695,7 @@ class ClaimController {
       logger.error('Get claim details error:', error);
       
       // Handle schema issues
-      if (error.message && error.message.includes('source_url') || error.message.includes('video_url')) {
+      if (error.message && (error.message.includes('source_url') || error.message.includes('video_url'))) {
         try {
           await this.fixClaimsTableSchema();
           // Retry the operation after fixing schema
@@ -731,9 +726,6 @@ class ClaimController {
         });
       }
 
-      // Ensure database schema is correct before querying
-      await this.ensureClaimsTableColumns();
-
       console.log('Search claims:', q);
       const result = await db.query(
         `SELECT c.id, c.title, c.description, c.category, c.status, c.video_url, c.source_url, c.media_url, c.media_type
@@ -758,7 +750,7 @@ class ClaimController {
       logger.error('Search claims error:', error);
       
       // Handle schema issues
-      if (error.message && error.message.includes('source_url') || error.message.includes('video_url')) {
+      if (error.message && (error.message.includes('source_url') || error.message.includes('video_url'))) {
         try {
           await this.fixClaimsTableSchema();
           // Retry the operation after fixing schema
@@ -782,9 +774,6 @@ class ClaimController {
       const { limit = 10 } = req.query;
       
       console.log('Getting trending claims with limit:', limit);
-
-      // Ensure database schema is correct before querying
-      await this.ensureClaimsTableColumns();
 
       const query = `
         SELECT 
@@ -916,7 +905,7 @@ class ClaimController {
       logger.error('Get trending claims error:', error);
       
       // Handle schema issues
-      if (error.message && error.message.includes('source_url') || error.message.includes('video_url')) {
+      if (error.message && (error.message.includes('source_url') || error.message.includes('video_url'))) {
         try {
           await this.fixClaimsTableSchema();
           // Retry the operation after fixing schema
@@ -1042,9 +1031,6 @@ class ClaimController {
   // Get verified claims (claims with final human verdict or published)
   async getVerifiedClaims(req, res) {
     try {
-      // Ensure database schema is correct before querying
-      await this.ensureClaimsTableColumns();
-
       const result = await db.query(
         `SELECT 
           c.id,
@@ -1080,7 +1066,7 @@ class ClaimController {
       logger.error('Get verified claims error:', error);
       
       // schema issues
-      if (error.message && error.message.includes('source_url') || error.message.includes('video_url')) {
+      if (error.message && (error.message.includes('source_url') || error.message.includes('video_url'))) {
         try {
           await this.fixClaimsTableSchema();
           // Retry the operation after fixing schema
