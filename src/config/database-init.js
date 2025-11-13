@@ -380,6 +380,7 @@ class DatabaseInitializer {
           category VARCHAR(100),
           media_type VARCHAR(50) DEFAULT 'text',
           media_url TEXT,
+          video_url TEXT, -- Added video_url column to fix the error
           status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed')),
           priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
           submission_count INTEGER DEFAULT 1,
@@ -424,6 +425,7 @@ class DatabaseInitializer {
             category VARCHAR(100),
             media_type VARCHAR(50) DEFAULT 'text',
             media_url TEXT,
+            video_url TEXT, -- Added video_url column to fix the error
             status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed')),
             priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
             submission_count INTEGER DEFAULT 1,
@@ -531,6 +533,7 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_claims_trending ON hakikisha.claims(is_trending)',
       'CREATE INDEX IF NOT EXISTS idx_claims_trending_score ON hakikisha.claims(trending_score)',
       'CREATE INDEX IF NOT EXISTS idx_claims_created_at ON hakikisha.claims(created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_claims_video_url ON hakikisha.claims(video_url) WHERE video_url IS NOT NULL', // Added index for video_url
       
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_claim_id ON hakikisha.ai_verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_verdict ON hakikisha.ai_verdicts(verdict)',
@@ -689,6 +692,23 @@ class DatabaseInitializer {
     try {
       console.log('Verifying database state...');
       
+      // Check claims table for the video_url column
+      const claimsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'claims'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`Claims table columns: ${claimsColumns.rows.length}`);
+      const hasVideoUrlColumn = claimsColumns.rows.some(col => col.column_name === 'video_url');
+      console.log(`✅ Claims has video_url column: ${hasVideoUrlColumn}`);
+      
+      if (!hasVideoUrlColumn) {
+        console.log('⚠️ video_url column missing, adding it now...');
+        await this.ensureClaimsColumns();
+      }
+      
       // Check verdicts table for the based_on_ai_verdict column
       const verdictsColumns = await db.query(`
         SELECT column_name, data_type, is_nullable, column_default
@@ -813,6 +833,7 @@ class DatabaseInitializer {
       }
 
       return {
+        claimsTableHasVideoUrl: hasVideoUrlColumn,
         verdictsTableHasBasedOnAI: hasBasedOnAIVerdictColumn,
         aiVerdictsTablesExist: hasRequiredAIVerdictsColumns,
         factCheckerActivitiesExist: hasRequiredActivitiesColumns,
@@ -1074,12 +1095,32 @@ class DatabaseInitializer {
     try {
       console.log('Ensuring all required columns exist...');
       await this.ensureUserColumns();
+      await this.ensureClaimsColumns(); // Added this line
       await this.ensureVerdictsColumns();
       await this.ensureAIVerdictsColumns();
       await this.ensureNotificationSettingsColumns();
       await this.ensureNotificationsColumns();
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
+      throw error;
+    }
+  }
+
+  static async ensureClaimsColumns() {
+    try {
+      console.log('Checking for missing columns in claims table...');
+      
+      const requiredColumns = [
+        { name: 'video_url', type: 'TEXT', defaultValue: 'NULL', isUnique: false } // Added video_url column
+      ];
+
+      for (const column of requiredColumns) {
+        await this.ensureColumnExists('claims', column);
+      }
+      
+      console.log('✅ All required columns verified in claims table');
+    } catch (error) {
+      console.error('❌ Error ensuring claims columns:', error);
       throw error;
     }
   }
@@ -1235,7 +1276,7 @@ class DatabaseInitializer {
         await this.ensureColumnExists('verdicts', column);
       }
       
-      console.log(' All required columns verified in verdicts table');
+      console.log('✅ All required columns verified in verdicts table');
     } catch (error) {
       console.error('❌ Error ensuring verdicts columns:', error);
       throw error;
