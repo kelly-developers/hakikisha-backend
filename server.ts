@@ -20,7 +20,7 @@ const startServer = async () => {
       process.exit(1);
     }
 
-    // Initialize database tables and create admin user
+    // Initialize database table
     console.log('🗃️ Initializing database tables and admin user...');
     await DatabaseInitializer.initializeCompleteDatabase();
 
