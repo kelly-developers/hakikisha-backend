@@ -33,6 +33,11 @@ class ClaimController {
       const claimId = uuidv4();
       console.log('Generated claim ID:', claimId);
 
+      // Debug the incoming links
+      console.log('Video Link:', videoLink);
+      console.log('Source Link:', sourceLink);
+      console.log('Image URL:', imageUrl);
+
       const mediaType = imageUrl || videoLink ? 'media' : 'text';
       const mediaUrl = imageUrl || videoLink || null;
 
@@ -43,7 +48,7 @@ class ClaimController {
           video_url, source_url, status, priority, submission_count, created_at
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 'medium', 1, NOW())
-        RETURNING id, category, status, created_at as submittedDate`,
+        RETURNING id, category, status, created_at as submittedDate, video_url, source_url`,
         [
           claimId, 
           req.user.userId, 
@@ -180,19 +185,34 @@ class ClaimController {
         
         console.log('Points awarded:', pointsResult);
 
+        // Return the claim with video and source URLs
+        const claimWithUrls = {
+          ...result.rows[0],
+          videoUrl: result.rows[0].video_url,
+          sourceUrl: result.rows[0].source_url
+        };
+
         res.status(201).json({
           success: true,
           message: 'Claim submitted successfully',
-          claim: result.rows[0],
+          claim: claimWithUrls,
           pointsAwarded: pointsResult?.pointsAwarded,
           isFirstClaim: isFirstClaim
         });
       } catch (pointsError) {
         console.log('Points service error, continuing without points:', pointsError.message);
+        
+        // Return the claim with video and source URLs even if points fail
+        const claimWithUrls = {
+          ...result.rows[0],
+          videoUrl: result.rows[0].video_url,
+          sourceUrl: result.rows[0].source_url
+        };
+
         res.status(201).json({
           success: true,
           message: 'Claim submitted successfully',
-          claim: result.rows[0],
+          claim: claimWithUrls,
           isFirstClaim: isFirstClaim
         });
       }
@@ -264,6 +284,8 @@ class ClaimController {
           c.status,
           c.video_url,
           c.source_url,
+          c.media_url,
+          c.media_type,
           c.created_at as "submittedDate",
           v.created_at as "verdictDate",
           v.verdict, 
@@ -305,7 +327,9 @@ class ClaimController {
         sources: claim.sources || [],
         factCheckerName: claim.factCheckerUsername || claim.factCheckerName || 'Fact Checker',
         videoUrl: claim.video_url,
-        sourceUrl: claim.source_url
+        sourceUrl: claim.source_url,
+        imageUrl: claim.media_type === 'image' ? claim.media_url : null,
+        mediaType: claim.media_type
       }));
 
       res.json({
@@ -341,6 +365,7 @@ class ClaimController {
         `SELECT 
           c.*, 
           u.email as "submittedBy",
+          u.username as "submitterUsername",
           v.verdict as "human_verdict", 
           v.explanation as "human_explanation", 
           v.evidence_sources as "evidence_sources",
@@ -376,6 +401,10 @@ class ClaimController {
 
       const claim = result.rows[0];
       console.log('Claim found with status:', claim.status);
+      console.log('Video URL from database:', claim.video_url);
+      console.log('Source URL from database:', claim.source_url);
+      console.log('Media URL from database:', claim.media_url);
+      console.log('Media Type from database:', claim.media_type);
       
       // Process evidence sources to ensure consistent format
       let humanSources = [];
@@ -517,7 +546,7 @@ class ClaimController {
         description: claim.description,
         category: claim.category,
         status: claim.status,
-        submittedBy: claim.submittedBy,
+        submittedBy: claim.submitterUsername || claim.submittedBy,
         submittedDate: claim.created_at,
         verdictDate: claim.verdictDate,
         verdict: claim.human_verdict || claim.ai_verdict,
@@ -539,9 +568,11 @@ class ClaimController {
         ai_edited: claim.ai_edited,
         verdict_responsibility: claim.verdict_responsibility || 'ai',
         review_time: claim.review_time,
-        imageUrl: claim.media_url,
-        videoLink: claim.video_url || (claim.media_type === 'video' ? claim.media_url : null),
-        sourceUrl: claim.source_url
+        imageUrl: claim.media_type === 'image' ? claim.media_url : null,
+        videoLink: claim.video_url,
+        sourceUrl: claim.source_url,
+        mediaType: claim.media_type,
+        mediaUrl: claim.media_url
       };
 
       console.log('Processed claim data for frontend:', {
@@ -552,8 +583,9 @@ class ClaimController {
         humanSourcesCount: humanSources.length,
         aiSourcesCount: aiSources.length,
         factChecker: responseData.factChecker,
-        videoLink: !!responseData.videoLink,
-        sourceUrl: !!responseData.sourceUrl
+        videoLink: responseData.videoLink,
+        sourceUrl: responseData.sourceUrl,
+        imageUrl: responseData.imageUrl
       });
 
       res.json({
@@ -585,7 +617,7 @@ class ClaimController {
 
       console.log('Search claims:', q);
       const result = await db.query(
-        `SELECT c.id, c.title, c.description, c.category, c.status, c.video_url, c.source_url
+        `SELECT c.id, c.title, c.description, c.category, c.status, c.video_url, c.source_url, c.media_url, c.media_type
          FROM hakikisha.claims c
          WHERE c.title ILIKE $1 OR c.description ILIKE $1
          ORDER BY c.created_at DESC
@@ -596,7 +628,12 @@ class ClaimController {
       console.log(`Search found ${result.rows.length} results`);
       res.json({
         success: true,
-        results: result.rows
+        results: result.rows.map(row => ({
+          ...row,
+          videoUrl: row.video_url,
+          sourceUrl: row.source_url,
+          imageUrl: row.media_type === 'image' ? row.media_url : null
+        }))
       });
     } catch (error) {
       logger.error('Search claims error:', error);
@@ -623,6 +660,8 @@ class ClaimController {
           c.status,
           c.video_url,
           c.source_url,
+          c.media_url,
+          c.media_type,
           COALESCE(v.verdict, av.verdict) as verdict,
           COALESCE(v.explanation, av.explanation) as "verdictText",
           COALESCE(v.evidence_sources, av.evidence_sources) as sources,
@@ -665,7 +704,10 @@ class ClaimController {
         return {
           ...claim,
           sources: sources,
-          ai_confidence: claim.ai_confidence
+          ai_confidence: claim.ai_confidence,
+          videoUrl: claim.video_url,
+          sourceUrl: claim.source_url,
+          imageUrl: claim.media_type === 'image' ? claim.media_url : null
         };
       });
 
@@ -680,6 +722,8 @@ class ClaimController {
             c.status,
             c.video_url,
             c.source_url,
+            c.media_url,
+            c.media_type,
             COALESCE(v.verdict, av.verdict) as verdict,
             COALESCE(v.explanation, av.explanation) as "verdictText",
             COALESCE(v.evidence_sources, av.evidence_sources) as sources,
@@ -712,7 +756,10 @@ class ClaimController {
           return {
             ...claim,
             sources: sources,
-            ai_confidence: claim.ai_confidence
+            ai_confidence: claim.ai_confidence,
+            videoUrl: claim.video_url,
+            sourceUrl: claim.source_url,
+            imageUrl: claim.media_type === 'image' ? claim.media_url : null
           };
         });
         
@@ -856,6 +903,8 @@ class ClaimController {
           c.status,
           c.video_url,
           c.source_url,
+          c.media_url,
+          c.media_type,
           c.created_at as "submittedDate",
           v.verdict,
           v.explanation as "verdictText",
@@ -869,7 +918,12 @@ class ClaimController {
 
       res.json({
         success: true,
-        claims: result.rows
+        claims: result.rows.map(claim => ({
+          ...claim,
+          videoUrl: claim.video_url,
+          sourceUrl: claim.source_url,
+          imageUrl: claim.media_type === 'image' ? claim.media_url : null
+        }))
       });
     } catch (error) {
       console.error('Get verified claims error:', error);
