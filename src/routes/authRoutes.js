@@ -22,6 +22,7 @@ function generateUsernameFromEmail(email) {
 router.post('/register', async (req, res) => {
   try {
     const { email, password, phone, role = 'user', username } = req.body;
+    const phoneInput = phone ?? req.body.phone_number ?? null;
 
     console.log('Registration attempt:', { email, role });
 
@@ -90,7 +91,7 @@ router.post('/register', async (req, res) => {
        (email, username, password_hash, phone, role, registration_status, is_verified) 
        VALUES ($1, $2, $3, $4, $5, $6, $7) 
        RETURNING id, email, username, role, registration_status, is_verified`,
-      [email, finalUsername, passwordHash, phone, role, registrationStatus, isVerified]
+      [email, finalUsername, passwordHash, phoneInput, role, registrationStatus, isVerified]
     );
 
     const user = result.rows[0];
@@ -161,33 +162,46 @@ router.post('/register', async (req, res) => {
 // Enhanced login with 2FA for admins
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, username, identifier, password } = req.body;
 
-    console.log('Login attempt:', { email });
+    console.log('Login attempt:', { email, username, identifier });
+
+    // Normalize identifier
+    const emailOrUsername = (identifier ?? email ?? username ?? '').trim().toLowerCase();
 
     // Validate input
-    if (!email || !password) {
+    if (!emailOrUsername || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Email and password are required'
+        error: 'Identifier (email or username) and password are required'
       });
     }
 
-    // Find user by email
+    // Find user by email OR username
     const userResult = await db.query(
-      `SELECT id, email, username, password_hash, role, registration_status, is_verified, two_factor_enabled
-       FROM hakikisha.users WHERE email = $1`,
-      [email]
+      `SELECT id, email, username, password_hash, role, registration_status, is_verified, two_factor_enabled, status
+       FROM hakikisha.users 
+       WHERE LOWER(email) = $1 OR LOWER(username) = $1`,
+      [emailOrUsername]
     );
 
     if (userResult.rows.length === 0) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid email or password'
+        error: 'Invalid credentials'
       });
     }
 
     const user = userResult.rows[0];
+
+    // Block suspended/inactive accounts
+    if (user.status !== 'active') {
+      return res.status(403).json({
+        success: false,
+        error: 'Your account has been suspended or deactivated. Please contact support for assistance.',
+        code: 'ACCOUNT_SUSPENDED'
+      });
+    }
 
     // Check registration status
     if (user.registration_status === 'pending') {
@@ -209,7 +223,7 @@ router.post('/login', async (req, res) => {
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid email or password'
+        error: 'Invalid credentials'
       });
     }
 
@@ -218,17 +232,17 @@ router.post('/login', async (req, res) => {
 
     if (requires2FA) {
       // Generate and send OTP for 2FA
-      await twoFactorService.generateAndSendOTP(user.id, user.email, user.username || user.email.split('@')[0]);
+      await twoFactorService.generateAndSendOTP(
+        user.id,
+        user.email,
+        user.username || user.email.split('@')[0]
+      );
 
       // Return temporary token for 2FA verification
       const tempToken = jwt.sign(
-        { 
-          userId: user.id, 
-          email: user.email,
-          temp: true // Mark as temporary token
-        },
+        { userId: user.id, email: user.email, temp: true },
         JWT_SECRET,
-        { expiresIn: '15m' } // Short expiration for 2FA
+        { expiresIn: '15m' }
       );
 
       return res.json({
@@ -240,18 +254,14 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // If no 2FA required, generate final token
+    // If no 2FA required, generate final token and update login stats
     await db.query(
       'UPDATE hakikisha.users SET login_count = COALESCE(login_count, 0) + 1, last_login = NOW() WHERE id = $1',
       [user.id]
     );
 
     const token = jwt.sign(
-      { 
-        userId: user.id, 
-        email: user.email, 
-        role: user.role 
-      },
+      { userId: user.id, email: user.email, role: user.role },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
