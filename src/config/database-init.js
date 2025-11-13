@@ -49,49 +49,10 @@ class DatabaseInitializer {
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
       await this.createNotificationsTable();
-      await this.createVerdictResponsesTable();
       
       console.log('✅ Essential tables created/verified successfully!');
     } catch (error) {
       console.error('❌ Error creating essential tables:', error);
-      throw error;
-    }
-  }
-
-  static async createVerdictResponsesTable() {
-    try {
-      const query = `
-        CREATE TABLE IF NOT EXISTS hakikisha.verdict_responses (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          claim_id UUID NOT NULL REFERENCES hakikisha.claims(id) ON DELETE CASCADE,
-          user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
-          response TEXT NOT NULL,
-          response_type VARCHAR(50) NOT NULL CHECK (response_type IN ('agree', 'disagree', 'need_more_info', 'report')),
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
-        )
-      `;
-      await db.query(query);
-      console.log('✅ Verdict responses table created/verified');
-
-      // Create indexes for verdict responses
-      const indexes = [
-        'CREATE INDEX IF NOT EXISTS idx_verdict_responses_claim_id ON hakikisha.verdict_responses(claim_id)',
-        'CREATE INDEX IF NOT EXISTS idx_verdict_responses_user_id ON hakikisha.verdict_responses(user_id)',
-        'CREATE INDEX IF NOT EXISTS idx_verdict_responses_response_type ON hakikisha.verdict_responses(response_type)',
-        'CREATE INDEX IF NOT EXISTS idx_verdict_responses_created_at ON hakikisha.verdict_responses(created_at)'
-      ];
-
-      for (const indexQuery of indexes) {
-        try {
-          await db.query(indexQuery);
-        } catch (error) {
-          console.log(`ℹ️ Verdict response index might already exist: ${error.message}`);
-        }
-      }
-      
-    } catch (error) {
-      console.error('❌ Error creating verdict responses table:', error);
       throw error;
     }
   }
@@ -178,7 +139,6 @@ class DatabaseInitializer {
           points INTEGER NOT NULL,
           activity_type VARCHAR(100) NOT NULL,
           description TEXT,
-          claim_id UUID REFERENCES hakikisha.claims(id),
           created_at TIMESTAMP DEFAULT NOW()
         )
       `;
@@ -420,8 +380,6 @@ class DatabaseInitializer {
           category VARCHAR(100),
           media_type VARCHAR(50) DEFAULT 'text',
           media_url TEXT,
-          video_url TEXT,
-          source_url TEXT,
           status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed')),
           priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
           submission_count INTEGER DEFAULT 1,
@@ -466,8 +424,6 @@ class DatabaseInitializer {
             category VARCHAR(100),
             media_type VARCHAR(50) DEFAULT 'text',
             media_url TEXT,
-            video_url TEXT,
-            source_url TEXT,
             status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed')),
             priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
             submission_count INTEGER DEFAULT 1,
@@ -575,8 +531,6 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_claims_trending ON hakikisha.claims(is_trending)',
       'CREATE INDEX IF NOT EXISTS idx_claims_trending_score ON hakikisha.claims(trending_score)',
       'CREATE INDEX IF NOT EXISTS idx_claims_created_at ON hakikisha.claims(created_at)',
-      'CREATE INDEX IF NOT EXISTS idx_claims_video_url ON hakikisha.claims(video_url)',
-      'CREATE INDEX IF NOT EXISTS idx_claims_source_url ON hakikisha.claims(source_url)',
       
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_claim_id ON hakikisha.ai_verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_verdict ON hakikisha.ai_verdicts(verdict)',
@@ -615,7 +569,6 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_points_history_user_id ON hakikisha.points_history(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_points_history_created_at ON hakikisha.points_history(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_points_history_activity_type ON hakikisha.points_history(activity_type)',
-      'CREATE INDEX IF NOT EXISTS idx_points_history_claim_id ON hakikisha.points_history(claim_id)',
       
       'CREATE INDEX IF NOT EXISTS idx_blog_articles_author_id ON hakikisha.blog_articles(author_id)',
       'CREATE INDEX IF NOT EXISTS idx_blog_articles_status ON hakikisha.blog_articles(status)',
@@ -631,12 +584,7 @@ class DatabaseInitializer {
       
       'CREATE INDEX IF NOT EXISTS idx_user_notification_settings_user ON hakikisha.user_notification_settings(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_user ON hakikisha.verdicts(claim_id) INCLUDE (fact_checker_id, created_at)',
-      'CREATE INDEX IF NOT EXISTS idx_claims_user_created ON hakikisha.claims(user_id, created_at)',
-      
-      'CREATE INDEX IF NOT EXISTS idx_verdict_responses_claim_id ON hakikisha.verdict_responses(claim_id)',
-      'CREATE INDEX IF NOT EXISTS idx_verdict_responses_user_id ON hakikisha.verdict_responses(user_id)',
-      'CREATE INDEX IF NOT EXISTS idx_verdict_responses_response_type ON hakikisha.verdict_responses(response_type)',
-      'CREATE INDEX IF NOT EXISTS idx_verdict_responses_created_at ON hakikisha.verdict_responses(created_at)'
+      'CREATE INDEX IF NOT EXISTS idx_claims_user_created ON hakikisha.claims(user_id, created_at)'
     ];
 
     for (const indexQuery of essentialIndexes) {
@@ -668,6 +616,7 @@ class DatabaseInitializer {
       
       console.log('Setting up admin user: ' + adminEmail);
       
+      // First check if admin exists and get current state
       const existingAdmin = await db.query(
         'SELECT id, email, username, password_hash, role, registration_status, status FROM hakikisha.users WHERE email = $1',
         [adminEmail]
@@ -677,6 +626,7 @@ class DatabaseInitializer {
         const admin = existingAdmin.rows[0];
         console.log('Found existing admin: ' + admin.email + ', role: ' + admin.role + ', status: ' + admin.registration_status);
         
+        // Verify the password matches
         let passwordValid = false;
         if (admin.password_hash) {
           passwordValid = await bcrypt.compare(adminPassword, admin.password_hash);
@@ -739,37 +689,90 @@ class DatabaseInitializer {
     try {
       console.log('Verifying database state...');
       
-      // Check for video_url and source_url columns in claims table
-      const claimsColumns = await db.query(`
+      // Check verdicts table for the based_on_ai_verdict column
+      const verdictsColumns = await db.query(`
         SELECT column_name, data_type, is_nullable, column_default
         FROM information_schema.columns 
-        WHERE table_schema = 'hakikisha' AND table_name = 'claims'
+        WHERE table_schema = 'hakikisha' AND table_name = 'verdicts'
         ORDER BY ordinal_position
       `);
       
-      console.log(`Claims table columns: ${claimsColumns.rows.length}`);
-      const hasVideoUrlColumn = claimsColumns.rows.some(col => col.column_name === 'video_url');
-      const hasSourceUrlColumn = claimsColumns.rows.some(col => col.column_name === 'source_url');
+      console.log(`Verdicts table columns: ${verdictsColumns.rows.length}`);
+      const hasBasedOnAIVerdictColumn = verdictsColumns.rows.some(col => col.column_name === 'based_on_ai_verdict');
+      console.log(`✅ Verdicts has based_on_ai_verdict column: ${hasBasedOnAIVerdictColumn}`);
       
-      console.log(`✅ Claims has video_url column: ${hasVideoUrlColumn}`);
-      console.log(`✅ Claims has source_url column: ${hasSourceUrlColumn}`);
-
-      if (!hasVideoUrlColumn || !hasSourceUrlColumn) {
-        console.log('⚠️ Adding missing video_url and source_url columns to claims table...');
-        await this.ensureClaimsColumns();
+      if (!hasBasedOnAIVerdictColumn) {
+        console.log('⚠️ based_on_ai_verdict column missing, adding it now...');
+        await this.ensureVerdictsColumns();
       }
 
-      // Check verdict_responses table
-      const verdictResponsesColumns = await db.query(`
+      // Check AI verdicts table
+      const aiVerdictsColumns = await db.query(`
         SELECT column_name, data_type, is_nullable, column_default
         FROM information_schema.columns 
-        WHERE table_schema = 'hakikisha' AND table_name = 'verdict_responses'
+        WHERE table_schema = 'hakikisha' AND table_name = 'ai_verdicts'
         ORDER BY ordinal_position
       `);
       
-      console.log(`Verdict responses table columns: ${verdictResponsesColumns.rows.length}`);
-      const hasVerdictResponsesTable = verdictResponsesColumns.rows.length > 0;
-      console.log(`✅ Verdict responses table exists: ${hasVerdictResponsesTable}`);
+      console.log(`AI Verdicts table columns: ${aiVerdictsColumns.rows.length}`);
+      const hasRequiredAIVerdictsColumns = aiVerdictsColumns.rows.some(col => col.column_name === 'is_edited_by_human') &&
+                                         aiVerdictsColumns.rows.some(col => col.column_name === 'edited_by_fact_checker_id') &&
+                                         aiVerdictsColumns.rows.some(col => col.column_name === 'edited_at');
+      console.log(`✅ AI Verdicts has required columns: ${hasRequiredAIVerdictsColumns}`);
+
+      // Check fact checker activities table
+      const factCheckerActivitiesColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'fact_checker_activities'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`Fact Checker Activities table columns: ${factCheckerActivitiesColumns.rows.length}`);
+      const hasRequiredActivitiesColumns = factCheckerActivitiesColumns.rows.length > 0;
+      console.log(`✅ Fact Checker Activities table exists: ${hasRequiredActivitiesColumns}`);
+
+      // Check points tables
+      const pointsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'user_points'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`User points table columns: ${pointsColumns.rows.length}`);
+      const hasRequiredPointsColumns = pointsColumns.rows.some(col => col.column_name === 'total_points') &&
+                                     pointsColumns.rows.some(col => col.column_name === 'current_streak') &&
+                                     pointsColumns.rows.some(col => col.column_name === 'longest_streak');
+      console.log(`✅ User points has required columns: ${hasRequiredPointsColumns}`);
+
+      // Check notification settings table
+      const notificationSettingsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'user_notification_settings'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`Notification settings table columns: ${notificationSettingsColumns.rows.length}`);
+      const hasRequiredNotificationColumns = notificationSettingsColumns.rows.some(col => col.column_name === 'last_read_verdict') &&
+                                           notificationSettingsColumns.rows.some(col => col.column_name === 'email_notifications');
+      console.log(`✅ Notification settings has required columns: ${hasRequiredNotificationColumns}`);
+
+      // Check notifications table
+      const notificationsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'notifications'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`Notifications table columns: ${notificationsColumns.rows.length}`);
+      const hasRequiredNotificationsColumns = notificationsColumns.rows.some(col => col.column_name === 'user_id') &&
+                                            notificationsColumns.rows.some(col => col.column_name === 'type') &&
+                                            notificationsColumns.rows.some(col => col.column_name === 'title') &&
+                                            notificationsColumns.rows.some(col => col.column_name === 'message');
+      console.log(`✅ Notifications table has required columns: ${hasRequiredNotificationsColumns}`);
 
       // Initialize points for users without points records
       const usersWithoutPoints = await db.query(`
@@ -810,34 +813,17 @@ class DatabaseInitializer {
       }
 
       return {
-        claimsHasVideoUrl: hasVideoUrlColumn,
-        claimsHasSourceUrl: hasSourceUrlColumn,
-        verdictResponsesExist: hasVerdictResponsesTable,
+        verdictsTableHasBasedOnAI: hasBasedOnAIVerdictColumn,
+        aiVerdictsTablesExist: hasRequiredAIVerdictsColumns,
+        factCheckerActivitiesExist: hasRequiredActivitiesColumns,
+        pointsTablesExist: hasRequiredPointsColumns,
+        notificationSettingsExist: hasRequiredNotificationColumns,
+        notificationsTableExist: hasRequiredNotificationsColumns,
         usersWithPoints: usersWithoutPoints.rows.length === 0,
         usersWithNotificationSettings: usersWithoutNotificationSettings.rows.length === 0
       };
     } catch (error) {
       console.error('❌ Error verifying database state:', error);
-      throw error;
-    }
-  }
-
-  static async ensureClaimsColumns() {
-    try {
-      console.log('Checking for missing columns in claims table...');
-      
-      const requiredColumns = [
-        { name: 'video_url', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
-        { name: 'source_url', type: 'TEXT', defaultValue: 'NULL', isUnique: false }
-      ];
-
-      for (const column of requiredColumns) {
-        await this.ensureColumnExists('claims', column);
-      }
-      
-      console.log('✅ All required columns verified in claims table');
-    } catch (error) {
-      console.error('❌ Error ensuring claims columns:', error);
       throw error;
     }
   }
@@ -941,7 +927,6 @@ class DatabaseInitializer {
       console.log('Resetting database...');
       
       const tables = [
-        'verdict_responses',
         'notifications',
         'user_notification_settings',
         'points_history',
@@ -1009,7 +994,6 @@ class DatabaseInitializer {
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
       await this.createNotificationsTable();
-      await this.createVerdictResponsesTable();
       await this.ensureVerdictsColumns();
       await this.ensureFactCheckersColumns();
       await this.ensureAdminActivitiesColumns();
@@ -1094,7 +1078,6 @@ class DatabaseInitializer {
       await this.ensureAIVerdictsColumns();
       await this.ensureNotificationSettingsColumns();
       await this.ensureNotificationsColumns();
-      await this.ensureClaimsColumns();
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
       throw error;
@@ -1176,10 +1159,6 @@ class DatabaseInitializer {
       // Run notifications table migration
       const notificationsMigration = require('../../migrations/025_add_notifications_table');
       await notificationsMigration.up();
-      
-      // Run claims video and source URL migration
-      const claimsUrlsMigration = require('../../migrations/026_add_video_source_urls_to_claims');
-      await claimsUrlsMigration.up();
       
       console.log('✅ All migrations completed successfully');
     } catch (error) {
