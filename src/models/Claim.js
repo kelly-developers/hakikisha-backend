@@ -10,22 +10,24 @@ class Claim {
       description,
       category,
       media_type = 'text',
-      media_url = null
+      media_url = null,
+      video_url = null,
+      source_url = null
     } = claimData;
 
     const id = uuidv4();
     const query = `
       INSERT INTO hakikisha.claims (
         id, user_id, title, description, category, media_type, media_url, 
-        status, priority, submission_count, created_at
+        video_url, source_url, status, priority, submission_count, created_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'medium', 1, NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 'medium', 1, NOW())
       RETURNING *
     `;
 
     try {
       const result = await db.query(query, [
-        id, user_id, title, description, category, media_type, media_url
+        id, user_id, title, description, category, media_type, media_url, video_url, source_url
       ]);
       return result.rows[0];
     } catch (error) {
@@ -159,6 +161,7 @@ class Claim {
   static async getTrendingClaims(limit = 10) {
     const query = `
       SELECT c.id, c.title, c.category, c.status,
+             c.video_url, c.source_url,
              COALESCE(v.verdict, av.verdict) as verdict,
              c.trending_score as trendingScore,
              c.created_at as submittedDate,
@@ -219,6 +222,7 @@ class Claim {
   static async getUserClaims(userId, status = null) {
     let query = `
       SELECT c.id, c.title, c.category, c.status,
+             c.video_url, c.source_url,
              c.created_at as submittedDate,
              COALESCE(v.created_at, av.created_at) as verdictDate,
              COALESCE(v.verdict, av.verdict) as verdict,

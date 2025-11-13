@@ -40,9 +40,9 @@ class ClaimController {
       const result = await db.query(
         `INSERT INTO hakikisha.claims (
           id, user_id, title, description, category, media_type, media_url,
-          status, priority, submission_count, created_at
+          video_url, source_url, status, priority, submission_count, created_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'medium', 1, NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 'medium', 1, NOW())
         RETURNING id, category, status, created_at as submittedDate`,
         [
           claimId, 
@@ -51,7 +51,9 @@ class ClaimController {
           claimText, 
           category, 
           mediaType, 
-          mediaUrl
+          mediaUrl,
+          videoLink || null,
+          sourceLink || null
         ]
       );
 
@@ -162,7 +164,8 @@ class ClaimController {
             req.user.userId, 
             POINTS.FIRST_CLAIM + POINTS.CLAIM_SUBMISSION, 
             'FIRST_CLAIM_SUBMISSION', 
-            `First claim submitted: ${claimId}`
+            `First claim submitted: ${claimId}`,
+            claimId
           );
         } else {
           // Regular claim submission points
@@ -170,7 +173,8 @@ class ClaimController {
             req.user.userId, 
             POINTS.CLAIM_SUBMISSION, 
             'CLAIM_SUBMISSION', 
-            `Claim submitted: ${claimId}`
+            `Claim submitted: ${claimId}`,
+            claimId
           );
         }
         
@@ -258,6 +262,8 @@ class ClaimController {
           c.title, 
           c.category, 
           c.status,
+          c.video_url,
+          c.source_url,
           c.created_at as "submittedDate",
           v.created_at as "verdictDate",
           v.verdict, 
@@ -297,7 +303,9 @@ class ClaimController {
         verdict: claim.verdict,
         verdictText: claim.verdictText,
         sources: claim.sources || [],
-        factCheckerName: claim.factCheckerUsername || claim.factCheckerName || 'Fact Checker'
+        factCheckerName: claim.factCheckerUsername || claim.factCheckerName || 'Fact Checker',
+        videoUrl: claim.video_url,
+        sourceUrl: claim.source_url
       }));
 
       res.json({
@@ -532,7 +540,8 @@ class ClaimController {
         verdict_responsibility: claim.verdict_responsibility || 'ai',
         review_time: claim.review_time,
         imageUrl: claim.media_url,
-        videoLink: claim.media_type === 'video' ? claim.media_url : null
+        videoLink: claim.video_url || (claim.media_type === 'video' ? claim.media_url : null),
+        sourceUrl: claim.source_url
       };
 
       console.log('Processed claim data for frontend:', {
@@ -542,7 +551,9 @@ class ClaimController {
         sourcesCount: responseData.sources.length,
         humanSourcesCount: humanSources.length,
         aiSourcesCount: aiSources.length,
-        factChecker: responseData.factChecker
+        factChecker: responseData.factChecker,
+        videoLink: !!responseData.videoLink,
+        sourceUrl: !!responseData.sourceUrl
       });
 
       res.json({
@@ -574,7 +585,7 @@ class ClaimController {
 
       console.log('Search claims:', q);
       const result = await db.query(
-        `SELECT c.id, c.title, c.description, c.category, c.status
+        `SELECT c.id, c.title, c.description, c.category, c.status, c.video_url, c.source_url
          FROM hakikisha.claims c
          WHERE c.title ILIKE $1 OR c.description ILIKE $1
          ORDER BY c.created_at DESC
@@ -610,6 +621,8 @@ class ClaimController {
           c.description,
           c.category, 
           c.status,
+          c.video_url,
+          c.source_url,
           COALESCE(v.verdict, av.verdict) as verdict,
           COALESCE(v.explanation, av.explanation) as "verdictText",
           COALESCE(v.evidence_sources, av.evidence_sources) as sources,
@@ -665,6 +678,8 @@ class ClaimController {
             c.description,
             c.category, 
             c.status,
+            c.video_url,
+            c.source_url,
             COALESCE(v.verdict, av.verdict) as verdict,
             COALESCE(v.explanation, av.explanation) as "verdictText",
             COALESCE(v.evidence_sources, av.evidence_sources) as sources,
@@ -839,6 +854,8 @@ class ClaimController {
           c.title,
           c.category,
           c.status,
+          c.video_url,
+          c.source_url,
           c.created_at as "submittedDate",
           v.verdict,
           v.explanation as "verdictText",
