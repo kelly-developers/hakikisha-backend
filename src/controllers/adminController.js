@@ -515,7 +515,7 @@ exports.resetAdminPassword = async (req, res, next) => {
 // FIXED: Register new fact checker - automatically approve since admin is creating
 exports.registerFactChecker = async (req, res, next) => {
   try {
-    const { email, username, password, credentials, areasOfExpertise } = req.body;
+    const { email, username, password, phone, credentials, areasOfExpertise } = req.body;
 
     // Validate required fields
     if (!email || !username || !password) {
@@ -539,6 +539,7 @@ exports.registerFactChecker = async (req, res, next) => {
       email: email,
       username: username,
       password_hash: await authService.hashPassword(password),
+      phone: phone || null,
       role: 'fact_checker',
       is_verified: true, // Auto-verify since admin is creating
       registration_status: 'approved', // FIX: Set to approved immediately
@@ -596,7 +597,7 @@ exports.registerFactChecker = async (req, res, next) => {
 // FIXED: Register admin user - automatically approve
 exports.registerAdmin = async (req, res, next) => {
   try {
-    const { email, username, password } = req.body;
+    const { email, username, password, phone } = req.body;
 
     // Validate required fields
     if (!email || !username || !password) {
@@ -620,6 +621,7 @@ exports.registerAdmin = async (req, res, next) => {
       email: email,
       username: username,
       password_hash: await authService.hashPassword(password),
+      phone: phone || null,
       role: 'admin',
       is_verified: true,
       registration_status: 'approved', // FIX: Set to approved immediately
