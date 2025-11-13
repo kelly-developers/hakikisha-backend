@@ -11,7 +11,7 @@ console.log('🔍 Database Host:', process.env.DB_HOST);
 
 const startServer = async () => {
   try {
-    // Initialize database connection
+    // Initia
     console.log('🔄 Initializing database connection...');
     const dbInitialized = await initializeDatabase();
 
