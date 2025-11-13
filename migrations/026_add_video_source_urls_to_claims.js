@@ -17,13 +17,13 @@ module.exports = {
         ALTER TABLE hakikisha.claims 
         ADD COLUMN IF NOT EXISTS source_url TEXT
       `);
-      console.log('✅ Added source_url column to claims table');
+      console.log('Added source_url column to claims table');
       
       // Create indexes for better performance
       await db.query(`
         CREATE INDEX IF NOT EXISTS idx_claims_video_url ON hakikisha.claims(video_url)
       `);
-      console.log('✅ Created index for video_url');
+      console.log('Created index for video_url');
       
       await db.query(`
         CREATE INDEX IF NOT EXISTS idx_claims_source_url ON hakikisha.claims(source_url)
