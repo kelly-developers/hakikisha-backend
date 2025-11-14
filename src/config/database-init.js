@@ -39,7 +39,6 @@ class DatabaseInitializer {
     try {
       console.log('Creating essential database tables...');
 
-      // Create tables in proper order to handle dependencies
       await this.createUsersTable();
       await this.createPointsTables();
       await this.createBlogTables();
@@ -50,8 +49,7 @@ class DatabaseInitializer {
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
       await this.createNotificationsTable();
-      await this.createOTPCodesTable();
-      await this.createVerdictResponsesTable();
+      await this.createOTPCodesTable(); // ADDED THIS LINE
       
       console.log('✅ Essential tables created/verified successfully!');
     } catch (error) {
@@ -60,34 +58,115 @@ class DatabaseInitializer {
     }
   }
 
-  static async createUsersTable() {
+  // ADD THIS NEW METHOD
+  static async createOTPCodesTable() {
     try {
       const query = `
-        CREATE TABLE IF NOT EXISTS hakikisha.users (
+        CREATE TABLE IF NOT EXISTS hakikisha.otp_codes (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          email VARCHAR(255) UNIQUE NOT NULL,
-          username VARCHAR(255) UNIQUE,
-          password_hash VARCHAR(255) NOT NULL,
-          full_name VARCHAR(255),
-          phone VARCHAR(50),
-          role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('user', 'fact_checker', 'admin')),
-          profile_picture TEXT,
-          is_verified BOOLEAN DEFAULT FALSE,
-          registration_status VARCHAR(50) DEFAULT 'pending' CHECK (registration_status IN ('pending', 'approved', 'rejected')),
-          status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'inactive')),
-          two_factor_enabled BOOLEAN DEFAULT FALSE,
-          two_factor_secret VARCHAR(255),
-          login_count INTEGER DEFAULT 0,
-          last_login TIMESTAMP,
+          user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
+          code VARCHAR(10) NOT NULL,
+          type VARCHAR(50) NOT NULL CHECK (type IN ('email_verification', '2fa', 'password_reset')),
+          used BOOLEAN DEFAULT FALSE,
+          used_at TIMESTAMP,
+          expires_at TIMESTAMP NOT NULL,
+          created_at TIMESTAMP DEFAULT NOW(),
+          
+          -- Index for faster lookups
+          CONSTRAINT unique_active_otp UNIQUE (user_id, type, used)
+        )
+      `;
+      await db.query(query);
+      console.log('✅ OTP codes table created/verified');
+
+      // Create indexes for OTP codes table
+      await this.createOTPCodesIndexes();
+      
+    } catch (error) {
+      console.error('❌ Error creating OTP codes table:', error);
+      throw error;
+    }
+  }
+
+  // ADD THIS NEW METHOD FOR OTP INDEXES
+  static async createOTPCodesIndexes() {
+    try {
+      const indexes = [
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_id ON hakikisha.otp_codes(user_id)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_type ON hakikisha.otp_codes(type)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_expires_at ON hakikisha.otp_codes(expires_at)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_code ON hakikisha.otp_codes(code)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_used ON hakikisha.otp_codes(used)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_type ON hakikisha.otp_codes(user_id, type, used)'
+      ];
+
+      for (const indexQuery of indexes) {
+        try {
+          await db.query(indexQuery);
+          console.log(`✅ Created OTP index: ${indexQuery.split(' ')[3]}`);
+        } catch (error) {
+          console.log(`ℹ️ OTP index might already exist: ${error.message}`);
+        }
+      }
+      console.log('✅ All OTP codes indexes created/verified');
+    } catch (error) {
+      console.error('❌ Error creating OTP codes indexes:', error);
+    }
+  }
+
+  static async createNotificationsTable() {
+    try {
+      const query = `
+        CREATE TABLE IF NOT EXISTS hakikisha.notifications (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
+          type VARCHAR(100) NOT NULL,
+          title VARCHAR(500) NOT NULL,
+          message TEXT NOT NULL,
+          related_entity_type VARCHAR(100),
+          related_entity_id UUID,
+          is_read BOOLEAN DEFAULT FALSE,
+          is_sent BOOLEAN DEFAULT FALSE,
+          sent_at TIMESTAMP WITH TIME ZONE,
+          read_at TIMESTAMP WITH TIME ZONE,
+          metadata JSONB DEFAULT '{}',
           created_at TIMESTAMP DEFAULT NOW(),
           updated_at TIMESTAMP DEFAULT NOW()
         )
       `;
       await db.query(query);
-      console.log('✅ Users table created/verified');
+      console.log('✅ Notifications table created/verified');
+
+      await this.createNotificationsIndexes();
+      
     } catch (error) {
-      console.error('❌ Error creating users table:', error);
+      console.error('❌ Error creating notifications table:', error);
       throw error;
+    }
+  }
+
+  static async createNotificationsIndexes() {
+    try {
+      const indexes = [
+        'CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON hakikisha.notifications(user_id)',
+        'CREATE INDEX IF NOT EXISTS idx_notifications_type ON hakikisha.notifications(type)',
+        'CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON hakikisha.notifications(is_read)',
+        'CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON hakikisha.notifications(created_at)',
+        'CREATE INDEX IF NOT EXISTS idx_notifications_related_entity ON hakikisha.notifications(related_entity_type, related_entity_id)',
+        'CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON hakikisha.notifications(user_id, is_read, created_at)'
+      ];
+
+      for (const indexQuery of indexes) {
+        try {
+          await db.query(indexQuery);
+          console.log(`✅ Created notification index: ${indexQuery.split(' ')[3]}`);
+        } catch (error) {
+          console.log(`ℹ️ Notification index might already exist: ${error.message}`);
+        }
+      }
+      console.log('✅ All notification indexes created/verified');
+    } catch (error) {
+      console.error('❌ Error creating notification indexes:', error);
     }
   }
 
@@ -126,6 +205,82 @@ class DatabaseInitializer {
     } catch (error) {
       console.error('❌ Error creating points tables:', error);
       throw error;
+    }
+  }
+
+  static async createUsersTable() {
+    try {
+      const query = `
+        CREATE TABLE IF NOT EXISTS hakikisha.users (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          email VARCHAR(255) UNIQUE NOT NULL,
+          username VARCHAR(255) UNIQUE,
+          password_hash VARCHAR(255) NOT NULL,
+          full_name VARCHAR(255), -- ADDED FULL_NAME COLUMN
+          phone VARCHAR(50),
+          role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('user', 'fact_checker', 'admin')),
+          profile_picture TEXT,
+          is_verified BOOLEAN DEFAULT FALSE,
+          registration_status VARCHAR(50) DEFAULT 'pending' CHECK (registration_status IN ('pending', 'approved', 'rejected')),
+          status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'inactive')),
+          two_factor_enabled BOOLEAN DEFAULT FALSE,
+          two_factor_secret VARCHAR(255),
+          login_count INTEGER DEFAULT 0,
+          last_login TIMESTAMP,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await db.query(query);
+      console.log('✅ Users table created/verified');
+    } catch (error) {
+      console.error('❌ Error creating users table:', error);
+      throw error;
+    }
+  }
+
+  static async createNotificationSettingsTable() {
+    try {
+      const query = `
+        CREATE TABLE IF NOT EXISTS hakikisha.user_notification_settings (
+          user_id UUID PRIMARY KEY REFERENCES hakikisha.users(id) ON DELETE CASCADE,
+          last_read_verdict TIMESTAMP WITH TIME ZONE DEFAULT '1970-01-01'::timestamp,
+          email_notifications BOOLEAN DEFAULT TRUE,
+          push_notifications BOOLEAN DEFAULT TRUE,
+          verdict_notifications BOOLEAN DEFAULT TRUE,
+          system_notifications BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await db.query(query);
+      console.log('✅ User notification settings table created/verified');
+
+      await this.initializeNotificationSettings();
+      
+    } catch (error) {
+      console.error('❌ Error creating notification settings table:', error);
+      throw error;
+    }
+  }
+
+  static async initializeNotificationSettings() {
+    try {
+      console.log('Initializing notification settings for existing users...');
+      
+      const users = await db.query('SELECT id FROM hakikisha.users');
+      
+      for (const user of users.rows) {
+        await db.query(`
+          INSERT INTO hakikisha.user_notification_settings (user_id)
+          VALUES ($1)
+          ON CONFLICT (user_id) DO NOTHING
+        `, [user.id]);
+      }
+
+      console.log(`✅ Notification settings initialized for ${users.rows.length} users`);
+    } catch (error) {
+      console.error('❌ Error initializing notification settings:', error);
     }
   }
 
@@ -407,34 +562,6 @@ class DatabaseInitializer {
     }
   }
 
-  static async createVerdictResponsesTable() {
-    try {
-      const query = `
-        CREATE TABLE IF NOT EXISTS hakikisha.verdict_responses (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          verdict_id UUID NOT NULL REFERENCES hakikisha.verdicts(id) ON DELETE CASCADE,
-          user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
-          response_type VARCHAR(50) NOT NULL CHECK (response_type IN ('helpful', 'not_helpful', 'disagree')),
-          comment TEXT,
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW(),
-          UNIQUE(verdict_id, user_id)
-        )
-      `;
-      await db.query(query);
-      console.log('✅ Verdict responses table created/verified');
-
-      // Create indexes for verdict responses
-      await db.query('CREATE INDEX IF NOT EXISTS idx_verdict_responses_verdict_id ON hakikisha.verdict_responses(verdict_id)');
-      await db.query('CREATE INDEX IF NOT EXISTS idx_verdict_responses_user_id ON hakikisha.verdict_responses(user_id)');
-      await db.query('CREATE INDEX IF NOT EXISTS idx_verdict_responses_response_type ON hakikisha.verdict_responses(response_type)');
-      
-    } catch (error) {
-      console.error('❌ Error creating verdict responses table:', error);
-      throw error;
-    }
-  }
-
   static async createFactCheckerActivitiesTable() {
     try {
       const query = `
@@ -458,146 +585,8 @@ class DatabaseInitializer {
     }
   }
 
-  static async createNotificationSettingsTable() {
-    try {
-      const query = `
-        CREATE TABLE IF NOT EXISTS hakikisha.user_notification_settings (
-          user_id UUID PRIMARY KEY REFERENCES hakikisha.users(id) ON DELETE CASCADE,
-          last_read_verdict TIMESTAMP WITH TIME ZONE DEFAULT '1970-01-01'::timestamp,
-          email_notifications BOOLEAN DEFAULT TRUE,
-          push_notifications BOOLEAN DEFAULT TRUE,
-          verdict_notifications BOOLEAN DEFAULT TRUE,
-          system_notifications BOOLEAN DEFAULT TRUE,
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
-        )
-      `;
-      await db.query(query);
-      console.log('✅ User notification settings table created/verified');
-
-      await this.initializeNotificationSettings();
-      
-    } catch (error) {
-      console.error('❌ Error creating notification settings table:', error);
-      throw error;
-    }
-  }
-
-  static async createNotificationsTable() {
-    try {
-      const query = `
-        CREATE TABLE IF NOT EXISTS hakikisha.notifications (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
-          type VARCHAR(100) NOT NULL,
-          title VARCHAR(500) NOT NULL,
-          message TEXT NOT NULL,
-          related_entity_type VARCHAR(100),
-          related_entity_id UUID,
-          is_read BOOLEAN DEFAULT FALSE,
-          is_sent BOOLEAN DEFAULT FALSE,
-          sent_at TIMESTAMP WITH TIME ZONE,
-          read_at TIMESTAMP WITH TIME ZONE,
-          metadata JSONB DEFAULT '{}',
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
-        )
-      `;
-      await db.query(query);
-      console.log('✅ Notifications table created/verified');
-
-      await this.createNotificationsIndexes();
-      
-    } catch (error) {
-      console.error('❌ Error creating notifications table:', error);
-      throw error;
-    }
-  }
-
-  static async createOTPCodesTable() {
-    try {
-      const query = `
-        CREATE TABLE IF NOT EXISTS hakikisha.otp_codes (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
-          code VARCHAR(10) NOT NULL,
-          type VARCHAR(50) NOT NULL CHECK (type IN ('email_verification', '2fa', 'password_reset')),
-          used BOOLEAN DEFAULT FALSE,
-          used_at TIMESTAMP,
-          expires_at TIMESTAMP NOT NULL,
-          created_at TIMESTAMP DEFAULT NOW(),
-          CONSTRAINT unique_active_otp UNIQUE (user_id, type, used)
-        )
-      `;
-      await db.query(query);
-      console.log('✅ OTP codes table created/verified');
-
-      await this.createOTPCodesIndexes();
-      
-    } catch (error) {
-      console.error('❌ Error creating OTP codes table:', error);
-      throw error;
-    }
-  }
-
-  static async createNotificationsIndexes() {
-    try {
-      const indexes = [
-        'CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON hakikisha.notifications(user_id)',
-        'CREATE INDEX IF NOT EXISTS idx_notifications_type ON hakikisha.notifications(type)',
-        'CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON hakikisha.notifications(is_read)',
-        'CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON hakikisha.notifications(created_at)',
-        'CREATE INDEX IF NOT EXISTS idx_notifications_related_entity ON hakikisha.notifications(related_entity_type, related_entity_id)',
-        'CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON hakikisha.notifications(user_id, is_read, created_at)'
-      ];
-
-      for (const indexQuery of indexes) {
-        try {
-          await db.query(indexQuery);
-        } catch (error) {
-          console.log(`ℹ️ Notification index might already exist: ${error.message}`);
-        }
-      }
-      console.log('✅ All notification indexes created/verified');
-    } catch (error) {
-      console.error('❌ Error creating notification indexes:', error);
-    }
-  }
-
-  static async createOTPCodesIndexes() {
-    try {
-      const indexes = [
-        'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_id ON hakikisha.otp_codes(user_id)',
-        'CREATE INDEX IF NOT EXISTS idx_otp_codes_type ON hakikisha.otp_codes(type)',
-        'CREATE INDEX IF NOT EXISTS idx_otp_codes_expires_at ON hakikisha.otp_codes(expires_at)',
-        'CREATE INDEX IF NOT EXISTS idx_otp_codes_code ON hakikisha.otp_codes(code)',
-        'CREATE INDEX IF NOT EXISTS idx_otp_codes_used ON hakikisha.otp_codes(used)',
-        'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_type ON hakikisha.otp_codes(user_id, type, used)'
-      ];
-
-      for (const indexQuery of indexes) {
-        try {
-          await db.query(indexQuery);
-        } catch (error) {
-          console.log(`ℹ️ OTP index might already exist: ${error.message}`);
-        }
-      }
-      console.log('✅ All OTP codes indexes created/verified');
-    } catch (error) {
-      console.error('❌ Error creating OTP codes indexes:', error);
-    }
-  }
-
   static async createIndexes() {
     const essentialIndexes = [
-      // Users indexes
-      'CREATE INDEX IF NOT EXISTS idx_users_email ON hakikisha.users(email)',
-      'CREATE INDEX IF NOT EXISTS idx_users_username ON hakikisha.users(username)',
-      'CREATE INDEX IF NOT EXISTS idx_users_role ON hakikisha.users(role)',
-      'CREATE INDEX IF NOT EXISTS idx_users_status ON hakikisha.users(status)',
-      'CREATE INDEX IF NOT EXISTS idx_users_registration_status ON hakikisha.users(registration_status)',
-      
-      // Claims indexes
       'CREATE INDEX IF NOT EXISTS idx_claims_user_id ON hakikisha.claims(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_claims_status ON hakikisha.claims(status)',
       'CREATE INDEX IF NOT EXISTS idx_claims_category ON hakikisha.claims(category)',
@@ -607,7 +596,6 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_claims_video_url ON hakikisha.claims(video_url) WHERE video_url IS NOT NULL',
       'CREATE INDEX IF NOT EXISTS idx_claims_source_url ON hakikisha.claims(source_url) WHERE source_url IS NOT NULL',
       
-      // AI Verdicts indexes
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_claim_id ON hakikisha.ai_verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_verdict ON hakikisha.ai_verdicts(verdict)',
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_confidence ON hakikisha.ai_verdicts(confidence_score)',
@@ -615,25 +603,23 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_edited_by ON hakikisha.ai_verdicts(edited_by_fact_checker_id)',
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_created_at ON hakikisha.ai_verdicts(created_at)',
       
-      // Verdicts indexes
       'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_id ON hakikisha.verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_fact_checker_id ON hakikisha.verdicts(fact_checker_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_verdict ON hakikisha.verdicts(verdict)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_is_final ON hakikisha.verdicts(is_final)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_based_on_ai ON hakikisha.verdicts(based_on_ai_verdict)',
       
-      // Verdict Responses indexes
-      'CREATE INDEX IF NOT EXISTS idx_verdict_responses_verdict_id ON hakikisha.verdict_responses(verdict_id)',
-      'CREATE INDEX IF NOT EXISTS idx_verdict_responses_user_id ON hakikisha.verdict_responses(user_id)',
-      'CREATE INDEX IF NOT EXISTS idx_verdict_responses_response_type ON hakikisha.verdict_responses(response_type)',
-      
-      // Fact Checker Activities indexes
       'CREATE INDEX IF NOT EXISTS idx_fact_checker_activities_fact_checker_id ON hakikisha.fact_checker_activities(fact_checker_id)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checker_activities_activity_type ON hakikisha.fact_checker_activities(activity_type)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checker_activities_claim_id ON hakikisha.fact_checker_activities(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checker_activities_created_at ON hakikisha.fact_checker_activities(created_at)',
       
-      // Admin tables indexes
+      'CREATE INDEX IF NOT EXISTS idx_users_email ON hakikisha.users(email)',
+      'CREATE INDEX IF NOT EXISTS idx_users_username ON hakikisha.users(username)',
+      'CREATE INDEX IF NOT EXISTS idx_users_role ON hakikisha.users(role)',
+      'CREATE INDEX IF NOT EXISTS idx_users_status ON hakikisha.users(status)',
+      'CREATE INDEX IF NOT EXISTS idx_users_registration_status ON hakikisha.users(registration_status)',
+      
       'CREATE INDEX IF NOT EXISTS idx_admin_activities_admin_id ON hakikisha.admin_activities(admin_id)',
       'CREATE INDEX IF NOT EXISTS idx_admin_activities_created_at ON hakikisha.admin_activities(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_registration_requests_user_id ON hakikisha.registration_requests(user_id)',
@@ -641,7 +627,6 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_fact_checkers_status ON hakikisha.fact_checkers(verification_status)',
       'CREATE INDEX IF NOT EXISTS idx_fact_checkers_active ON hakikisha.fact_checkers(is_active)',
       
-      // Points system indexes
       'CREATE INDEX IF NOT EXISTS idx_user_points_user_id ON hakikisha.user_points(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_user_points_total ON hakikisha.user_points(total_points)',
       'CREATE INDEX IF NOT EXISTS idx_user_points_streak ON hakikisha.user_points(current_streak)',
@@ -649,7 +634,6 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_points_history_created_at ON hakikisha.points_history(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_points_history_activity_type ON hakikisha.points_history(activity_type)',
       
-      // Blog indexes
       'CREATE INDEX IF NOT EXISTS idx_blog_articles_author_id ON hakikisha.blog_articles(author_id)',
       'CREATE INDEX IF NOT EXISTS idx_blog_articles_status ON hakikisha.blog_articles(status)',
       'CREATE INDEX IF NOT EXISTS idx_blog_articles_category ON hakikisha.blog_articles(category)',
@@ -662,7 +646,6 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_blog_likes_blog_id ON hakikisha.blog_likes(blog_id)',
       'CREATE INDEX IF NOT EXISTS idx_blog_likes_user_id ON hakikisha.blog_likes(user_id)',
       
-      // Notification indexes
       'CREATE INDEX IF NOT EXISTS idx_user_notification_settings_user ON hakikisha.user_notification_settings(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_verdicts_claim_user ON hakikisha.verdicts(claim_id) INCLUDE (fact_checker_id, created_at)',
       'CREATE INDEX IF NOT EXISTS idx_claims_user_created ON hakikisha.claims(user_id, created_at)'
@@ -671,6 +654,7 @@ class DatabaseInitializer {
     for (const indexQuery of essentialIndexes) {
       try {
         await db.query(indexQuery);
+        console.log(`✅ Created index: ${indexQuery.split(' ')[3]}`);
       } catch (error) {
         console.log(`ℹ️ Index might already exist: ${error.message}`);
       }
@@ -696,6 +680,7 @@ class DatabaseInitializer {
       
       console.log('Setting up admin user: ' + adminEmail);
       
+      // First check if admin exists and get current state
       const existingAdmin = await db.query(
         'SELECT id, email, username, password_hash, role, registration_status, status FROM hakikisha.users WHERE email = $1',
         [adminEmail]
@@ -705,6 +690,7 @@ class DatabaseInitializer {
         const admin = existingAdmin.rows[0];
         console.log('Found existing admin: ' + admin.email + ', role: ' + admin.role + ', status: ' + admin.registration_status);
         
+        // Verify the password matches
         let passwordValid = false;
         if (admin.password_hash) {
           passwordValid = await bcrypt.compare(adminPassword, admin.password_hash);
@@ -763,56 +749,145 @@ class DatabaseInitializer {
     }
   }
 
-  static async initializeNotificationSettings() {
-    try {
-      console.log('Initializing notification settings for existing users...');
-      
-      const users = await db.query('SELECT id FROM hakikisha.users');
-      
-      for (const user of users.rows) {
-        await db.query(`
-          INSERT INTO hakikisha.user_notification_settings (user_id)
-          VALUES ($1)
-          ON CONFLICT (user_id) DO NOTHING
-        `, [user.id]);
-      }
-
-      console.log(`✅ Notification settings initialized for ${users.rows.length} users`);
-    } catch (error) {
-      console.error('❌ Error initializing notification settings:', error);
-    }
-  }
-
   static async verifyDatabaseState() {
     try {
       console.log('Verifying database state...');
       
-      const tablesToCheck = [
-        'users', 'claims', 'ai_verdicts', 'verdicts', 'verdict_responses',
-        'fact_checker_activities', 'user_points', 'points_history',
-        'blog_articles', 'blog_comments', 'blog_likes', 'blog_categories',
-        'admin_activities', 'registration_requests', 'fact_checkers',
-        'user_notification_settings', 'notifications', 'otp_codes'
-      ];
-
-      let allTablesExist = true;
-
-      for (const table of tablesToCheck) {
-        const result = await db.query(`
-          SELECT EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_schema = 'hakikisha' 
-            AND table_name = $1
-          )
-        `, [table]);
-
-        const tableExists = result.rows[0].exists;
-        console.log(`✅ ${table} table exists: ${tableExists}`);
-        
-        if (!tableExists) {
-          allTablesExist = false;
-        }
+      // Check users table for the full_name column
+      const usersColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'users'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`Users table columns: ${usersColumns.rows.length}`);
+      const hasFullNameColumn = usersColumns.rows.some(col => col.column_name === 'full_name');
+      console.log(`✅ Users has full_name column: ${hasFullNameColumn}`);
+      
+      if (!hasFullNameColumn) {
+        console.log('⚠️ Missing full_name column detected, adding it now...');
+        await this.ensureUserColumns();
       }
+      
+      // Check claims table for the source_url column
+      const claimsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'claims'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`Claims table columns: ${claimsColumns.rows.length}`);
+      const hasVideoUrlColumn = claimsColumns.rows.some(col => col.column_name === 'video_url');
+      const hasSourceUrlColumn = claimsColumns.rows.some(col => col.column_name === 'source_url');
+      console.log(`✅ Claims has video_url column: ${hasVideoUrlColumn}`);
+      console.log(`✅ Claims has source_url column: ${hasSourceUrlColumn}`);
+      
+      if (!hasVideoUrlColumn || !hasSourceUrlColumn) {
+        console.log('⚠️ Missing columns detected, adding them now...');
+        await this.ensureClaimsColumns();
+      }
+      
+      // Check verdicts table for the based_on_ai_verdict column
+      const verdictsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'verdicts'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`Verdicts table columns: ${verdictsColumns.rows.length}`);
+      const hasBasedOnAIVerdictColumn = verdictsColumns.rows.some(col => col.column_name === 'based_on_ai_verdict');
+      console.log(`✅ Verdicts has based_on_ai_verdict column: ${hasBasedOnAIVerdictColumn}`);
+      
+      if (!hasBasedOnAIVerdictColumn) {
+        console.log('⚠️ based_on_ai_verdict column missing, adding it now...');
+        await this.ensureVerdictsColumns();
+      }
+
+      // Check AI verdicts table
+      const aiVerdictsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'ai_verdicts'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`AI Verdicts table columns: ${aiVerdictsColumns.rows.length}`);
+      const hasRequiredAIVerdictsColumns = aiVerdictsColumns.rows.some(col => col.column_name === 'is_edited_by_human') &&
+                                         aiVerdictsColumns.rows.some(col => col.column_name === 'edited_by_fact_checker_id') &&
+                                         aiVerdictsColumns.rows.some(col => col.column_name === 'edited_at');
+      console.log(`✅ AI Verdicts has required columns: ${hasRequiredAIVerdictsColumns}`);
+
+      // Check fact checker activities table
+      const factCheckerActivitiesColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'fact_checker_activities'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`Fact Checker Activities table columns: ${factCheckerActivitiesColumns.rows.length}`);
+      const hasRequiredActivitiesColumns = factCheckerActivitiesColumns.rows.length > 0;
+      console.log(`✅ Fact Checker Activities table exists: ${hasRequiredActivitiesColumns}`);
+
+      // Check points tables
+      const pointsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'user_points'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`User points table columns: ${pointsColumns.rows.length}`);
+      const hasRequiredPointsColumns = pointsColumns.rows.some(col => col.column_name === 'total_points') &&
+                                     pointsColumns.rows.some(col => col.column_name === 'current_streak') &&
+                                     pointsColumns.rows.some(col => col.column_name === 'longest_streak');
+      console.log(`✅ User points has required columns: ${hasRequiredPointsColumns}`);
+
+      // Check notification settings table
+      const notificationSettingsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'user_notification_settings'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`Notification settings table columns: ${notificationSettingsColumns.rows.length}`);
+      const hasRequiredNotificationColumns = notificationSettingsColumns.rows.some(col => col.column_name === 'last_read_verdict') &&
+                                           notificationSettingsColumns.rows.some(col => col.column_name === 'email_notifications');
+      console.log(`✅ Notification settings has required columns: ${hasRequiredNotificationColumns}`);
+
+      // Check notifications table
+      const notificationsColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'notifications'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`Notifications table columns: ${notificationsColumns.rows.length}`);
+      const hasRequiredNotificationsColumns = notificationsColumns.rows.some(col => col.column_name === 'user_id') &&
+                                            notificationsColumns.rows.some(col => col.column_name === 'type') &&
+                                            notificationsColumns.rows.some(col => col.column_name === 'title') &&
+                                            notificationsColumns.rows.some(col => col.column_name === 'message');
+      console.log(`✅ Notifications table has required columns: ${hasRequiredNotificationsColumns}`);
+
+      // ADDED: Check OTP codes table
+      const otpCodesColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'otp_codes'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`OTP codes table columns: ${otpCodesColumns.rows.length}`);
+      const hasRequiredOTPCodesColumns = otpCodesColumns.rows.some(col => col.column_name === 'user_id') &&
+                                       otpCodesColumns.rows.some(col => col.column_name === 'code') &&
+                                       otpCodesColumns.rows.some(col => col.column_name === 'type') &&
+                                       otpCodesColumns.rows.some(col => col.column_name === 'expires_at');
+      console.log(`✅ OTP codes table has required columns: ${hasRequiredOTPCodesColumns}`);
 
       // Initialize points for users without points records
       const usersWithoutPoints = await db.query(`
@@ -853,7 +928,16 @@ class DatabaseInitializer {
       }
 
       return {
-        allTablesExist,
+        usersTableHasFullName: hasFullNameColumn,
+        claimsTableHasVideoUrl: hasVideoUrlColumn,
+        claimsTableHasSourceUrl: hasSourceUrlColumn,
+        verdictsTableHasBasedOnAI: hasBasedOnAIVerdictColumn,
+        aiVerdictsTablesExist: hasRequiredAIVerdictsColumns,
+        factCheckerActivitiesExist: hasRequiredActivitiesColumns,
+        pointsTablesExist: hasRequiredPointsColumns,
+        notificationSettingsExist: hasRequiredNotificationColumns,
+        notificationsTableExist: hasRequiredNotificationsColumns,
+        otpCodesTableExist: hasRequiredOTPCodesColumns, // ADDED THIS
         usersWithPoints: usersWithoutPoints.rows.length === 0,
         usersWithNotificationSettings: usersWithoutNotificationSettings.rows.length === 0
       };
@@ -962,7 +1046,7 @@ class DatabaseInitializer {
       console.log('Resetting database...');
       
       const tables = [
-        'otp_codes',
+        'otp_codes', // ADDED THIS
         'notifications',
         'user_notification_settings',
         'points_history',
@@ -970,9 +1054,7 @@ class DatabaseInitializer {
         'blog_likes',
         'blog_comments',
         'blog_articles',
-        'blog_categories',
         'fact_checker_activities',
-        'verdict_responses',
         'verdicts',
         'ai_verdicts', 
         'claims',
@@ -1008,20 +1090,22 @@ class DatabaseInitializer {
     }
   }
 
-  static async runMigrations() {
-    try {
-      console.log('Running database migrations...');
-      
-      // These would be your migration files - for now we'll create the tables directly
-      console.log('✅ All migrations completed via direct table creation');
-    } catch (error) {
-      console.log('ℹ️ Migrations might have already run:', error.message);
-    }
-  }
-
   static async fixExistingDatabase() {
     try {
       console.log('Fixing existing database schema...');
+      
+      try {
+        await db.query(`
+          ALTER TABLE hakikisha.users 
+          ALTER COLUMN username DROP NOT NULL
+        `);
+        console.log('✅ Made username column nullable');
+      } catch (error) {
+        console.log('ℹ️ Username column might already be nullable:', error.message);
+      }
+      
+      await this.updateClaimsTableStatus();
+      await this.updateVerdictsTableConstraints();
       
       await this.ensureRequiredColumns();
       await this.createPointsTables();
@@ -1030,8 +1114,7 @@ class DatabaseInitializer {
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
       await this.createNotificationsTable();
-      await this.createOTPCodesTable();
-      await this.createVerdictResponsesTable();
+      await this.createOTPCodesTable(); // ADDED THIS
       await this.ensureVerdictsColumns();
       await this.ensureFactCheckersColumns();
       await this.ensureAdminActivitiesColumns();
@@ -1040,6 +1123,70 @@ class DatabaseInitializer {
       console.log('✅ Existing database fixed successfully!');
     } catch (error) {
       console.error('❌ Error fixing existing database:', error);
+      throw error;
+    }
+  }
+
+  static async updateClaimsTableStatus() {
+    try {
+      console.log('Updating claims table status constraint...');
+      
+      try {
+        await db.query('ALTER TABLE hakikisha.claims DROP CONSTRAINT IF EXISTS claims_status_check');
+        console.log('✅ Dropped existing claims_status_check constraint');
+      } catch (error) {
+        console.log('ℹ️ Could not drop constraint (might not exist):', error.message);
+      }
+      
+      await db.query(`
+        ALTER TABLE hakikisha.claims 
+        ADD CONSTRAINT claims_status_check 
+        CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed'))
+      `);
+      console.log('✅ Added updated claims_status_check constraint');
+      
+    } catch (error) {
+      console.error('❌ Error updating claims table status constraint:', error);
+      throw error;
+    }
+  }
+
+  static async updateVerdictsTableConstraints() {
+    try {
+      console.log('Updating verdicts table constraints...');
+      
+      // Update AI verdicts table
+      try {
+        await db.query('ALTER TABLE hakikisha.ai_verdicts DROP CONSTRAINT IF EXISTS ai_verdicts_verdict_check');
+        console.log('✅ Dropped existing ai_verdicts_verdict_check constraint');
+      } catch (error) {
+        console.log('ℹ️ Could not drop AI verdicts constraint:', error.message);
+      }
+      
+      await db.query(`
+        ALTER TABLE hakikisha.ai_verdicts 
+        ADD CONSTRAINT ai_verdicts_verdict_check 
+        CHECK (verdict IN ('true', 'false', 'misleading', 'needs_context', 'unverifiable'))
+      `);
+      console.log('✅ Added updated ai_verdicts_verdict_check constraint');
+      
+      // Update verdicts table
+      try {
+        await db.query('ALTER TABLE hakikisha.verdicts DROP CONSTRAINT IF EXISTS verdicts_verdict_check');
+        console.log('✅ Dropped existing verdicts_verdict_check constraint');
+      } catch (error) {
+        console.log('ℹ️ Could not drop verdicts constraint:', error.message);
+      }
+      
+      await db.query(`
+        ALTER TABLE hakikisha.verdicts 
+        ADD CONSTRAINT verdicts_verdict_check 
+        CHECK (verdict IN ('true', 'false', 'misleading', 'needs_context', 'unverifiable'))
+      `);
+      console.log('✅ Added updated verdicts_verdict_check constraint');
+      
+    } catch (error) {
+      console.error('❌ Error updating verdicts table constraints:', error);
       throw error;
     }
   }
@@ -1053,13 +1200,14 @@ class DatabaseInitializer {
       await this.ensureAIVerdictsColumns();
       await this.ensureNotificationSettingsColumns();
       await this.ensureNotificationsColumns();
-      await this.ensureOTPCodesColumns();
+      await this.ensureOTPCodesColumns(); // ADDED THIS
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
       throw error;
     }
   }
 
+  // ADD THIS NEW METHOD
   static async ensureOTPCodesColumns() {
     try {
       console.log('Checking for missing columns in otp_codes table...');
@@ -1161,6 +1309,32 @@ class DatabaseInitializer {
     }
   }
 
+  static async runMigrations() {
+    try {
+      console.log('Running database migrations...');
+      
+      // Run verdict_responses table migration
+      const verdictResponsesMigration = require('../../migrations/022_create_verdict_responses_table');
+      await verdictResponsesMigration.up();
+      
+      // Run username unique constraint migration
+      const usernameUniqueMigration = require('../../migrations/023_add_username_unique_constraint');
+      await usernameUniqueMigration.up();
+      
+      // Run notification settings migration
+      const notificationSettingsMigration = require('../../migrations/024_add_notification_settings_table');
+      await notificationSettingsMigration.up();
+      
+      // Run notifications table migration
+      const notificationsMigration = require('../../migrations/025_add_notifications_table');
+      await notificationsMigration.up();
+      
+      console.log('✅ All migrations completed successfully');
+    } catch (error) {
+      console.log('ℹ️ Migrations might have already run:', error.message);
+    }
+  }
+
   static async ensureAIVerdictsColumns() {
     try {
       console.log('Checking for missing columns in ai_verdicts table...');
@@ -1189,7 +1363,7 @@ class DatabaseInitializer {
       
       const requiredColumns = [
         { name: 'username', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: true },
-        { name: 'full_name', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: false },
+        { name: 'full_name', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: false }, // ADDED FULL_NAME
         { name: 'status', type: 'VARCHAR(50)', defaultValue: "'active'", isUnique: false },
         { name: 'registration_status', type: 'VARCHAR(50)', defaultValue: "'pending'", isUnique: false },
         { name: 'is_verified', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
@@ -1233,7 +1407,7 @@ class DatabaseInitializer {
       
       console.log('All required columns verified in verdicts table');
     } catch (error) {
-      console.error('Error ensuring verdicts columns:', error);
+      console.error('❌ Error ensuring verdicts columns:', error);
       throw error;
     }
   }
