@@ -18,9 +18,9 @@ router.post('/register', async (req, res) => {
     console.log('📝 Registration request received');
     console.log('Request body:', JSON.stringify(req.body, null, 2));
 
-    const { email, password, phone, role = 'user', username } = req.body;
+    const { email, password, phone, role = 'user', username, full_name } = req.body;
     
-    // Additional validation
+    // Required fields validation
     if (!email || !password) {
       return res.status(400).json({
         success: false,
@@ -29,11 +29,18 @@ router.post('/register', async (req, res) => {
     }
 
     // Validate email format using regex
-    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-    if (!emailRegex.test(email)) {
+    if (!EMAIL_REGEX.test(email)) {
       return res.status(400).json({
         success: false,
         error: 'Invalid email format. Please provide a valid email address.'
+      });
+    }
+
+    // Validate username if provided
+    if (username && !USERNAME_REGEX.test(username)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid username format. Username must be 3-30 characters long and contain only letters, numbers, and underscores.'
       });
     }
 
@@ -52,6 +59,7 @@ router.post('/register', async (req, res) => {
 
     console.log('Registration attempt:', { email, role });
 
+    // Password validation
     if (password.length < 6) {
       return res.status(400).json({
         success: false,
@@ -72,26 +80,30 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    // Generate username if not provided
+    // Check if username already exists (if provided)
+    if (username) {
+      const existingUsername = await db.query(
+        'SELECT id FROM hakikisha.users WHERE username = $1',
+        [username]
+      );
+
+      if (existingUsername.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username already exists. Please choose a different username.'
+        });
+      }
+    }
+
+    // Use provided username or generate simple username from email (without random numbers)
     let finalUsername = username;
     if (!finalUsername) {
-      finalUsername = generateUsernameFromEmail(email);
+      // Simple username generation - just use the part before @
+      finalUsername = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
       
-      // Ensure username is unique
-      let usernameExists = true;
-      let attempts = 0;
-      while (usernameExists && attempts < 5) {
-        const existingUsername = await db.query(
-          'SELECT id FROM hakikisha.users WHERE username = $1',
-          [finalUsername]
-        );
-        
-        if (existingUsername.rows.length === 0) {
-          usernameExists = false;
-        } else {
-          finalUsername = generateUsernameFromEmail(email);
-          attempts++;
-        }
+      // Ensure basic username meets requirements
+      if (finalUsername.length < 3) {
+        finalUsername = 'user' + Date.now().toString().slice(-6);
       }
     }
 
@@ -106,10 +118,10 @@ router.post('/register', async (req, res) => {
     // Insert user
     const result = await db.query(
       `INSERT INTO hakikisha.users 
-       (email, username, password_hash, phone, role, registration_status, is_verified) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7) 
-       RETURNING id, email, username, role, registration_status, is_verified`,
-      [email, finalUsername, passwordHash, phoneInput, role, registrationStatus, isVerified]
+       (email, username, password_hash, phone, role, registration_status, is_verified, full_name) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+       RETURNING id, email, username, role, registration_status, is_verified, full_name`,
+      [email, finalUsername, passwordHash, phoneInput, role, registrationStatus, isVerified, full_name]
     );
 
     const user = result.rows[0];
@@ -142,7 +154,8 @@ router.post('/register', async (req, res) => {
         username: user.username,
         role: user.role,
         registration_status: user.registration_status,
-        is_verified: user.is_verified
+        is_verified: user.is_verified,
+        full_name: user.full_name
       },
       token: token
     });
@@ -802,7 +815,7 @@ router.get('/profile', async (req, res) => {
     const decoded = jwt.verify(token, JWT_SECRET);
     
     const userResult = await db.query(
-      'SELECT id, email, username, role, phone, is_verified, registration_status, two_factor_enabled, created_at FROM hakikisha.users WHERE id = $1',
+      'SELECT id, email, username, role, phone, is_verified, registration_status, two_factor_enabled, created_at, full_name FROM hakikisha.users WHERE id = $1',
       [decoded.userId]
     );
 
