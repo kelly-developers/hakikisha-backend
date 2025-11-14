@@ -8,15 +8,9 @@ const emailService = require('../services/emailService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-fallback-secret-key-change-in-production';
 
-// Helper function to generate username from email
-function generateUsernameFromEmail(email) {
-  const baseUsername = email.split('@')[0];
-  // Remove special characters and ensure it's alphanumeric
-  const cleanUsername = baseUsername.replace(/[^a-zA-Z0-9]/g, '');
-  // Add random number to ensure uniqueness
-  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-  return `${cleanUsername}${randomSuffix}`;
-}
+// Validation constants
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,30}$/;
 
 // Simple register endpoint
 router.post('/register', async (req, res) => {
