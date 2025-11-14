@@ -221,6 +221,70 @@ class EmailService {
     }
   }
 
+  // Send Email Verification OTP
+  async sendEmailVerificationOTP(email, code, username = 'User') {
+    const mailOptions = {
+      from: process.env.EMAIL_FROM || `"Hakikisha" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: 'Verify Your Email - Hakikisha',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; background-color: #f6f9fc; margin: 0; padding: 20px; }
+            .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .header { text-align: center; margin-bottom: 30px; }
+            .logo { color: #0A864D; font-size: 24px; font-weight: bold; }
+            .code { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 6px; margin: 20px 0; border: 2px dashed #dee2e6; }
+            .code-number { font-size: 32px; font-weight: bold; color: #0A864D; letter-spacing: 8px; }
+            .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #e9ecef; color: #6c757d; font-size: 14px; }
+            .warning { background: #d1ecf1; color: #0c5460; padding: 12px; border-radius: 4px; margin: 15px 0; border: 1px solid #bee5eb; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <div class="logo">HAKIKISHA</div>
+              <h2 style="color: #333; margin-bottom: 5px;">Email Verification</h2>
+              <p style="color: #666; margin: 0;">Welcome to Hakikisha!</p>
+            </div>
+            
+            <p>Hello <strong>${username}</strong>,</p>
+            
+            <p>Thank you for registering with Hakikisha. To complete your registration, please verify your email address using the code below:</p>
+            
+            <div class="code">
+              <div class="code-number">${code}</div>
+            </div>
+            
+            <div class="warning">
+              <strong>Important:</strong> This verification code will expire in <strong>10 minutes</strong>. 
+              Do not share this code with anyone.
+            </div>
+            
+            <p>If you didn't create an account with Hakikisha, please ignore this email.</p>
+            
+            <div class="footer">
+              <p>This is an automated message from Hakikisha Fact-Checking Platform.</p>
+              <p>© ${new Date().getFullYear()} Hakikisha. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+      logger.info(`Email verification code sent to: ${email}`);
+      return true;
+    } catch (error) {
+      logger.error('Error sending email verification code:', error);
+      throw new Error('Failed to send email verification code');
+    }
+  }
+
   // Generate OTP Code
   generateOTP() {
     return Math.floor(100000 + Math.random() * 900000).toString();
