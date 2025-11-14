@@ -49,11 +49,68 @@ class DatabaseInitializer {
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
       await this.createNotificationsTable();
+      await this.createOTPCodesTable(); // ADDED THIS LINE
       
       console.log('✅ Essential tables created/verified successfully!');
     } catch (error) {
       console.error('❌ Error creating essential tables:', error);
       throw error;
+    }
+  }
+
+  // ADD THIS NEW METHOD
+  static async createOTPCodesTable() {
+    try {
+      const query = `
+        CREATE TABLE IF NOT EXISTS hakikisha.otp_codes (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
+          code VARCHAR(10) NOT NULL,
+          type VARCHAR(50) NOT NULL CHECK (type IN ('email_verification', '2fa', 'password_reset')),
+          used BOOLEAN DEFAULT FALSE,
+          used_at TIMESTAMP,
+          expires_at TIMESTAMP NOT NULL,
+          created_at TIMESTAMP DEFAULT NOW(),
+          
+          -- Index for faster lookups
+          CONSTRAINT unique_active_otp UNIQUE (user_id, type, used)
+        )
+      `;
+      await db.query(query);
+      console.log('✅ OTP codes table created/verified');
+
+      // Create indexes for OTP codes table
+      await this.createOTPCodesIndexes();
+      
+    } catch (error) {
+      console.error('❌ Error creating OTP codes table:', error);
+      throw error;
+    }
+  }
+
+  // ADD THIS NEW METHOD FOR OTP INDEXES
+  static async createOTPCodesIndexes() {
+    try {
+      const indexes = [
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_id ON hakikisha.otp_codes(user_id)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_type ON hakikisha.otp_codes(type)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_expires_at ON hakikisha.otp_codes(expires_at)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_code ON hakikisha.otp_codes(code)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_used ON hakikisha.otp_codes(used)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_type ON hakikisha.otp_codes(user_id, type, used)'
+      ];
+
+      for (const indexQuery of indexes) {
+        try {
+          await db.query(indexQuery);
+          console.log(`✅ Created OTP index: ${indexQuery.split(' ')[3]}`);
+        } catch (error) {
+          console.log(`ℹ️ OTP index might already exist: ${error.message}`);
+        }
+      }
+      console.log('✅ All OTP codes indexes created/verified');
+    } catch (error) {
+      console.error('❌ Error creating OTP codes indexes:', error);
     }
   }
 
@@ -817,6 +874,21 @@ class DatabaseInitializer {
                                             notificationsColumns.rows.some(col => col.column_name === 'message');
       console.log(`✅ Notifications table has required columns: ${hasRequiredNotificationsColumns}`);
 
+      // ADDED: Check OTP codes table
+      const otpCodesColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'otp_codes'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`OTP codes table columns: ${otpCodesColumns.rows.length}`);
+      const hasRequiredOTPCodesColumns = otpCodesColumns.rows.some(col => col.column_name === 'user_id') &&
+                                       otpCodesColumns.rows.some(col => col.column_name === 'code') &&
+                                       otpCodesColumns.rows.some(col => col.column_name === 'type') &&
+                                       otpCodesColumns.rows.some(col => col.column_name === 'expires_at');
+      console.log(`✅ OTP codes table has required columns: ${hasRequiredOTPCodesColumns}`);
+
       // Initialize points for users without points records
       const usersWithoutPoints = await db.query(`
         SELECT u.id, u.email 
@@ -865,6 +937,7 @@ class DatabaseInitializer {
         pointsTablesExist: hasRequiredPointsColumns,
         notificationSettingsExist: hasRequiredNotificationColumns,
         notificationsTableExist: hasRequiredNotificationsColumns,
+        otpCodesTableExist: hasRequiredOTPCodesColumns, // ADDED THIS
         usersWithPoints: usersWithoutPoints.rows.length === 0,
         usersWithNotificationSettings: usersWithoutNotificationSettings.rows.length === 0
       };
@@ -973,6 +1046,7 @@ class DatabaseInitializer {
       console.log('Resetting database...');
       
       const tables = [
+        'otp_codes', // ADDED THIS
         'notifications',
         'user_notification_settings',
         'points_history',
@@ -1040,6 +1114,7 @@ class DatabaseInitializer {
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
       await this.createNotificationsTable();
+      await this.createOTPCodesTable(); // ADDED THIS
       await this.ensureVerdictsColumns();
       await this.ensureFactCheckersColumns();
       await this.ensureAdminActivitiesColumns();
@@ -1125,8 +1200,35 @@ class DatabaseInitializer {
       await this.ensureAIVerdictsColumns();
       await this.ensureNotificationSettingsColumns();
       await this.ensureNotificationsColumns();
+      await this.ensureOTPCodesColumns(); // ADDED THIS
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
+      throw error;
+    }
+  }
+
+  // ADD THIS NEW METHOD
+  static async ensureOTPCodesColumns() {
+    try {
+      console.log('Checking for missing columns in otp_codes table...');
+      
+      const requiredColumns = [
+        { name: 'user_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
+        { name: 'code', type: 'VARCHAR(10)', defaultValue: "''", isUnique: false },
+        { name: 'type', type: 'VARCHAR(50)', defaultValue: "'email_verification'", isUnique: false },
+        { name: 'used', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
+        { name: 'used_at', type: 'TIMESTAMP', defaultValue: 'NULL', isUnique: false },
+        { name: 'expires_at', type: 'TIMESTAMP', defaultValue: 'NOW() + INTERVAL ''10 minutes''', isUnique: false },
+        { name: 'created_at', type: 'TIMESTAMP', defaultValue: 'NOW()', isUnique: false }
+      ];
+
+      for (const column of requiredColumns) {
+        await this.ensureColumnExists('otp_codes', column);
+      }
+      
+      console.log('✅ All required columns verified in otp_codes table');
+    } catch (error) {
+      console.error('❌ Error ensuring otp_codes columns:', error);
       throw error;
     }
   }
