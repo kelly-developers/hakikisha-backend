@@ -68,6 +68,21 @@ class ClaimController {
 
       console.log('Claim inserted successfully:', result.rows[0]);
 
+      // Award 5 points for claim submission
+      console.log('Awarding 5 points for claim submission to user:', req.user.userId);
+      try {
+        await PointsService.awardPoints(
+          req.user.userId, 
+          5, 
+          'CLAIM_SUBMISSION', 
+          'Submitted a claim for fact-checking'
+        );
+        console.log('✅ Successfully awarded 5 points for claim submission');
+      } catch (pointsError) {
+        console.error('❌ Failed to award points:', pointsError);
+        // Continue even if points fail - don't block claim submission
+      }
+
       // Automatically process claim with AI
       try {
         const poeAIService = require('../services/poeAIService');
@@ -93,6 +108,18 @@ class ClaimController {
           
           console.log(`AI verdict extracted: ${aiFactCheckResult.aiVerdict.verdict}, mapped to: ${mappedVerdict}`);
           
+          // Format AI explanation with user-provided links if available
+          let aiExplanation = aiFactCheckResult.aiVerdict.explanation;
+          if (videoLink || sourceLink) {
+            aiExplanation += '\n\n📎 User Provided Links:';
+            if (videoLink) {
+              aiExplanation += `\n🎥 Video: ${videoLink}`;
+            }
+            if (sourceLink) {
+              aiExplanation += `\n🔗 Source: ${sourceLink}`;
+            }
+          }
+          
           await db.query(
             `INSERT INTO hakikisha.ai_verdicts (
               id, claim_id, verdict, confidence_score, explanation, 
@@ -102,7 +129,7 @@ class ClaimController {
               aiVerdictId,
               claimId,
               mappedVerdict,
-              aiFactCheckResult.aiVerdict.confidence === 'high' ? 0.9 : 
+              aiFactCheckResult.aiVerdict.confidence === 'high' ? 0.9 :
                 aiFactCheckResult.aiVerdict.confidence === 'low' ? 0.5 : 0.7,
               aiFactCheckResult.aiVerdict.explanation,
               JSON.stringify([]),

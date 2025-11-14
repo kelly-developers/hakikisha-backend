@@ -4,7 +4,7 @@ const logger = require('../utils/logger');
 class PointsService {
   static POINTS = {
     DAILY_LOGIN: 10,
-    CLAIM_SUBMISSION: 20,
+    CLAIM_SUBMISSION: 5,
     PROFILE_COMPLETION: 15,
     VERDICT_RECEIVED: 5,
     STREAK_BONUS: 25

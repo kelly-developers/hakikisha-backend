@@ -21,18 +21,42 @@ function generateUsernameFromEmail(email) {
 // Simple register endpoint
 router.post('/register', async (req, res) => {
   try {
+    console.log('📝 Registration request received');
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+
     const { email, password, phone, role = 'user', username } = req.body;
-    const phoneInput = phone ?? req.body.phone_number ?? null;
-
-    console.log('Registration attempt:', { email, role });
-
-    // Validate input
+    
+    // Additional validation
     if (!email || !password) {
       return res.status(400).json({
         success: false,
         error: 'Email and password are required'
       });
     }
+
+    // Validate email format using regex
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid email format. Please provide a valid email address.'
+      });
+    }
+
+    const phoneInput = phone ?? req.body.phone_number ?? null;
+    
+    // Validate phone number - must not contain letters
+    if (phoneInput) {
+      const phoneRegex = /^\+?[\d\s\-()]+$/;
+      if (!phoneRegex.test(phoneInput)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid phone number format. Phone number should only contain numbers, spaces, hyphens, and parentheses.'
+        });
+      }
+    }
+
+    console.log('Registration attempt:', { email, role });
 
     if (password.length < 6) {
       return res.status(400).json({
