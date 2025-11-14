@@ -70,15 +70,19 @@ const authMiddleware = async (req, res, next) => {
       registration_status: user.registration_status
     });
 
-    // Check if user is verified and approved
+    // ENFORCE EMAIL VERIFICATION - Users must verify email before accessing protected routes
     if (!user.is_verified) {
-      console.log('❌ User not verified');
-      return res.status(401).json({
+      console.log('❌ User not verified - blocking access to protected route');
+      return res.status(403).json({
         success: false,
-        error: 'Account not verified. Please verify your email.'
+        error: 'Please verify your email address to access this resource.',
+        code: 'EMAIL_NOT_VERIFIED',
+        requiresEmailVerification: true,
+        userId: user.id
       });
     }
 
+    // Check if user is approved
     if (user.registration_status !== 'approved') {
       console.log('❌ User registration not approved:', user.registration_status);
       return res.status(401).json({

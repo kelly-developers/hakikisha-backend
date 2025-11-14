@@ -134,7 +134,7 @@ const register = async (req, res) => {
 
     // Generate and send email verification OTP for all users
     try {
-      const otp = require('../services/emailService').generateOTP();
+      const otp = emailService.generateOTP();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
       await db.query(
@@ -252,11 +252,39 @@ const login = async (req, res) => {
       });
     }
 
-    // Check if user has verified their email (required for first login)
-    if (!user.is_verified && user.role === 'user') {
+    // ENFORCE EMAIL VERIFICATION FOR ALL USERS BEFORE FIRST LOGIN
+    if (!user.is_verified) {
+      // Check if there's a pending verification OTP
+      const pendingOTP = await db.query(
+        `SELECT * FROM hakikisha.otp_codes 
+         WHERE user_id = $1 AND type = 'email_verification' 
+         AND expires_at > NOW() AND used = false
+         ORDER BY created_at DESC LIMIT 1`,
+        [user.id]
+      );
+
+      let message = 'Please verify your email address before logging in.';
+      
+      if (pendingOTP.rows.length === 0) {
+        // No active OTP, generate and send a new one
+        const otp = emailService.generateOTP();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        await db.query(
+          `INSERT INTO hakikisha.otp_codes (user_id, code, type, expires_at)
+           VALUES ($1, $2, $3, $4)`,
+          [user.id, otp, 'email_verification', expiresAt]
+        );
+
+        await emailService.sendEmailVerificationOTP(user.email, otp, user.username);
+        message += ' A new verification code has been sent to your email.';
+      } else {
+        message += ' Check your email for the verification code.';
+      }
+
       return res.status(403).json({
         success: false,
-        error: 'Please verify your email address before logging in. Check your email for the verification code.',
+        error: message,
         code: 'EMAIL_NOT_VERIFIED',
         requiresEmailVerification: true,
         userId: user.id
@@ -410,6 +438,17 @@ const verify2FA = async (req, res) => {
     }
 
     const user = userResult.rows[0];
+
+    // Check if email is verified before allowing 2FA login
+    if (!user.is_verified) {
+      return res.status(403).json({
+        success: false,
+        error: 'Please verify your email address before logging in.',
+        code: 'EMAIL_NOT_VERIFIED',
+        requiresEmailVerification: true,
+        userId: user.id
+      });
+    }
 
     await db.query(
       'UPDATE hakikisha.users SET last_login = NOW(), login_count = COALESCE(login_count, 0) + 1, updated_at = NOW() WHERE id = $1',
@@ -685,7 +724,7 @@ const refreshToken = async (req, res) => {
     }
 
     const userResult = await db.query(
-      'SELECT id, email, role, status FROM hakikisha.users WHERE id = $1',
+      'SELECT id, email, role, status, is_verified FROM hakikisha.users WHERE id = $1',
       [decoded.userId]
     );
 
@@ -704,6 +743,17 @@ const refreshToken = async (req, res) => {
         success: false,
         error: 'Account is inactive',
         code: 'ACCOUNT_SUSPENDED'
+      });
+    }
+
+    // Check if email is verified
+    if (!user.is_verified) {
+      return res.status(403).json({
+        success: false,
+        error: 'Please verify your email address to continue.',
+        code: 'EMAIL_NOT_VERIFIED',
+        requiresEmailVerification: true,
+        userId: user.id
       });
     }
 
@@ -802,7 +852,6 @@ const logoutAllDevices = async (req, res) => {
   }
 };
 
-// In your authController.js, update the getCurrentUser function:
 const getCurrentUser = async (req, res) => {
   try {
     console.log('Get Current User Request');

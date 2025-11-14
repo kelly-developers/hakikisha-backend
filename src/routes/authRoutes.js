@@ -113,7 +113,8 @@ router.post('/register', async (req, res) => {
 
     // Determine registration status
     const registrationStatus = role === 'fact_checker' ? 'pending' : 'approved';
-    const isVerified = role === 'user'; // Auto-verify regular users
+    // ALL USERS START AS UNVERIFIED - must verify email before login
+    const isVerified = false;
 
     // Insert user
     const result = await db.query(
@@ -126,28 +127,49 @@ router.post('/register', async (req, res) => {
 
     const user = result.rows[0];
 
+    // Generate and send email verification OTP for ALL users
+    try {
+      const otp = emailService.generateOTP();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      await db.query(
+        `INSERT INTO hakikisha.otp_codes (user_id, code, type, expires_at)
+         VALUES ($1, $2, $3, $4)`,
+        [user.id, otp, 'email_verification', expiresAt]
+      );
+
+      // Send verification email
+      await emailService.sendEmailVerificationOTP(user.email, otp, user.username);
+      console.log(`Email verification OTP sent to: ${user.email}`);
+    } catch (otpError) {
+      console.error('Failed to send verification email:', otpError);
+      // Continue registration even if email fails - user can request resend
+    }
+
     // If user is admin, automatically enable 2FA
     if (role === 'admin') {
       await twoFactorService.enable2FA(user.id, 'email');
       console.log(`2FA automatically enabled for admin: ${email}`);
     }
 
-    // Generate JWT token
-    const token = jwt.sign(
+    // Generate temporary token (limited access until email verification)
+    const tempToken = jwt.sign(
       { 
         userId: user.id, 
         email: user.email, 
-        role: user.role 
+        role: user.role,
+        temp: true, // Mark as temporary until email verification
+        is_verified: false
       },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '1h' } // Short expiry for temporary token
     );
 
     res.status(201).json({
       success: true,
       message: role === 'fact_checker' 
-        ? 'Registration submitted for approval. You will be notified once reviewed.'
-        : 'Registration successful',
+        ? 'Registration submitted for approval. Please verify your email to continue.'
+        : 'Registration successful! Please check your email to verify your account before logging in.',
       user: {
         id: user.id,
         email: user.email,
@@ -157,7 +179,8 @@ router.post('/register', async (req, res) => {
         is_verified: user.is_verified,
         full_name: user.full_name
       },
-      token: token
+      token: tempToken,
+      requiresEmailVerification: true
     });
 
   } catch (error) {
@@ -190,7 +213,7 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Enhanced login with 2FA for admins
+// Enhanced login with email verification enforcement
 router.post('/login', async (req, res) => {
   try {
     const { email, username, identifier, password } = req.body;
@@ -231,6 +254,45 @@ router.post('/login', async (req, res) => {
         success: false,
         error: 'Your account has been suspended or deactivated. Please contact support for assistance.',
         code: 'ACCOUNT_SUSPENDED'
+      });
+    }
+
+    // ENFORCE EMAIL VERIFICATION - Block login if email not verified
+    if (!user.is_verified) {
+      // Check if there's a pending verification OTP
+      const pendingOTP = await db.query(
+        `SELECT * FROM hakikisha.otp_codes 
+         WHERE user_id = $1 AND type = 'email_verification' 
+         AND expires_at > NOW() AND used = false
+         ORDER BY created_at DESC LIMIT 1`,
+        [user.id]
+      );
+
+      let message = 'Please verify your email address before logging in.';
+      
+      if (pendingOTP.rows.length === 0) {
+        // No active OTP, generate and send a new one
+        const otp = emailService.generateOTP();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        await db.query(
+          `INSERT INTO hakikisha.otp_codes (user_id, code, type, expires_at)
+           VALUES ($1, $2, $3, $4)`,
+          [user.id, otp, 'email_verification', expiresAt]
+        );
+
+        await emailService.sendEmailVerificationOTP(user.email, otp, user.username);
+        message += ' A new verification code has been sent to your email.';
+      } else {
+        message += ' Check your email for the verification code.';
+      }
+
+      return res.status(403).json({
+        success: false,
+        error: message,
+        code: 'EMAIL_NOT_VERIFIED',
+        requiresEmailVerification: true,
+        userId: user.id
       });
     }
 
@@ -292,7 +354,12 @@ router.post('/login', async (req, res) => {
     );
 
     const token = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role },
+      { 
+        userId: user.id, 
+        email: user.email, 
+        role: user.role,
+        is_verified: user.is_verified 
+      },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -322,7 +389,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Verify 2FA OTP
+// Verify 2FA OTP with email verification check
 router.post('/verify-2fa', async (req, res) => {
   try {
     const { tempToken, code, userId } = req.body;
@@ -382,6 +449,17 @@ router.post('/verify-2fa', async (req, res) => {
 
     const user = userResult.rows[0];
 
+    // ENFORCE EMAIL VERIFICATION before allowing 2FA login
+    if (!user.is_verified) {
+      return res.status(403).json({
+        success: false,
+        error: 'Please verify your email address before logging in.',
+        code: 'EMAIL_NOT_VERIFIED',
+        requiresEmailVerification: true,
+        userId: user.id
+      });
+    }
+
     // Update login stats
     await db.query(
       'UPDATE hakikisha.users SET login_count = COALESCE(login_count, 0) + 1, last_login = NOW() WHERE id = $1',
@@ -399,7 +477,8 @@ router.post('/verify-2fa', async (req, res) => {
       { 
         userId: user.id, 
         email: user.email, 
-        role: user.role 
+        role: user.role,
+        is_verified: user.is_verified 
       },
       JWT_SECRET,
       { expiresIn: '24h' }
@@ -425,6 +504,166 @@ router.post('/verify-2fa', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Internal server error during 2FA verification'
+    });
+  }
+});
+
+// Email verification routes
+router.post('/verify-email', async (req, res) => {
+  try {
+    console.log('Verify Email Request');
+    const { userId, code } = req.body;
+
+    if (!userId || !code) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID and verification code are required',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Check OTP for email verification
+    const result = await db.query(
+      `SELECT * FROM hakikisha.otp_codes 
+       WHERE user_id = $1 AND code = $2 AND type = 'email_verification' 
+       AND expires_at > NOW() AND used = false
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId, code]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired verification code',
+        code: 'INVALID_CODE'
+      });
+    }
+
+    // Mark OTP as used
+    await db.query(
+      'UPDATE hakikisha.otp_codes SET used = true WHERE id = $1',
+      [result.rows[0].id]
+    );
+
+    // Mark user as verified
+    await db.query(
+      'UPDATE hakikisha.users SET is_verified = true, updated_at = NOW() WHERE id = $1',
+      [userId]
+    );
+
+    // Get updated user data
+    const userResult = await db.query(
+      'SELECT id, email, username, role, is_verified, registration_status FROM hakikisha.users WHERE id = $1',
+      [userId]
+    );
+
+    const user = userResult.rows[0];
+
+    // Generate proper JWT token now that email is verified
+    const token = jwt.sign(
+      { 
+        userId: user.id, 
+        email: user.email, 
+        role: user.role,
+        is_verified: true 
+      },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    console.log(`Email verified successfully for user: ${userId}`);
+
+    res.json({
+      success: true,
+      message: 'Email verified successfully. You can now log in.',
+      user: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        role: user.role,
+        is_verified: user.is_verified,
+        registration_status: user.registration_status
+      },
+      token: token
+    });
+  } catch (error) {
+    console.error('Verify email error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Verification failed. Please try again.',
+      code: 'SERVER_ERROR'
+    });
+  }
+});
+
+// Resend Email Verification Code
+router.post('/resend-verification', async (req, res) => {
+  try {
+    console.log('Resend Verification Code Request');
+    const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email is required',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Find user by email
+    const userResult = await db.query(
+      'SELECT id, email, username, is_verified FROM hakikisha.users WHERE email = $1',
+      [email]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+        code: 'NOT_FOUND'
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    if (user.is_verified) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email already verified',
+        code: 'ALREADY_VERIFIED'
+      });
+    }
+
+    // Invalidate old OTPs
+    await db.query(
+      `UPDATE hakikisha.otp_codes SET used = true 
+       WHERE user_id = $1 AND type = 'email_verification' AND used = false`,
+      [user.id]
+    );
+
+    // Generate new OTP
+    const otp = emailService.generateOTP();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    await db.query(
+      `INSERT INTO hakikisha.otp_codes (user_id, code, type, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [user.id, otp, 'email_verification', expiresAt]
+    );
+
+    await emailService.sendEmailVerificationOTP(user.email, otp, user.username);
+    console.log(`Verification code resent to user: ${user.email}`);
+
+    res.json({
+      success: true,
+      message: 'Verification code sent to your email'
+    });
+  } catch (error) {
+    console.error('Resend verification code error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to resend verification code. Please try again.',
+      code: 'SERVER_ERROR'
     });
   }
 });
