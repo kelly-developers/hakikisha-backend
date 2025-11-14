@@ -98,11 +98,12 @@ class User {
       throw new Error('Email and password are required');
     }
 
-    // Generate username if not provided
-    let finalUsername = username;
-    if (!finalUsername) {
-      finalUsername = email.split('@')[0] + Math.floor(1000 + Math.random() * 9000);
+    // Username is required, no random generation
+    if (!username) {
+      throw new Error('Username is required');
     }
+
+    const finalUsername = username;
 
     const id = uuidv4();
     const query = `

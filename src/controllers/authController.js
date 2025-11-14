@@ -42,11 +42,22 @@ const register = async (req, res) => {
       });
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    // Strict email validation with multiple checks
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid email format',
+        error: 'Invalid email format. Please provide a valid email address.',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Additional check: email must have valid domain
+    const emailParts = email.split('@');
+    if (emailParts.length !== 2 || emailParts[1].split('.').length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid email domain. Please use a valid email address.',
         code: 'VALIDATION_ERROR'
       });
     }
@@ -72,83 +83,80 @@ const register = async (req, res) => {
       });
     }
 
-    if (username) {
-      const existingUsername = await db.query(
-        'SELECT id FROM hakikisha.users WHERE username = $1',
-        [username]
-      );
+    // Username is required
+    if (!username || username.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'Username is required',
+        code: 'VALIDATION_ERROR'
+      });
+    }
 
-      if (existingUsername.rows.length > 0) {
-        return res.status(400).json({
-          success: false,
-          error: 'Username already taken',
-          code: 'USERNAME_EXISTS'
-        });
-      }
+    // Validate username format (alphanumeric and underscore only, 3-30 chars)
+    const usernameRegex = /^[a-zA-Z0-9_]{3,30}$/;
+    if (!usernameRegex.test(username)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Username must be 3-30 characters and contain only letters, numbers, and underscores',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    const existingUsername = await db.query(
+      'SELECT id FROM hakikisha.users WHERE username = $1',
+      [username]
+    );
+
+    if (existingUsername.rows.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Username already taken',
+        code: 'USERNAME_EXISTS'
+      });
     }
 
     const password_hash = await bcrypt.hash(password, 12);
     const userId = uuidv4();
 
     const registrationStatus = role === 'fact_checker' ? 'pending' : 'approved';
-    const isVerified = role !== 'fact_checker';
-
-    // Generate unique username if not provided
-    let finalUsername = username;
-    if (!finalUsername) {
-      const baseUsername = email.split('@')[0];
-      let counter = 0;
-      let usernameExists = true;
-      
-      while (usernameExists && counter < 100) {
-        const testUsername = counter === 0 ? baseUsername : `${baseUsername}${counter}`;
-        const existingUsernameCheck = await db.query(
-          'SELECT id FROM hakikisha.users WHERE username = $1',
-          [testUsername]
-        );
-        
-        if (existingUsernameCheck.rows.length === 0) {
-          finalUsername = testUsername;
-          usernameExists = false;
-        } else {
-          counter++;
-        }
-      }
-      
-      if (usernameExists) {
-        // Last resort: append UUID fragment
-        finalUsername = `${baseUsername}_${userId.substring(0, 8)}`;
-      }
-    }
+    // Users start as unverified and must verify email
+    const isVerified = false;
+    const twoFactorEnabled = (role === 'admin' || role === 'fact_checker');
 
     const result = await db.query(
-      `INSERT INTO hakikisha.users (id, email, username, password_hash, phone, role, registration_status, is_verified, status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', NOW(), NOW())
-       RETURNING id, email, username, role, registration_status, is_verified, created_at`,
-      [userId, email, finalUsername, password_hash, phone || null, role, registrationStatus, isVerified]
+      `INSERT INTO hakikisha.users (id, email, username, password_hash, phone, role, registration_status, is_verified, two_factor_enabled, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', NOW(), NOW())
+       RETURNING id, email, username, role, registration_status, is_verified, two_factor_enabled, created_at`,
+      [userId, email, username, password_hash, phone || null, role, registrationStatus, isVerified, twoFactorEnabled]
     );
 
     const user = result.rows[0];
 
+    // Generate and send email verification OTP for all users
+    try {
+      const otp = require('../services/emailService').generateOTP();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      await db.query(
+        `INSERT INTO hakikisha.otp_codes (user_id, code, type, expires_at)
+         VALUES ($1, $2, $3, $4)`,
+        [user.id, otp, 'email_verification', expiresAt]
+      );
+
+      // Send verification email
+      await emailService.sendEmailVerificationOTP(user.email, otp, user.username);
+      logger.info(`Email verification OTP sent to: ${user.email}`);
+    } catch (otpError) {
+      logger.error('Failed to send verification email:', otpError);
+      // Continue registration even if email fails - user can request resend
+    }
+
+    // Initialize user points (will be fully awarded after email verification)
     try {
       await PointsService.initializeUserPoints(user.id);
       console.log('User points initialized for new user');
-      
-      const pointsResult = await PointsService.awardPoints(
-        user.id,
-        POINTS.PROFILE_COMPLETION,
-        'PROFILE_COMPLETION',
-        'Completed registration and profile setup'
-      );
-      console.log('Registration points awarded:', pointsResult.pointsAwarded);
     } catch (pointsError) {
-      console.log('Points initialization or award failed:', pointsError.message);
-    }
-
-    try {
-      await emailService.sendWelcomeEmail(user.email, user.username);
-    } catch (emailError) {
-      console.error('Failed to send welcome email:', emailError);
+      console.log('Points initialization failed:', pointsError.message);
     }
 
     logger.info(`New user registered: ${user.email} with ID: ${user.id}`);
@@ -156,16 +164,18 @@ const register = async (req, res) => {
     res.status(201).json({
       success: true,
       message: role === 'fact_checker' 
-        ? 'Registration submitted for approval. You will be notified once reviewed.'
-        : 'Registration successful! You can now login to your account.',
+        ? 'Registration submitted for approval. Please verify your email to continue.'
+        : 'Registration successful! Please check your email to verify your account before logging in.',
       user: {
         id: user.id,
         email: user.email,
         username: user.username,
         role: user.role,
         registration_status: user.registration_status,
-        is_verified: user.is_verified
-      }
+        is_verified: user.is_verified,
+        two_factor_enabled: user.two_factor_enabled
+      },
+      requiresEmailVerification: !user.is_verified
     });
   } catch (error) {
     console.error('Register error:', error);
@@ -242,6 +252,17 @@ const login = async (req, res) => {
       });
     }
 
+    // Check if user has verified their email (required for first login)
+    if (!user.is_verified && user.role === 'user') {
+      return res.status(403).json({
+        success: false,
+        error: 'Please verify your email address before logging in. Check your email for the verification code.',
+        code: 'EMAIL_NOT_VERIFIED',
+        requiresEmailVerification: true,
+        userId: user.id
+      });
+    }
+
     if (user.registration_status !== 'approved') {
       return res.status(403).json({
         success: false,
@@ -250,7 +271,8 @@ const login = async (req, res) => {
       });
     }
 
-    if (user.role === 'admin' || user.two_factor_enabled) {
+    // Enforce 2FA for admins and fact-checkers (MANDATORY)
+    if ((user.role === 'admin' || user.role === 'fact_checker') && user.two_factor_enabled) {
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
@@ -948,8 +970,8 @@ const verifyEmail = async (req, res) => {
     // Check OTP for email verification
     const result = await db.query(
       `SELECT * FROM hakikisha.otp_codes 
-       WHERE user_id = $1 AND code = $2 AND purpose = 'email_verification' 
-       AND expires_at > NOW() AND is_used = false
+       WHERE user_id = $1 AND code = $2 AND type = 'email_verification' 
+       AND expires_at > NOW() AND used = false
        ORDER BY created_at DESC LIMIT 1`,
       [userId, code]
     );
@@ -964,7 +986,7 @@ const verifyEmail = async (req, res) => {
 
     // Mark OTP as used
     await db.query(
-      'UPDATE hakikisha.otp_codes SET is_used = true WHERE id = $1',
+      'UPDATE hakikisha.otp_codes SET used = true WHERE id = $1',
       [result.rows[0].id]
     );
 
@@ -973,6 +995,21 @@ const verifyEmail = async (req, res) => {
       'UPDATE hakikisha.users SET is_verified = true, updated_at = NOW() WHERE id = $1',
       [userId]
     );
+
+    // Award registration points for users after email verification
+    try {
+      const userResult = await db.query('SELECT role FROM hakikisha.users WHERE id = $1', [userId]);
+      if (userResult.rows.length > 0 && userResult.rows[0].role === 'user') {
+        await PointsService.awardPoints(
+          userId,
+          POINTS.PROFILE_COMPLETION,
+          'PROFILE_COMPLETION',
+          'Completed email verification'
+        );
+      }
+    } catch (pointsError) {
+      logger.warn('Failed to award points after email verification:', pointsError);
+    }
 
     logger.info(`Email verified successfully for user: ${userId}`);
 
@@ -1031,8 +1068,8 @@ const resendVerificationCode = async (req, res) => {
 
     // Invalidate old OTPs
     await db.query(
-      `UPDATE hakikisha.otp_codes SET is_used = true 
-       WHERE user_id = $1 AND purpose = 'email_verification' AND is_used = false`,
+      `UPDATE hakikisha.otp_codes SET used = true 
+       WHERE user_id = $1 AND type = 'email_verification' AND used = false`,
       [user.id]
     );
 
@@ -1041,7 +1078,7 @@ const resendVerificationCode = async (req, res) => {
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     await db.query(
-      `INSERT INTO hakikisha.otp_codes (user_id, code, purpose, expires_at)
+      `INSERT INTO hakikisha.otp_codes (user_id, code, type, expires_at)
        VALUES ($1, $2, $3, $4)`,
       [user.id, otp, 'email_verification', expiresAt]
     );
