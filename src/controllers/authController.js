@@ -931,10 +931,211 @@ const checkAuth = async (req, res) => {
   }
 };
 
+// Verify Email (for regular users after registration)
+const verifyEmail = async (req, res) => {
+  try {
+    console.log('Verify Email Request');
+    const { userId, code } = req.body;
+
+    if (!userId || !code) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID and verification code are required',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Check OTP for email verification
+    const result = await db.query(
+      `SELECT * FROM hakikisha.otp_codes 
+       WHERE user_id = $1 AND code = $2 AND purpose = 'email_verification' 
+       AND expires_at > NOW() AND is_used = false
+       ORDER BY created_at DESC LIMIT 1`,
+      [userId, code]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired verification code',
+        code: 'INVALID_CODE'
+      });
+    }
+
+    // Mark OTP as used
+    await db.query(
+      'UPDATE hakikisha.otp_codes SET is_used = true WHERE id = $1',
+      [result.rows[0].id]
+    );
+
+    // Mark user as verified
+    await db.query(
+      'UPDATE hakikisha.users SET is_verified = true, updated_at = NOW() WHERE id = $1',
+      [userId]
+    );
+
+    logger.info(`Email verified successfully for user: ${userId}`);
+
+    res.json({
+      success: true,
+      message: 'Email verified successfully. You can now log in.'
+    });
+  } catch (error) {
+    console.error('Verify email error:', error);
+    logger.error('Verify email error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Verification failed. Please try again.',
+      code: 'SERVER_ERROR'
+    });
+  }
+};
+
+// Resend Email Verification Code
+const resendVerificationCode = async (req, res) => {
+  try {
+    console.log('Resend Verification Code Request');
+    const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email is required',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Find user by email
+    const userResult = await db.query(
+      'SELECT id, email, username, is_verified FROM hakikisha.users WHERE email = $1',
+      [email]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+        code: 'NOT_FOUND'
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    if (user.is_verified) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email already verified',
+        code: 'ALREADY_VERIFIED'
+      });
+    }
+
+    // Invalidate old OTPs
+    await db.query(
+      `UPDATE hakikisha.otp_codes SET is_used = true 
+       WHERE user_id = $1 AND purpose = 'email_verification' AND is_used = false`,
+      [user.id]
+    );
+
+    // Generate new OTP
+    const otp = emailService.generateOTP();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    await db.query(
+      `INSERT INTO hakikisha.otp_codes (user_id, code, purpose, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [user.id, otp, 'email_verification', expiresAt]
+    );
+
+    await emailService.sendEmailVerificationOTP(user.email, otp, user.username);
+    logger.info(`Verification code resent to user: ${user.email}`);
+
+    res.json({
+      success: true,
+      message: 'Verification code sent to your email'
+    });
+  } catch (error) {
+    console.error('Resend verification code error:', error);
+    logger.error('Resend verification code error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to resend verification code. Please try again.',
+      code: 'SERVER_ERROR'
+    });
+  }
+};
+
+// Resend 2FA Code
+const resend2FACode = async (req, res) => {
+  try {
+    console.log('Resend 2FA Code Request');
+    const { userId, email } = req.body;
+
+    if (!userId || !email) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID and email are required',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Verify user exists
+    const userResult = await db.query(
+      'SELECT id, email, username, role FROM hakikisha.users WHERE id = $1 AND email = $2',
+      [userId, email]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+        code: 'NOT_FOUND'
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Invalidate old 2FA codes
+    await db.query(
+      `UPDATE hakikisha.otp_codes SET is_used = true 
+       WHERE user_id = $1 AND purpose = '2fa_login' AND is_used = false`,
+      [user.id]
+    );
+
+    // Generate new 2FA code
+    const twoFactorCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    await db.query(
+      `INSERT INTO hakikisha.otp_codes (user_id, code, purpose, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [user.id, twoFactorCode, '2fa_login', expiresAt]
+    );
+
+    await emailService.send2FACode(user.email, twoFactorCode, user.username);
+    logger.info(`2FA code resent to user: ${user.email}`);
+
+    res.json({
+      success: true,
+      message: '2FA code resent to your email'
+    });
+  } catch (error) {
+    console.error('Resend 2FA code error:', error);
+    logger.error('Resend 2FA code error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to resend 2FA code. Please try again.',
+      code: 'SERVER_ERROR'
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
   verify2FA,
+  verifyEmail,
+  resendVerificationCode,
+  resend2FACode,
   forgotPassword,
   resetPassword,
   refreshToken,
