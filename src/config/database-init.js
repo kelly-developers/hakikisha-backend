@@ -1405,9 +1405,9 @@ class DatabaseInitializer {
         await this.ensureColumnExists('verdicts', column);
       }
       
-      console.log('✅ All required columns verified in verdicts table');
+      console.log('All required columns verified in verdicts table');
     } catch (error) {
-      console.error('❌ Error ensuring verdicts columns:', error);
+      console.error('Error ensuring verdicts columns:', error);
       throw error;
     }
   }
