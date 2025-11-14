@@ -159,6 +159,7 @@ class DatabaseInitializer {
           email VARCHAR(255) UNIQUE NOT NULL,
           username VARCHAR(255) UNIQUE,
           password_hash VARCHAR(255) NOT NULL,
+          full_name VARCHAR(255), -- ADDED FULL_NAME COLUMN
           phone VARCHAR(50),
           role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('user', 'fact_checker', 'admin')),
           profile_picture TEXT,
@@ -381,7 +382,7 @@ class DatabaseInitializer {
           media_type VARCHAR(50) DEFAULT 'text',
           media_url TEXT,
           video_url TEXT,
-          source_url TEXT, -- ADDED THIS MISSING COLUMN
+          source_url TEXT,
           status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed')),
           priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
           submission_count INTEGER DEFAULT 1,
@@ -427,7 +428,7 @@ class DatabaseInitializer {
             media_type VARCHAR(50) DEFAULT 'text',
             media_url TEXT,
             video_url TEXT,
-            source_url TEXT, -- ADDED THIS MISSING COLUMN
+            source_url TEXT,
             status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed')),
             priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
             submission_count INTEGER DEFAULT 1,
@@ -536,7 +537,7 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_claims_trending_score ON hakikisha.claims(trending_score)',
       'CREATE INDEX IF NOT EXISTS idx_claims_created_at ON hakikisha.claims(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_claims_video_url ON hakikisha.claims(video_url) WHERE video_url IS NOT NULL',
-      'CREATE INDEX IF NOT EXISTS idx_claims_source_url ON hakikisha.claims(source_url) WHERE source_url IS NOT NULL', // ADDED INDEX FOR SOURCE_URL
+      'CREATE INDEX IF NOT EXISTS idx_claims_source_url ON hakikisha.claims(source_url) WHERE source_url IS NOT NULL',
       
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_claim_id ON hakikisha.ai_verdicts(claim_id)',
       'CREATE INDEX IF NOT EXISTS idx_ai_verdicts_verdict ON hakikisha.ai_verdicts(verdict)',
@@ -669,10 +670,10 @@ class DatabaseInitializer {
         const passwordHash = await bcrypt.hash(adminPassword, saltRounds);
 
         const result = await db.query(
-          `INSERT INTO hakikisha.users (email, username, password_hash, role, is_verified, registration_status, status) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7) 
-           RETURNING id, email, username, role, registration_status, status`,
-          [adminEmail, 'admin', passwordHash, 'admin', true, 'approved', 'active']
+          `INSERT INTO hakikisha.users (email, username, password_hash, role, is_verified, registration_status, status, full_name) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+           RETURNING id, email, username, role, registration_status, status, full_name`,
+          [adminEmail, 'admin', passwordHash, 'admin', true, 'approved', 'active', 'Admin User']
         );
 
         const newAdmin = result.rows[0];
@@ -695,6 +696,23 @@ class DatabaseInitializer {
     try {
       console.log('Verifying database state...');
       
+      // Check users table for the full_name column
+      const usersColumns = await db.query(`
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_schema = 'hakikisha' AND table_name = 'users'
+        ORDER BY ordinal_position
+      `);
+      
+      console.log(`Users table columns: ${usersColumns.rows.length}`);
+      const hasFullNameColumn = usersColumns.rows.some(col => col.column_name === 'full_name');
+      console.log(`✅ Users has full_name column: ${hasFullNameColumn}`);
+      
+      if (!hasFullNameColumn) {
+        console.log('⚠️ Missing full_name column detected, adding it now...');
+        await this.ensureUserColumns();
+      }
+      
       // Check claims table for the source_url column
       const claimsColumns = await db.query(`
         SELECT column_name, data_type, is_nullable, column_default
@@ -705,7 +723,7 @@ class DatabaseInitializer {
       
       console.log(`Claims table columns: ${claimsColumns.rows.length}`);
       const hasVideoUrlColumn = claimsColumns.rows.some(col => col.column_name === 'video_url');
-      const hasSourceUrlColumn = claimsColumns.rows.some(col => col.column_name === 'source_url'); // CHECK FOR SOURCE_URL
+      const hasSourceUrlColumn = claimsColumns.rows.some(col => col.column_name === 'source_url');
       console.log(`✅ Claims has video_url column: ${hasVideoUrlColumn}`);
       console.log(`✅ Claims has source_url column: ${hasSourceUrlColumn}`);
       
@@ -838,8 +856,9 @@ class DatabaseInitializer {
       }
 
       return {
+        usersTableHasFullName: hasFullNameColumn,
         claimsTableHasVideoUrl: hasVideoUrlColumn,
-        claimsTableHasSourceUrl: hasSourceUrlColumn, // ADDED THIS
+        claimsTableHasSourceUrl: hasSourceUrlColumn,
         verdictsTableHasBasedOnAI: hasBasedOnAIVerdictColumn,
         aiVerdictsTablesExist: hasRequiredAIVerdictsColumns,
         factCheckerActivitiesExist: hasRequiredActivitiesColumns,
@@ -1101,7 +1120,7 @@ class DatabaseInitializer {
     try {
       console.log('Ensuring all required columns exist...');
       await this.ensureUserColumns();
-      await this.ensureClaimsColumns(); // This will now add source_url
+      await this.ensureClaimsColumns();
       await this.ensureVerdictsColumns();
       await this.ensureAIVerdictsColumns();
       await this.ensureNotificationSettingsColumns();
@@ -1118,7 +1137,7 @@ class DatabaseInitializer {
       
       const requiredColumns = [
         { name: 'video_url', type: 'TEXT', defaultValue: 'NULL', isUnique: false },
-        { name: 'source_url', type: 'TEXT', defaultValue: 'NULL', isUnique: false } // ADDED THIS COLUMN
+        { name: 'source_url', type: 'TEXT', defaultValue: 'NULL', isUnique: false }
       ];
 
       for (const column of requiredColumns) {
@@ -1242,6 +1261,7 @@ class DatabaseInitializer {
       
       const requiredColumns = [
         { name: 'username', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: true },
+        { name: 'full_name', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: false }, // ADDED FULL_NAME
         { name: 'status', type: 'VARCHAR(50)', defaultValue: "'active'", isUnique: false },
         { name: 'registration_status', type: 'VARCHAR(50)', defaultValue: "'pending'", isUnique: false },
         { name: 'is_verified', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
@@ -1285,7 +1305,7 @@ class DatabaseInitializer {
       
       console.log('✅ All required columns verified in verdicts table');
     } catch (error) {
-      console.error(' Error ensuring verdicts columns:', error);
+      console.error('❌ Error ensuring verdicts columns:', error);
       throw error;
     }
   }
