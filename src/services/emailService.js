@@ -3,13 +3,31 @@ const logger = require('../utils/logger');
 
 class EmailService {
   constructor() {
-    this.transporter = nodemailer.createTransport({
-      service: process.env.EMAIL_SERVICE || 'gmail',
+    // Configure based on environment variables
+    const config = {
       auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD // Use App Password for Gmail
-      }
-    });
+        pass: process.env.EMAIL_PASSWORD
+      },
+      // Add timeout settings to prevent hanging
+      connectionTimeout: 10000, // 10 seconds
+      greetingTimeout: 10000,
+      socketTimeout: 15000
+    };
+
+    // Use Gmail service if EMAIL_SERVICE is 'gmail', otherwise use custom SMTP
+    if (process.env.EMAIL_SERVICE === 'gmail') {
+      config.service = 'gmail';
+    } else if (process.env.EMAIL_HOST) {
+      config.host = process.env.EMAIL_HOST;
+      config.port = parseInt(process.env.EMAIL_PORT || '587');
+      config.secure = process.env.EMAIL_SECURE === 'true'; // true for 465, false for other ports
+    } else {
+      // Default to Gmail
+      config.service = 'gmail';
+    }
+
+    this.transporter = nodemailer.createTransport(config);
   }
 
   // Send 2FA OTP Code
