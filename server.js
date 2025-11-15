@@ -294,7 +294,7 @@ const startServer = async () => {
       });
     });
 
-    // Root endpoint
+    // Root endpoints
     app.get('/', (req, res) => {
       res.json({
         message: 'Hakikisha Backend API',
