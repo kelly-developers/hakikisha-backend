@@ -37,6 +37,7 @@ const startServer = async () => {
       
       console.log('Database modules loaded successfully');
       
+      // Test database connection
       const isConnected = await db.query('SELECT 1').then(() => true).catch(() => false);
       if (!isConnected) {
         throw new Error('Cannot connect to database');
@@ -58,6 +59,7 @@ const startServer = async () => {
     const app = express();
     app.set('trust proxy', 1);
     
+    // Enhanced CORS configuration
     app.use(cors({
       origin: function(origin, callback) {
         if (!origin) return callback(null, true);
@@ -70,13 +72,19 @@ const startServer = async () => {
           'http://localhost:3000',
           'http://localhost:5173',
           'https://e2280cef-9c3e-485b-aca5-a7c342a041ca.lovableproject.com',
-          'https://hakikisha-backend.onrender.com'
-        ];
+          'https://hakikisha-backend.onrender.com',
+          'https://hakikisha-frontend.vercel.app',
+          process.env.FRONTEND_URL
+        ].filter(Boolean);
         
-        if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('capacitor://') || origin.startsWith('ionic://')) {
+        if (allowedOrigins.indexOf(origin) !== -1 || 
+            origin.startsWith('capacitor://') || 
+            origin.startsWith('ionic://') ||
+            (process.env.NODE_ENV === 'development' && origin.includes('localhost'))) {
           callback(null, true);
         } else {
           if (process.env.NODE_ENV === 'production') {
+            console.log(`CORS blocked for origin: ${origin}`);
             callback(new Error(`CORS blocked for origin: ${origin}`), false);
           } else {
             callback(null, true);
@@ -85,17 +93,20 @@ const startServer = async () => {
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Client-Info'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Client-Info', 'Accept', 'Origin'],
       exposedHeaders: ['Content-Range', 'X-Content-Range']
     }));
 
     app.options('*', cors());
     
-    app.use(helmet());
+    app.use(helmet({
+      crossOriginResourcePolicy: { policy: "cross-origin" }
+    }));
     app.use(morgan('combined'));
     app.use(express.json({ limit: '10mb' }));
     app.use(express.urlencoded({ extended: true }));
 
+    // Create uploads directory
     const uploadsDir = path.join(__dirname, 'uploads');
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
@@ -105,6 +116,7 @@ const startServer = async () => {
     app.use('/uploads', express.static(uploadsDir));
     console.log('Serving static files from uploads directory');
 
+    // Rate limiting
     const limiter = rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 1000,
@@ -115,29 +127,31 @@ const startServer = async () => {
     app.use(limiter);
 
     // Performance middleware
-    const { 
-      requestTimer, 
-      connectionPoolMonitor, 
-      memoryMonitor,
-      requestId 
-    } = require('./src/middleware/performanceMiddleware');
-    
-    app.use(requestId);
-    app.use(requestTimer);
-    app.use(connectionPoolMonitor);
-    app.use(memoryMonitor);
-
-    // Health check
-    app.get('/health', (req, res) => {
-      const db = require('./src/config/database');
-      const { isAvailable } = require('./src/config/redis');
+    try {
+      const { 
+        requestTimer, 
+        connectionPoolMonitor, 
+        memoryMonitor,
+        requestId 
+      } = require('./src/middleware/performanceMiddleware');
       
+      app.use(requestId);
+      app.use(requestTimer);
+      app.use(connectionPoolMonitor);
+      app.use(memoryMonitor);
+      console.log('✅ Performance middleware loaded');
+    } catch (error) {
+      console.log('⚠️ Performance middleware not available:', error.message);
+    }
+
+    // Health check endpoint
+    app.get('/health', (req, res) => {
       res.json({
         status: 'ok',
         service: 'hakikisha-backend',
         timestamp: new Date().toISOString(),
         database: dbInitialized ? 'connected' : 'disconnected',
-        redis: isAvailable() ? 'connected' : 'disconnected',
+        redis: redisInitialized ? 'connected' : 'disconnected',
         tables: tablesInitialized ? 'initialized' : 'not initialized',
         admin: adminCreated ? 'created' : 'not created',
         uploads: fs.existsSync(uploadsDir) ? 'available' : 'unavailable',
@@ -164,7 +178,6 @@ const startServer = async () => {
         const users = await db.query('SELECT COUNT(*) as count FROM hakikisha.users');
         const claims = await db.query('SELECT COUNT(*) as count FROM hakikisha.claims');
         const verdicts = await db.query('SELECT COUNT(*) as count FROM hakikisha.verdicts');
-        const notificationSettings = await db.query('SELECT COUNT(*) as count FROM hakikisha.user_notification_settings');
         
         res.json({
           success: true,
@@ -181,8 +194,7 @@ const startServer = async () => {
           stats: {
             users: users.rows[0].count,
             claims: claims.rows[0].count,
-            verdicts: verdicts.rows[0].count,
-            notification_settings: notificationSettings.rows[0].count
+            verdicts: verdicts.rows[0].count
           }
         });
       } catch (error) {
@@ -223,32 +235,17 @@ const startServer = async () => {
         
       } catch (error) {
         console.error(` ❌ Failed to load ${route.path} routes:`, error.message);
-        console.error(`    Error details:`, error.stack);
         
-        // Only create fallback for critical routes, but NOT for notifications
-        // Let the actual notification routes handle their own errors
-        if (route.path === '/api/v1/notifications') {
-          console.log('⚠️  Notification routes failed to load - this will cause issues');
-          console.log('   Attempting to debug notification routes...');
-          
-          // Try to debug what's wrong with the notification routes
-          try {
-            const notificationRoutesPath = path.join(__dirname, 'src', 'routes', 'notificationRoutes.js');
-            if (fs.existsSync(notificationRoutesPath)) {
-              console.log('   Notification routes file exists at:', notificationRoutesPath);
-              const fileStats = fs.statSync(notificationRoutesPath);
-              console.log('   File size:', fileStats.size, 'bytes');
-              console.log('   Last modified:', fileStats.mtime);
-              
-              // Try to read and parse the file to check for syntax errors
-              const fileContent = fs.readFileSync(notificationRoutesPath, 'utf8');
-              console.log('   File starts with:', fileContent.substring(0, 200));
-            } else {
-              console.log('   ❌ Notification routes file does not exist!');
-            }
-          } catch (debugError) {
-            console.log('   Debug error:', debugError.message);
-          }
+        // Create a basic fallback route for critical endpoints
+        if (route.path === '/api/v1/auth' || route.path === '/api/v1/health') {
+          app.use(route.path, (req, res) => {
+            res.status(503).json({
+              error: 'Service temporarily unavailable',
+              message: 'This route is currently being initialized',
+              path: req.path
+            });
+          });
+          console.log(` ⚠️  Created fallback for ${route.path}`);
         }
       }
     }
@@ -294,7 +291,7 @@ const startServer = async () => {
       });
     });
 
-    // Root endpoints
+    // Root endpoint
     app.get('/', (req, res) => {
       res.json({
         message: 'Hakikisha Backend API',
@@ -324,7 +321,7 @@ const startServer = async () => {
 
     // 404 handler
     app.use('*', (req, res) => {
-      console.log(` Route not found: ${req.method} ${req.originalUrl}`);
+      console.log(`Route not found: ${req.method} ${req.originalUrl}`);
       res.status(404).json({
         error: 'Route not found',
         path: req.originalUrl,
@@ -348,14 +345,14 @@ const startServer = async () => {
       });
     });
 
-    // Error handler
+    // Global error handler
     app.use((error, req, res, next) => {
       console.error('Unhandled error:', error);
       
       if (error.code === 'LIMIT_FILE_SIZE') {
         return res.status(400).json({
           error: 'File too large',
-          message: 'File size must be less than 5MB'
+          message: 'File size must be less than 10MB'
         });
       }
       
@@ -368,7 +365,7 @@ const startServer = async () => {
 
     const PORT = process.env.PORT || 10000;
     
-    app.listen(PORT, '0.0.0.0', () => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
       console.log('');
       console.log('===================================');
       console.log('Hakikisha Server is running!');
@@ -387,20 +384,31 @@ const startServer = async () => {
       console.log('');
     });
 
+    // Graceful shutdown
+    process.on('SIGTERM', async () => {
+      console.log('SIGTERM received, shutting down gracefully...');
+      server.close(() => {
+        console.log('HTTP server closed');
+        process.exit(0);
+      });
+    });
+
   } catch (error) {
     console.error('Server startup error:', error);
     process.exit(1);
   }
 };
 
+// Global error handlers
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
+  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
 });
 
+// Start the server
 startServer();
-
-//thi
