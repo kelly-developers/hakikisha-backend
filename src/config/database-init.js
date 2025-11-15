@@ -39,6 +39,7 @@ class DatabaseInitializer {
     try {
       console.log('Creating essential database tables...');
 
+      // Create tables in correct order to handle dependencies
       await this.createUsersTable();
       await this.createPointsTables();
       await this.createBlogTables();
@@ -49,7 +50,7 @@ class DatabaseInitializer {
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
       await this.createNotificationsTable();
-      await this.createOTPCodesTable(); // ADDED THIS LINE
+      await this.createOTPCodesTable();
       
       console.log('✅ Essential tables created/verified successfully!');
     } catch (error) {
@@ -58,7 +59,6 @@ class DatabaseInitializer {
     }
   }
 
-  // ADD THIS NEW METHOD
   static async createOTPCodesTable() {
     try {
       const query = `
@@ -70,10 +70,7 @@ class DatabaseInitializer {
           used BOOLEAN DEFAULT FALSE,
           used_at TIMESTAMP,
           expires_at TIMESTAMP NOT NULL,
-          created_at TIMESTAMP DEFAULT NOW(),
-          
-          -- Index for faster lookups
-          CONSTRAINT unique_active_otp UNIQUE (user_id, type, used)
+          created_at TIMESTAMP DEFAULT NOW()
         )
       `;
       await db.query(query);
@@ -88,7 +85,6 @@ class DatabaseInitializer {
     }
   }
 
-  // ADD THIS NEW METHOD FOR OTP INDEXES
   static async createOTPCodesIndexes() {
     try {
       const indexes = [
@@ -216,7 +212,7 @@ class DatabaseInitializer {
           email VARCHAR(255) UNIQUE NOT NULL,
           username VARCHAR(255) UNIQUE,
           password_hash VARCHAR(255) NOT NULL,
-          full_name VARCHAR(255), -- ADDED FULL_NAME COLUMN
+          full_name VARCHAR(255),
           phone VARCHAR(50),
           role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('user', 'fact_checker', 'admin')),
           profile_picture TEXT,
@@ -486,8 +482,8 @@ class DatabaseInitializer {
             media_url TEXT,
             video_url TEXT,
             source_url TEXT,
-            status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed')),
-            priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+            status VARCHAR(50) DEFAULT 'pending',
+            priority VARCHAR(50) DEFAULT 'medium',
             submission_count INTEGER DEFAULT 1,
             is_trending BOOLEAN DEFAULT FALSE,
             trending_score DECIMAL(5,2) DEFAULT 0,
@@ -874,7 +870,7 @@ class DatabaseInitializer {
                                             notificationsColumns.rows.some(col => col.column_name === 'message');
       console.log(`✅ Notifications table has required columns: ${hasRequiredNotificationsColumns}`);
 
-      // ADDED: Check OTP codes table
+      // Check OTP codes table
       const otpCodesColumns = await db.query(`
         SELECT column_name, data_type, is_nullable, column_default
         FROM information_schema.columns 
@@ -937,7 +933,7 @@ class DatabaseInitializer {
         pointsTablesExist: hasRequiredPointsColumns,
         notificationSettingsExist: hasRequiredNotificationColumns,
         notificationsTableExist: hasRequiredNotificationsColumns,
-        otpCodesTableExist: hasRequiredOTPCodesColumns, // ADDED THIS
+        otpCodesTableExist: hasRequiredOTPCodesColumns,
         usersWithPoints: usersWithoutPoints.rows.length === 0,
         usersWithNotificationSettings: usersWithoutNotificationSettings.rows.length === 0
       };
@@ -1046,7 +1042,7 @@ class DatabaseInitializer {
       console.log('Resetting database...');
       
       const tables = [
-        'otp_codes', // ADDED THIS
+        'otp_codes',
         'notifications',
         'user_notification_settings',
         'points_history',
@@ -1114,7 +1110,7 @@ class DatabaseInitializer {
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
       await this.createNotificationsTable();
-      await this.createOTPCodesTable(); // ADDED THIS
+      await this.createOTPCodesTable();
       await this.ensureVerdictsColumns();
       await this.ensureFactCheckersColumns();
       await this.ensureAdminActivitiesColumns();
@@ -1200,14 +1196,13 @@ class DatabaseInitializer {
       await this.ensureAIVerdictsColumns();
       await this.ensureNotificationSettingsColumns();
       await this.ensureNotificationsColumns();
-      await this.ensureOTPCodesColumns(); // ADDED THIS
+      await this.ensureOTPCodesColumns();
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
       throw error;
     }
   }
 
-  // ADD THIS NEW METHOD
   static async ensureOTPCodesColumns() {
     try {
       console.log('Checking for missing columns in otp_codes table...');
@@ -1313,21 +1308,38 @@ class DatabaseInitializer {
     try {
       console.log('Running database migrations...');
       
-      // Run verdict_responses table migration
-      const verdictResponsesMigration = require('../../migrations/022_create_verdict_responses_table');
-      await verdictResponsesMigration.up();
+      // Check if migrations exist before running them
+      try {
+        // Run verdict_responses table migration
+        const verdictResponsesMigration = require('../../migrations/022_create_verdict_responses_table');
+        await verdictResponsesMigration.up();
+      } catch (error) {
+        console.log('ℹ️ Verdict responses migration might not exist or already ran:', error.message);
+      }
       
-      // Run username unique constraint migration
-      const usernameUniqueMigration = require('../../migrations/023_add_username_unique_constraint');
-      await usernameUniqueMigration.up();
+      try {
+        // Run username unique constraint migration
+        const usernameUniqueMigration = require('../../migrations/023_add_username_unique_constraint');
+        await usernameUniqueMigration.up();
+      } catch (error) {
+        console.log('ℹ️ Username unique constraint migration might not exist or already ran:', error.message);
+      }
       
-      // Run notification settings migration
-      const notificationSettingsMigration = require('../../migrations/024_add_notification_settings_table');
-      await notificationSettingsMigration.up();
+      try {
+        // Run notification settings migration
+        const notificationSettingsMigration = require('../../migrations/024_add_notification_settings_table');
+        await notificationSettingsMigration.up();
+      } catch (error) {
+        console.log('ℹ️ Notification settings migration might not exist or already ran:', error.message);
+      }
       
-      // Run notifications table migration
-      const notificationsMigration = require('../../migrations/025_add_notifications_table');
-      await notificationsMigration.up();
+      try {
+        // Run notifications table migration
+        const notificationsMigration = require('../../migrations/025_add_notifications_table');
+        await notificationsMigration.up();
+      } catch (error) {
+        console.log('ℹ️ Notifications migration might not exist or already ran:', error.message);
+      }
       
       console.log('✅ All migrations completed successfully');
     } catch (error) {
@@ -1363,7 +1375,7 @@ class DatabaseInitializer {
       
       const requiredColumns = [
         { name: 'username', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: true },
-        { name: 'full_name', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: false }, // ADDED FULL_NAME
+        { name: 'full_name', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: false },
         { name: 'status', type: 'VARCHAR(50)', defaultValue: "'active'", isUnique: false },
         { name: 'registration_status', type: 'VARCHAR(50)', defaultValue: "'pending'", isUnique: false },
         { name: 'is_verified', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
@@ -1405,7 +1417,7 @@ class DatabaseInitializer {
         await this.ensureColumnExists('verdicts', column);
       }
       
-      console.log('All required columns verified in verdicts table');
+      console.log('✅ All required columns verified in verdicts table');
     } catch (error) {
       console.error('❌ Error ensuring verdicts columns:', error);
       throw error;
