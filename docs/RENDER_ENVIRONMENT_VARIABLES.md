@@ -185,7 +185,7 @@ Your current JWT secrets are still using default values:
 **Generate new secrets:**
 
 ```bash
-# Run this command twice to generate two different secrets
+# Run this command  to generate two different secrets
 node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ```
 
