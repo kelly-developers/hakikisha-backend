@@ -1,128 +1,151 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT || 5432,
-  database: process.env.DB_NAME || 'hakikisha_db',
-  user: process.env.DB_USER || 'hakikisha_user',
-  password: process.env.DB_PASSWORD || 'hakikisha_pass',
-  // Force SSL for Render PostgreSQL
-  ssl: {
-    rejectUnauthorized: false
-  },
-  // Performance optimizations for 5M concurrent users
-  max: parseInt(process.env.DB_POOL_MAX) || 100, // Increased from 20 to 100
-  min: parseInt(process.env.DB_POOL_MIN) || 10, // Keep minimum connections alive
-  idleTimeoutMillis: 10000, // Release idle connections faster
-  connectionTimeoutMillis: 5000, // Increased timeout
-  
-  // Statement timeout to prevent long-running queries
-  statement_timeout: 10000, // 10 seconds max per query
-  query_timeout: 10000,
-  
-  // Connection pool monitoring
-  application_name: 'hakikisha_backend',
-  
-  // Keep-alive settings for stable connections
-  keepAlive: true,
-  keepAliveInitialDelayMillis: 10000,
-};
-
 class Database {
   constructor() {
     this.pool = null;
-    this.isInitialized = false;
+    this.isConnected = false;
+    this.initializePool();
   }
 
-  async initializeDatabase() {
+  initializePool() {
     try {
-      console.log('Initializing database connection...');
-      console.log('Database config:', {
-        host: dbConfig.host,
-        port: dbConfig.port,
-        database: dbConfig.database,
-        user: dbConfig.user,
-        ssl: true
-      });
-
-      this.pool = new Pool(dbConfig);
+      // Parse your DATASOURCE_URL to extract connection details
+      const datasourceUrl = process.env.DATASOURCE_URL || 'postgresql://username:password@host:port/database';
       
-      // Test connection
-      const client = await this.pool.connect();
-      console.log('Database connected successfully');
+      // Extract components from the URL (you might need to adjust this based on your actual URL format)
+      const urlPattern = /postgresql:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/([^?]+)/;
+      const match = datasourceUrl.match(urlPattern);
       
-      // Set schema if specified
-      if (process.env.DB_SCHEMA) {
-        await client.query(`SET search_path TO ${process.env.DB_SCHEMA}`);
-        console.log(`Schema set to: ${process.env.DB_SCHEMA}`);
+      if (match) {
+        const [, user, password, host, port, database] = match;
+        
+        this.pool = new Pool({
+          user: user || process.env.DATASOURCE_USER,
+          password: password || process.env.DATASOURCE_PASSWORD,
+          host: host,
+          port: parseInt(port) || 5432,
+          database: database,
+          ssl: {
+            rejectUnauthorized: false
+          },
+          // Connection pool settings
+          max: 20,
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 10000,
+          // Add retry logic
+          retry: {
+            max: 3,
+            timeout: 1000
+          }
+        });
+      } else {
+        // Fallback to individual environment variables
+        this.pool = new Pool({
+          user: process.env.DATASOURCE_USER,
+          password: process.env.DATASOURCE_PASSWORD,
+          host: 'dpg-d1shosh5pdvs73ahbdog-a.frankfurt-postgres.render.com',
+          port: 5432,
+          database: 'deepkentom',
+          ssl: {
+            rejectUnauthorized: false
+          },
+          max: 20,
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 10000,
+        });
       }
-      
-      client.release();
-      
-      this.isInitialized = true;
-      return true;
+
+      this.setupEventListeners();
+      console.log('✅ Database pool initialized');
     } catch (error) {
-      console.error('Database connection failed:', error.message);
-      this.isInitialized = false;
-      return false;
+      console.error('❌ Error initializing database pool:', error);
     }
+  }
+
+  setupEventListeners() {
+    this.pool.on('connect', () => {
+      console.log('✅ New client connected to database');
+      this.isConnected = true;
+    });
+
+    this.pool.on('error', (err, client) => {
+      console.error('❌ Database pool error:', err);
+      this.isConnected = false;
+    });
+
+    this.pool.on('remove', () => {
+      console.log('ℹ️ Client removed from pool');
+    });
   }
 
   async query(text, params) {
-    if (!this.isInitialized) {
-      const initialized = await this.initializeDatabase();
-      if (!initialized) {
-        throw new Error('Database not initialized');
-      }
-    }
-
     const start = Date.now();
+    
     try {
       const result = await this.pool.query(text, params);
       const duration = Date.now() - start;
       
-      // Log slow queries (>1s) for performance monitoring
-      if (duration > 1000) {
-        console.warn(`SLOW QUERY (${duration}ms):`, text.substring(0, 100));
-      }
+      console.log(`✅ Executed query in ${duration}ms:`, {
+        query: text,
+        duration: duration,
+        rows: result.rowCount
+      });
       
       return result;
     } catch (error) {
-      console.error('Query error:', { text: text.substring(0, 100), error: error.message });
+      console.error('❌ Database query error:', {
+        query: text,
+        params: params,
+        error: error.message
+      });
       throw error;
     }
   }
 
   async connect() {
-    if (!this.isInitialized) {
-      await this.initializeDatabase();
+    try {
+      // Test connection
+      const client = await this.pool.connect();
+      const result = await client.query('SELECT NOW()');
+      console.log('✅ Database connection test successful:', result.rows[0]);
+      client.release();
+      this.isConnected = true;
+      return true;
+    } catch (error) {
+      console.error('❌ Database connection failed:', error);
+      this.isConnected = false;
+      return false;
     }
-    return await this.pool.connect();
   }
 
-  // Expose pool stats for monitoring
-  get totalCount() {
-    return this.pool?.totalCount || 0;
+  async checkConnection() {
+    try {
+      const result = await this.query('SELECT 1 as test');
+      this.isConnected = true;
+      return true;
+    } catch (error) {
+      this.isConnected = false;
+      return false;
+    }
   }
 
-  get idleCount() {
-    return this.pool?.idleCount || 0;
-  }
-
-  get waitingCount() {
-    return this.pool?.waitingCount || 0;
-  }
-
-  async end() {
-    if (this.pool) {
+  async close() {
+    try {
       await this.pool.end();
-      this.isInitialized = false;
+      console.log('✅ Database pool closed');
+      this.isConnected = false;
+    } catch (error) {
+      console.error('❌ Error closing database pool:', error);
     }
+  }
+
+  getConnectionStatus() {
+    return this.isConnected;
   }
 }
 
-// Create single instance
-const db = new Database();
+// Create a single instance
+const database = new Database();
 
-module.exports = db;
+module.exports = database;
