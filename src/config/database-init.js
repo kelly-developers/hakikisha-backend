@@ -39,7 +39,6 @@ class DatabaseInitializer {
     try {
       console.log('Creating essential database tables...');
 
-      // Create tables in correct order to handle dependencies
       await this.createUsersTable();
       await this.createPointsTables();
       await this.createBlogTables();
@@ -50,63 +49,11 @@ class DatabaseInitializer {
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
       await this.createNotificationsTable();
-      await this.createOTPCodesTable();
       
       console.log('✅ Essential tables created/verified successfully!');
     } catch (error) {
       console.error('❌ Error creating essential tables:', error);
       throw error;
-    }
-  }
-
-  static async createOTPCodesTable() {
-    try {
-      const query = `
-        CREATE TABLE IF NOT EXISTS hakikisha.otp_codes (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
-          code VARCHAR(10) NOT NULL,
-          type VARCHAR(50) NOT NULL CHECK (type IN ('email_verification', '2fa', 'password_reset')),
-          used BOOLEAN DEFAULT FALSE,
-          used_at TIMESTAMP,
-          expires_at TIMESTAMP NOT NULL,
-          created_at TIMESTAMP DEFAULT NOW()
-        )
-      `;
-      await db.query(query);
-      console.log('✅ OTP codes table created/verified');
-
-      // Create indexes for OTP codes table
-      await this.createOTPCodesIndexes();
-      
-    } catch (error) {
-      console.error('❌ Error creating OTP codes table:', error);
-      throw error;
-    }
-  }
-
-  static async createOTPCodesIndexes() {
-    try {
-      const indexes = [
-        'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_id ON hakikisha.otp_codes(user_id)',
-        'CREATE INDEX IF NOT EXISTS idx_otp_codes_type ON hakikisha.otp_codes(type)',
-        'CREATE INDEX IF NOT EXISTS idx_otp_codes_expires_at ON hakikisha.otp_codes(expires_at)',
-        'CREATE INDEX IF NOT EXISTS idx_otp_codes_code ON hakikisha.otp_codes(code)',
-        'CREATE INDEX IF NOT EXISTS idx_otp_codes_used ON hakikisha.otp_codes(used)',
-        'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_type ON hakikisha.otp_codes(user_id, type, used)'
-      ];
-
-      for (const indexQuery of indexes) {
-        try {
-          await db.query(indexQuery);
-          console.log(`✅ Created OTP index: ${indexQuery.split(' ')[3]}`);
-        } catch (error) {
-          console.log(`ℹ️ OTP index might already exist: ${error.message}`);
-        }
-      }
-      console.log('✅ All OTP codes indexes created/verified');
-    } catch (error) {
-      console.error('❌ Error creating OTP codes indexes:', error);
     }
   }
 
@@ -212,7 +159,7 @@ class DatabaseInitializer {
           email VARCHAR(255) UNIQUE NOT NULL,
           username VARCHAR(255) UNIQUE,
           password_hash VARCHAR(255) NOT NULL,
-          full_name VARCHAR(255),
+          full_name VARCHAR(255), -- ADDED FULL_NAME COLUMN
           phone VARCHAR(50),
           role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('user', 'fact_checker', 'admin')),
           profile_picture TEXT,
@@ -482,8 +429,8 @@ class DatabaseInitializer {
             media_url TEXT,
             video_url TEXT,
             source_url TEXT,
-            status VARCHAR(50) DEFAULT 'pending',
-            priority VARCHAR(50) DEFAULT 'medium',
+            status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'ai_processing', 'human_review', 'resolved', 'rejected', 'human_approved', 'ai_approved', 'completed', 'ai_processing_failed')),
+            priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
             submission_count INTEGER DEFAULT 1,
             is_trending BOOLEAN DEFAULT FALSE,
             trending_score DECIMAL(5,2) DEFAULT 0,
@@ -870,21 +817,6 @@ class DatabaseInitializer {
                                             notificationsColumns.rows.some(col => col.column_name === 'message');
       console.log(`✅ Notifications table has required columns: ${hasRequiredNotificationsColumns}`);
 
-      // Check OTP codes table
-      const otpCodesColumns = await db.query(`
-        SELECT column_name, data_type, is_nullable, column_default
-        FROM information_schema.columns 
-        WHERE table_schema = 'hakikisha' AND table_name = 'otp_codes'
-        ORDER BY ordinal_position
-      `);
-      
-      console.log(`OTP codes table columns: ${otpCodesColumns.rows.length}`);
-      const hasRequiredOTPCodesColumns = otpCodesColumns.rows.some(col => col.column_name === 'user_id') &&
-                                       otpCodesColumns.rows.some(col => col.column_name === 'code') &&
-                                       otpCodesColumns.rows.some(col => col.column_name === 'type') &&
-                                       otpCodesColumns.rows.some(col => col.column_name === 'expires_at');
-      console.log(`✅ OTP codes table has required columns: ${hasRequiredOTPCodesColumns}`);
-
       // Initialize points for users without points records
       const usersWithoutPoints = await db.query(`
         SELECT u.id, u.email 
@@ -933,7 +865,6 @@ class DatabaseInitializer {
         pointsTablesExist: hasRequiredPointsColumns,
         notificationSettingsExist: hasRequiredNotificationColumns,
         notificationsTableExist: hasRequiredNotificationsColumns,
-        otpCodesTableExist: hasRequiredOTPCodesColumns,
         usersWithPoints: usersWithoutPoints.rows.length === 0,
         usersWithNotificationSettings: usersWithoutNotificationSettings.rows.length === 0
       };
@@ -1042,7 +973,6 @@ class DatabaseInitializer {
       console.log('Resetting database...');
       
       const tables = [
-        'otp_codes',
         'notifications',
         'user_notification_settings',
         'points_history',
@@ -1110,7 +1040,6 @@ class DatabaseInitializer {
       await this.createFactCheckerActivitiesTable();
       await this.createNotificationSettingsTable();
       await this.createNotificationsTable();
-      await this.createOTPCodesTable();
       await this.ensureVerdictsColumns();
       await this.ensureFactCheckersColumns();
       await this.ensureAdminActivitiesColumns();
@@ -1196,34 +1125,8 @@ class DatabaseInitializer {
       await this.ensureAIVerdictsColumns();
       await this.ensureNotificationSettingsColumns();
       await this.ensureNotificationsColumns();
-      await this.ensureOTPCodesColumns();
     } catch (error) {
       console.error('❌ Error ensuring required columns:', error);
-      throw error;
-    }
-  }
-
-  static async ensureOTPCodesColumns() {
-    try {
-      console.log('Checking for missing columns in otp_codes table...');
-      
-      const requiredColumns = [
-        { name: 'user_id', type: 'UUID', defaultValue: 'NULL', isUnique: false },
-        { name: 'code', type: 'VARCHAR(10)', defaultValue: "''", isUnique: false },
-        { name: 'type', type: 'VARCHAR(50)', defaultValue: "'email_verification'", isUnique: false },
-        { name: 'used', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
-        { name: 'used_at', type: 'TIMESTAMP', defaultValue: 'NULL', isUnique: false },
-        { name: 'expires_at', type: 'TIMESTAMP', defaultValue: 'NOW() + INTERVAL ''10 minutes''', isUnique: false },
-        { name: 'created_at', type: 'TIMESTAMP', defaultValue: 'NOW()', isUnique: false }
-      ];
-
-      for (const column of requiredColumns) {
-        await this.ensureColumnExists('otp_codes', column);
-      }
-      
-      console.log('✅ All required columns verified in otp_codes table');
-    } catch (error) {
-      console.error('❌ Error ensuring otp_codes columns:', error);
       throw error;
     }
   }
@@ -1308,38 +1211,21 @@ class DatabaseInitializer {
     try {
       console.log('Running database migrations...');
       
-      // Check if migrations exist before running them
-      try {
-        // Run verdict_responses table migration
-        const verdictResponsesMigration = require('../../migrations/022_create_verdict_responses_table');
-        await verdictResponsesMigration.up();
-      } catch (error) {
-        console.log('ℹ️ Verdict responses migration might not exist or already ran:', error.message);
-      }
+      // Run verdict_responses table migration
+      const verdictResponsesMigration = require('../../migrations/022_create_verdict_responses_table');
+      await verdictResponsesMigration.up();
       
-      try {
-        // Run username unique constraint migration
-        const usernameUniqueMigration = require('../../migrations/023_add_username_unique_constraint');
-        await usernameUniqueMigration.up();
-      } catch (error) {
-        console.log('ℹ️ Username unique constraint migration might not exist or already ran:', error.message);
-      }
+      // Run username unique constraint migration
+      const usernameUniqueMigration = require('../../migrations/023_add_username_unique_constraint');
+      await usernameUniqueMigration.up();
       
-      try {
-        // Run notification settings migration
-        const notificationSettingsMigration = require('../../migrations/024_add_notification_settings_table');
-        await notificationSettingsMigration.up();
-      } catch (error) {
-        console.log('ℹ️ Notification settings migration might not exist or already ran:', error.message);
-      }
+      // Run notification settings migration
+      const notificationSettingsMigration = require('../../migrations/024_add_notification_settings_table');
+      await notificationSettingsMigration.up();
       
-      try {
-        // Run notifications table migration
-        const notificationsMigration = require('../../migrations/025_add_notifications_table');
-        await notificationsMigration.up();
-      } catch (error) {
-        console.log('ℹ️ Notifications migration might not exist or already ran:', error.message);
-      }
+      // Run notifications table migration
+      const notificationsMigration = require('../../migrations/025_add_notifications_table');
+      await notificationsMigration.up();
       
       console.log('✅ All migrations completed successfully');
     } catch (error) {
@@ -1375,7 +1261,7 @@ class DatabaseInitializer {
       
       const requiredColumns = [
         { name: 'username', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: true },
-        { name: 'full_name', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: false },
+        { name: 'full_name', type: 'VARCHAR(255)', defaultValue: 'NULL', isUnique: false }, // ADDED FULL_NAME
         { name: 'status', type: 'VARCHAR(50)', defaultValue: "'active'", isUnique: false },
         { name: 'registration_status', type: 'VARCHAR(50)', defaultValue: "'pending'", isUnique: false },
         { name: 'is_verified', type: 'BOOLEAN', defaultValue: 'FALSE', isUnique: false },
