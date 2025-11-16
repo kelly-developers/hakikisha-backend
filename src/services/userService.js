@@ -74,7 +74,7 @@ class UserService {
         throw new Error('User not found');
       }
 
-      const validPassword = await authService.verifyPassword(currentPassword, user.password_hash);
+      const validPassword = await authService.comparePassword(currentPassword, user.password_hash);
       if (!validPassword) {
         throw new Error('Current password is incorrect');
       }
