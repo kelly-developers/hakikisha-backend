@@ -315,7 +315,7 @@ class EmailService {
     }
   }
 
-  // Generate OTP the Codes
+  // function to Generate OTP the Code
   generateOTP() {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
