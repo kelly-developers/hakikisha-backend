@@ -5,7 +5,7 @@ const db = require('../config/database');
 const logger = require('../utils/logger');
 const emailService = require('../services/emailService');
 const { PointsService, POINTS } = require('../services/pointsService');
-const AuthService = require('../services/authService'); // ADDED: Import AuthService
+const AuthService = require('../services/authService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const JWT_EXPIRES_IN = '24h';
@@ -23,6 +23,26 @@ const generateJWTToken = (user) => {
       expiresIn: JWT_EXPIRES_IN
     }
   );
+};
+
+// Helper function to generate OTP (fallback if AuthService fails)
+const generateOTP = (length = 6) => {
+  const digits = '0123456789';
+  let OTP = '';
+  for (let i = 0; i < length; i++) {
+    OTP += digits[Math.floor(Math.random() * 10)];
+  }
+  return OTP;
+};
+
+// Safe OTP generation function
+const safeGenerateOTP = () => {
+  try {
+    return AuthService.generateOTP();
+  } catch (error) {
+    console.log('AuthService.generateOTP failed, using fallback:', error.message);
+    return generateOTP();
+  }
 };
 
 const register = async (req, res) => {
@@ -116,7 +136,7 @@ const register = async (req, res) => {
       });
     }
 
-    const password_hash = await AuthService.hashPassword(password); // FIXED: Use AuthService
+    const password_hash = await AuthService.hashPassword(password);
     const userId = uuidv4();
 
     const registrationStatus = role === 'fact_checker' ? 'pending' : 'approved';
@@ -135,7 +155,7 @@ const register = async (req, res) => {
 
     // Generate and send email verification OTP for all users
     try {
-      const otp = AuthService.generateOTP(); // FIXED: Use AuthService
+      const otp = safeGenerateOTP();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
       await db.query(
@@ -243,7 +263,7 @@ const login = async (req, res) => {
       });
     }
 
-    const isValid = await AuthService.comparePassword(password, user.password_hash); // FIXED: Use AuthService
+    const isValid = await AuthService.comparePassword(password, user.password_hash);
     if (!isValid) {
       logger.warn(`Failed login attempt for user: ${user.email} - Invalid password`);
       return res.status(401).json({
@@ -268,7 +288,7 @@ const login = async (req, res) => {
       
       if (pendingOTP.rows.length === 0) {
         // No active OTP, generate and send a new one
-        const otp = AuthService.generateOTP(); // FIXED: Use AuthService
+        const otp = safeGenerateOTP();
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
         await db.query(
@@ -302,7 +322,7 @@ const login = async (req, res) => {
 
     // Enforce 2FA for admins and fact-checkers (MANDATORY)
     if ((user.role === 'admin' || user.role === 'fact_checker') && user.two_factor_enabled) {
-      const otp = AuthService.generateOTP(); // FIXED: Use AuthService
+      const otp = safeGenerateOTP();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
       await db.query(
@@ -543,7 +563,7 @@ const forgotPassword = async (req, res) => {
     }
 
     const user = userResult.rows[0];
-    const resetCode = AuthService.generateOTP(); // FIXED: Use AuthService
+    const resetCode = safeGenerateOTP();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
     await db.query(
@@ -645,7 +665,7 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    const newPasswordHash = await AuthService.hashPassword(newPassword); // FIXED: Use AuthService
+    const newPasswordHash = await AuthService.hashPassword(newPassword);
 
     await db.query(
       'UPDATE hakikisha.users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
@@ -1003,7 +1023,7 @@ const checkAuth = async (req, res) => {
   }
 };
 
-// Verify Email (for regular users after registration)
+// Verify Email (for regular users after registration) - FIXED VERSION
 const verifyEmail = async (req, res) => {
   try {
     console.log('Verify Email Request');
@@ -1013,6 +1033,15 @@ const verifyEmail = async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'User ID and verification code are required',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    // Validate code format
+    if (!/^\d{6}$/.test(code)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Verification code must be 6 digits',
         code: 'VALIDATION_ERROR'
       });
     }
@@ -1036,7 +1065,7 @@ const verifyEmail = async (req, res) => {
 
     // Mark OTP as used
     await db.query(
-      'UPDATE hakikisha.otp_codes SET used = true WHERE id = $1',
+      'UPDATE hakikisha.otp_codes SET used = true, used_at = NOW() WHERE id = $1',
       [result.rows[0].id]
     );
 
@@ -1078,7 +1107,7 @@ const verifyEmail = async (req, res) => {
   }
 };
 
-// Resend Email Verification Code
+// Resend Email Verification Code - FIXED VERSION
 const resendVerificationCode = async (req, res) => {
   try {
     console.log('Resend Verification Code Request');
@@ -1124,7 +1153,7 @@ const resendVerificationCode = async (req, res) => {
     );
 
     // Generate new OTP
-    const otp = AuthService.generateOTP(); // FIXED: Use AuthService
+    const otp = safeGenerateOTP();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     await db.query(
@@ -1138,7 +1167,8 @@ const resendVerificationCode = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Verification code sent to your email'
+      message: 'Verification code sent to your email',
+      userId: user.id // Return userId for client reference
     });
   } catch (error) {
     console.error('Resend verification code error:', error);
@@ -1151,7 +1181,7 @@ const resendVerificationCode = async (req, res) => {
   }
 };
 
-// Resend 2FA Code
+// Resend 2FA Code - FIXED VERSION
 const resend2FACode = async (req, res) => {
   try {
     console.log('Resend 2FA Code Request');
@@ -1184,17 +1214,17 @@ const resend2FACode = async (req, res) => {
     // Invalidate old 2FA codes
     await db.query(
       `UPDATE hakikisha.otp_codes SET used = true 
-       WHERE user_id = $1 AND type = '2fa' AND used = false`, // FIXED: Changed 'purpose' to 'type'
+       WHERE user_id = $1 AND type = '2fa' AND used = false`,
       [user.id]
     );
 
     // Generate new 2FA code
-    const twoFactorCode = AuthService.generateOTP(); // FIXED: Use AuthService
+    const twoFactorCode = safeGenerateOTP();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     await db.query(
       `INSERT INTO hakikisha.otp_codes (user_id, code, type, expires_at)
-       VALUES ($1, $2, $3, $4)`, // FIXED: Changed 'purpose' to 'type'
+       VALUES ($1, $2, $3, $4)`,
       [user.id, twoFactorCode, '2fa', expiresAt]
     );
 

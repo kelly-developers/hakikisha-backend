@@ -34,23 +34,6 @@ class AuthService {
     return jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
   }
 
-  // ADDED: Email verification method
-  static async verifyEmail(token) {
-    try {
-      const decoded = this.verifyVerificationToken(token);
-      
-      // Verify it's an email verification token
-      if (decoded.type !== 'verification') {
-        throw new Error('Invalid token type');
-      }
-      
-      return decoded;
-    } catch (error) {
-      logger.error('Email verification failed:', error);
-      throw new Error('Invalid or expired verification token');
-    }
-  }
-
   // ADDED: Generate OTP for email verification
   static generateOTP(length = 6) {
     const digits = '0123456789';
@@ -60,6 +43,8 @@ class AuthService {
     }
     return OTP;
   }
+
+  // REMOVED: verifyEmail method since we're using OTP verification in controller
 }
 
 module.exports = AuthService;
