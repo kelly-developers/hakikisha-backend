@@ -10,7 +10,7 @@ router.post('/login', AuthController.login);
 router.post('/verify-2fa', AuthController.verify2FA);
 router.post('/refresh', AuthController.refreshToken);
 
-// Protected routes
+// Protected route
 router.post('/logout', authenticate, AuthController.logout);
 router.get('/me', authenticate, AuthController.getCurrentUser);
 
