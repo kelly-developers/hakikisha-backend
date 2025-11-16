@@ -43,6 +43,16 @@ BEGIN
   ) THEN
     ALTER TABLE hakikisha.otp_codes ADD COLUMN used BOOLEAN DEFAULT false;
   END IF;
+
+  -- Add 'used_at' column if it doesn't exist
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'hakikisha' 
+    AND table_name = 'otp_codes' 
+    AND column_name = 'used_at'
+  ) THEN
+    ALTER TABLE hakikisha.otp_codes ADD COLUMN used_at TIMESTAMP WITH TIME ZONE;
+  END IF;
 END $$;
 
 -- Ensure the table has the correct structure
@@ -53,3 +63,4 @@ ALTER TABLE hakikisha.otp_codes
 COMMENT ON TABLE hakikisha.otp_codes IS 'Stores OTP codes for 2FA and email verification';
 COMMENT ON COLUMN hakikisha.otp_codes.type IS 'Type of OTP: 2fa, email_verification, password_reset';
 COMMENT ON COLUMN hakikisha.otp_codes.used IS 'Whether the OTP has been used';
+COMMENT ON COLUMN hakikisha.otp_codes.used_at IS 'Timestamp when the OTP was used';
