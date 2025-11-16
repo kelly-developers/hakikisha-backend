@@ -5,6 +5,7 @@ const db = require('../config/database');
 const logger = require('../utils/logger');
 const emailService = require('../services/emailService');
 const { PointsService, POINTS } = require('../services/pointsService');
+const AuthService = require('../services/authService'); // ADDED: Import AuthService
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const JWT_EXPIRES_IN = '24h';
@@ -115,7 +116,7 @@ const register = async (req, res) => {
       });
     }
 
-    const password_hash = await bcrypt.hash(password, 12);
+    const password_hash = await AuthService.hashPassword(password); // FIXED: Use AuthService
     const userId = uuidv4();
 
     const registrationStatus = role === 'fact_checker' ? 'pending' : 'approved';
@@ -134,7 +135,7 @@ const register = async (req, res) => {
 
     // Generate and send email verification OTP for all users
     try {
-      const otp = emailService.generateOTP();
+      const otp = AuthService.generateOTP(); // FIXED: Use AuthService
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
       await db.query(
@@ -242,7 +243,7 @@ const login = async (req, res) => {
       });
     }
 
-    const isValid = await bcrypt.compare(password, user.password_hash);
+    const isValid = await AuthService.comparePassword(password, user.password_hash); // FIXED: Use AuthService
     if (!isValid) {
       logger.warn(`Failed login attempt for user: ${user.email} - Invalid password`);
       return res.status(401).json({
@@ -267,7 +268,7 @@ const login = async (req, res) => {
       
       if (pendingOTP.rows.length === 0) {
         // No active OTP, generate and send a new one
-        const otp = emailService.generateOTP();
+        const otp = AuthService.generateOTP(); // FIXED: Use AuthService
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
         await db.query(
@@ -301,7 +302,7 @@ const login = async (req, res) => {
 
     // Enforce 2FA for admins and fact-checkers (MANDATORY)
     if ((user.role === 'admin' || user.role === 'fact_checker') && user.two_factor_enabled) {
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otp = AuthService.generateOTP(); // FIXED: Use AuthService
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
       await db.query(
@@ -542,7 +543,7 @@ const forgotPassword = async (req, res) => {
     }
 
     const user = userResult.rows[0];
-    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const resetCode = AuthService.generateOTP(); // FIXED: Use AuthService
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
     await db.query(
@@ -644,7 +645,7 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    const newPasswordHash = await bcrypt.hash(newPassword, 12);
+    const newPasswordHash = await AuthService.hashPassword(newPassword); // FIXED: Use AuthService
 
     await db.query(
       'UPDATE hakikisha.users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
@@ -1123,7 +1124,7 @@ const resendVerificationCode = async (req, res) => {
     );
 
     // Generate new OTP
-    const otp = emailService.generateOTP();
+    const otp = AuthService.generateOTP(); // FIXED: Use AuthService
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     await db.query(
@@ -1182,19 +1183,19 @@ const resend2FACode = async (req, res) => {
 
     // Invalidate old 2FA codes
     await db.query(
-      `UPDATE hakikisha.otp_codes SET is_used = true 
-       WHERE user_id = $1 AND purpose = '2fa_login' AND is_used = false`,
+      `UPDATE hakikisha.otp_codes SET used = true 
+       WHERE user_id = $1 AND type = '2fa' AND used = false`, // FIXED: Changed 'purpose' to 'type'
       [user.id]
     );
 
     // Generate new 2FA code
-    const twoFactorCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const twoFactorCode = AuthService.generateOTP(); // FIXED: Use AuthService
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     await db.query(
-      `INSERT INTO hakikisha.otp_codes (user_id, code, purpose, expires_at)
-       VALUES ($1, $2, $3, $4)`,
-      [user.id, twoFactorCode, '2fa_login', expiresAt]
+      `INSERT INTO hakikisha.otp_codes (user_id, code, type, expires_at)
+       VALUES ($1, $2, $3, $4)`, // FIXED: Changed 'purpose' to 'type'
+      [user.id, twoFactorCode, '2fa', expiresAt]
     );
 
     await emailService.send2FACode(user.email, twoFactorCode, user.username);
