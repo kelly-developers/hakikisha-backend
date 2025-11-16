@@ -33,6 +33,33 @@ class AuthService {
   static verifyVerificationToken(token) {
     return jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
   }
+
+  // ADDED: Email verification method
+  static async verifyEmail(token) {
+    try {
+      const decoded = this.verifyVerificationToken(token);
+      
+      // Verify it's an email verification token
+      if (decoded.type !== 'verification') {
+        throw new Error('Invalid token type');
+      }
+      
+      return decoded;
+    } catch (error) {
+      logger.error('Email verification failed:', error);
+      throw new Error('Invalid or expired verification token');
+    }
+  }
+
+  // ADDED: Generate OTP for email verification
+  static generateOTP(length = 6) {
+    const digits = '0123456789';
+    let OTP = '';
+    for (let i = 0; i < length; i++) {
+      OTP += digits[Math.floor(Math.random() * 10)];
+    }
+    return OTP;
+  }
 }
 
 module.exports = AuthService;
