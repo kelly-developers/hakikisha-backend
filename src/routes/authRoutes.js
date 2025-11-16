@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../config/database');
 const twoFactorService = require('../services/twoFactorService');
 const emailService = require('../services/emailService');
+const logger = require('../utils/logger');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-fallback-secret-key-change-in-production';
 
