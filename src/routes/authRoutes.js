@@ -466,11 +466,16 @@ router.post('/verify-2fa', async (req, res) => {
       [user.id]
     );
 
-    // Update 2FA last used
-    await db.query(
-      'UPDATE hakikisha.two_factor_auth SET last_used = NOW() WHERE user_id = $1 AND is_enabled = true',
-      [user.id]
-    );
+    // Update 2FA last used (optional - table may not exist)
+    try {
+      await db.query(
+        'UPDATE hakikisha.two_factor_auth SET last_used = NOW() WHERE user_id = $1 AND is_enabled = true',
+        [user.id]
+      );
+    } catch (updateError) {
+      // Table doesn't exist yet - this is OK, continue with 2FA verification
+      logger.warn('two_factor_auth table not found (optional tracking)', { userId: user.id });
+    }
 
     // Generate final JWT token
     const finalToken = jwt.sign(

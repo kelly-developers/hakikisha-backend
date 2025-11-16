@@ -78,30 +78,7 @@ class TwoFactorService {
   // Enable 2FA for user
   async enable2FA(userId, method = 'email') {
     try {
-      // Check if 2FA already enabled
-      const existing2FA = await db.query(
-        'SELECT * FROM hakikisha.two_factor_auth WHERE user_id = $1 AND method = $2',
-        [userId, method]
-      );
-
-      if (existing2FA.rows.length > 0) {
-        // Update existing record
-        await db.query(
-          `UPDATE hakikisha.two_factor_auth 
-           SET is_enabled = true, updated_at = NOW() 
-           WHERE user_id = $1 AND method = $2`,
-          [userId, method]
-        );
-      } else {
-        // Create new record
-        await db.query(
-          `INSERT INTO hakikisha.two_factor_auth (user_id, method, is_enabled)
-           VALUES ($1, $2, $3)`,
-          [userId, method, true]
-        );
-      }
-
-      // Update user table
+      // Update user table directly - two_factor_auth table is optional
       await db.query(
         'UPDATE hakikisha.users SET two_factor_enabled = true, updated_at = NOW() WHERE id = $1',
         [userId]
@@ -122,13 +99,7 @@ class TwoFactorService {
   // Disable 2FA for user
   async disable2FA(userId) {
     try {
-      // Disable all 2FA methods for user
-      await db.query(
-        'UPDATE hakikisha.two_factor_auth SET is_enabled = false, updated_at = NOW() WHERE user_id = $1',
-        [userId]
-      );
-
-      // Update user table
+      // Update user table directly - two_factor_auth table is optional
       await db.query(
         'UPDATE hakikisha.users SET two_factor_enabled = false, updated_at = NOW() WHERE id = $1',
         [userId]
@@ -172,10 +143,7 @@ class TwoFactorService {
   async get2FAStatus(userId) {
     try {
       const result = await db.query(
-        `SELECT u.two_factor_enabled, tfa.method, tfa.last_used
-         FROM hakikisha.users u
-         LEFT JOIN hakikisha.two_factor_auth tfa ON u.id = tfa.user_id AND tfa.is_enabled = true
-         WHERE u.id = $1`,
+        `SELECT two_factor_enabled FROM hakikisha.users WHERE id = $1`,
         [userId]
       );
 
@@ -187,9 +155,9 @@ class TwoFactorService {
       }
 
       return {
-        enabled: result.rows[0].two_factor_enabled,
-        method: result.rows[0].method || null,
-        lastUsed: result.rows[0].last_used
+        enabled: result.rows[0].two_factor_enabled || false,
+        method: result.rows[0].two_factor_enabled ? 'email' : null,
+        lastUsed: null
       };
     } catch (error) {
       logger.error('Error getting 2FA status:', error);
