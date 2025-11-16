@@ -18,7 +18,7 @@ app.use(
   })
 );
 
-// CORS Configuration for 5M users on AWS with mobile app support
+// CORS Configuration for 5Ms users on AWS with mobile app support
 const allowedOrigins = [
   'capacitor://localhost',
   'http://localhost',
