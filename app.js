@@ -135,7 +135,7 @@ app.get('/api/debug/db', async (req, res) => {
     // Check if admin user exists
     const adminCheck = await db.query(
       'SELECT email, role FROM hakikisha.users WHERE email = $1', 
-      ['kellynyachiro@gmail.com']
+      ['crecocommunication@gmail.com']
     );
 
     res.json({
@@ -173,7 +173,7 @@ app.get('/api/test', (req, res) => {
     version: '1.0.0',
     timestamp: new Date().toISOString(),
     admin: {
-      email: 'kellynyachiro@gmail.com',
+      email: 'crecocommunication@gmail.com',
       note: 'Default admin user is automatically created on server start'
     }
   });

@@ -9,8 +9,8 @@ async function seedDatabase() {
     
     console.log('✅ Database seeding completed successfully!');
     console.log('👤 Default Admin Credentials:');
-    console.log('   Email: kellynyachiro@gmail.com');
-    console.log('   Password: Kelly@40125507');
+    console.log('   Email: crecocommunication@gmail.com');
+    console.log('   Password: 12345678');
     console.log('   Role: admin');
     
     process.exit(0);

@@ -610,8 +610,8 @@ class DatabaseInitializer {
 
   static async createDefaultAdmin() {
     try {
-      const adminEmail = 'kellynyachiro@gmail.com';
-      const adminPassword = 'Kelly@40125507';
+      const adminEmail = 'crecocommunication@gmail.com';
+      const adminPassword = '12345678';
       
       console.log('Setting up admin user: ' + adminEmail);
       
