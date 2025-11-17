@@ -544,7 +544,7 @@ class DatabaseInitializer {
       await db.query(query);
       console.log('✅ Fact Checker Activities table created/verified');
     } catch (error) {
-      console.error('❌ Error creating fact checker activities table:', error);
+      console.error('Error creating fact checker activities table:', error);
       throw error;
     }
   }

@@ -84,10 +84,8 @@ class EmailService {
     }
   }
 
-  // Send Password Reset Email
-  async sendPasswordResetEmail(email, resetToken, username = 'User') {
-    const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
-    
+  // Send Password Reset OTP Code
+  async sendPasswordResetCode(email, code, username = 'User') {
     const html = `
       <!DOCTYPE html>
       <html>
@@ -97,7 +95,8 @@ class EmailService {
           .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
           .header { text-align: center; margin-bottom: 30px; }
           .logo { color: #0A864D; font-size: 24px; font-weight: bold; }
-          .button { background: #0A864D; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; }
+          .code { background: #f8f9fa; padding: 20px; text-align: center; border-radius: 6px; margin: 20px 0; border: 2px dashed #dee2e6; }
+          .code-number { font-size: 32px; font-weight: bold; color: #0A864D; letter-spacing: 8px; }
           .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #e9ecef; color: #6c757d; font-size: 14px; }
           .warning { background: #fff3cd; color: #856404; padding: 12px; border-radius: 4px; margin: 15px 0; border: 1px solid #ffeaa7; }
         </style>
@@ -107,24 +106,20 @@ class EmailService {
           <div class="header">
             <div class="logo">HAKIKISHA</div>
             <h2 style="color: #333; margin-bottom: 5px;">Password Reset Request</h2>
+            <p style="color: #666; margin: 0;">Reset Your Password</p>
           </div>
           
           <p>Hello <strong>${username}</strong>,</p>
           
-          <p>We received a request to reset your password for your Hakikisha account. Click the button below to create a new password:</p>
+          <p>We received a request to reset your password for your Hakikisha account. Use the verification code below to reset your password:</p>
           
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${resetLink}" class="button">Reset Password</a>
+          <div class="code">
+            <div class="code-number">${code}</div>
           </div>
           
-          <p>Or copy and paste this link in your browser:</p>
-          <p style="word-break: break-all; background: #f8f9fa; padding: 12px; border-radius: 4px;">
-            ${resetLink}
-          </p>
-          
           <div class="warning">
-            <strong>Important:</strong> This link will expire in <strong>1 hour</strong>. 
-            If you didn't request a password reset, please ignore this email.
+            <strong>Important:</strong> This code will expire in <strong>15 minutes</strong>. 
+            Do not share this code with anyone. If you didn't request a password reset, please ignore this email and your password will remain unchanged.
           </div>
           
           <div class="footer">
@@ -145,15 +140,15 @@ class EmailService {
       });
 
       if (error) {
-        logger.error('Error sending password reset email via Resend:', error);
-        throw new Error('Failed to send password reset email');
+        logger.error('Error sending password reset code via Resend:', error);
+        throw new Error('Failed to send password reset code');
       }
 
-      logger.info(`Password reset email sent to: ${email} (ID: ${data?.id})`);
+      logger.info(`Password reset code sent to: ${email} (ID: ${data?.id})`);
       return true;
     } catch (error) {
-      logger.error('Error sending password reset email:', error);
-      throw new Error('Failed to send password reset email');
+      logger.error('Error sending password reset code:', error);
+      throw new Error('Failed to send password reset code');
     }
   }
 
