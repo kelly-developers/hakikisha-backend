@@ -17,10 +17,10 @@ class DatabaseInitializer {
       await this.createDefaultAdmin();
       await this.verifyDatabaseState();
       
-      console.log('🎉 Database initialization completed successfully!');
+      console.log('Database initialization completed successfully!');
       return true;
     } catch (error) {
-      console.error('❌ Database initialization failed:', error);
+      console.error('Database initialization failed:', error);
       throw error;
     }
   }
@@ -28,9 +28,9 @@ class DatabaseInitializer {
   static async createSchema() {
     try {
       await db.query('CREATE SCHEMA IF NOT EXISTS hakikisha');
-      console.log('✅ Schema created/verified');
+      console.log('Schema created/verified');
     } catch (error) {
-      console.log('ℹ️ Schema might already exist:', error.message);
+      console.log('ℹSchema might already exist:', error.message);
     }
   }
 
@@ -51,9 +51,9 @@ class DatabaseInitializer {
       await this.createNotificationsTable();
       await this.createOTPCodesTable();
       
-      console.log('✅ Essential tables created/verified successfully!');
+      console.log('Essential tables created/verified successfully!');
     } catch (error) {
-      console.error('❌ Error creating essential tables:', error);
+      console.error('Error creating essential tables:', error);
       throw error;
     }
   }
@@ -73,13 +73,13 @@ class DatabaseInitializer {
         )
       `;
       await db.query(query);
-      console.log('✅ OTP codes table created/verified');
+      console.log('OTP codes table created/verified');
 
       // Create indexes for OTP codes table
       await this.createOTPCodesIndexes();
       
     } catch (error) {
-      console.error('❌ Error creating OTP codes table:', error);
+      console.error('Error creating OTP codes table:', error);
       throw error;
     }
   }
@@ -99,12 +99,12 @@ class DatabaseInitializer {
         try {
           await db.query(indexQuery);
         } catch (error) {
-          console.log(`ℹ️ OTP index might already exist: ${error.message}`);
+          console.log(`ℹOTP index might already exist: ${error.message}`);
         }
       }
-      console.log('✅ All OTP codes indexes created/verified');
+      console.log('All OTP codes indexes created/verified');
     } catch (error) {
-      console.error('❌ Error creating OTP codes indexes:', error);
+      console.error(' Error creating OTP codes indexes:', error);
     }
   }
 
@@ -129,12 +129,12 @@ class DatabaseInitializer {
         )
       `;
       await db.query(query);
-      console.log('✅ Notifications table created/verified');
+      console.log('Notifications table created/verified');
 
       await this.createNotificationsIndexes();
       
     } catch (error) {
-      console.error('❌ Error creating notifications table:', error);
+      console.error('Error creating notifications table:', error);
       throw error;
     }
   }
@@ -154,12 +154,12 @@ class DatabaseInitializer {
         try {
           await db.query(indexQuery);
         } catch (error) {
-          console.log(`ℹ️ Notification index might already exist: ${error.message}`);
+          console.log(`Notification index might already exist: ${error.message}`);
         }
       }
-      console.log('✅ All notification indexes created/verified');
+      console.log('All notification indexes created/verified');
     } catch (error) {
-      console.error('❌ Error creating notification indexes:', error);
+      console.error('Error creating notification indexes:', error);
     }
   }
 
@@ -180,7 +180,7 @@ class DatabaseInitializer {
         )
       `;
       await db.query(userPointsQuery);
-      console.log('✅ User points table created/verified');
+      console.log('User points table created/verified');
 
       const pointsHistoryQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.points_history (
@@ -193,10 +193,10 @@ class DatabaseInitializer {
         )
       `;
       await db.query(pointsHistoryQuery);
-      console.log('✅ Points history table created/verified');
+      console.log('Points history table created/verified');
 
     } catch (error) {
-      console.error('❌ Error creating points tables:', error);
+      console.error('Error creating points tables:', error);
       throw error;
     }
   }
@@ -225,9 +225,9 @@ class DatabaseInitializer {
         )
       `;
       await db.query(query);
-      console.log('✅ Users table created/verified');
+      console.log('Users table created/verified');
     } catch (error) {
-      console.error('❌ Error creating users table:', error);
+      console.error('Error creating users table:', error);
       throw error;
     }
   }
@@ -247,12 +247,12 @@ class DatabaseInitializer {
         )
       `;
       await db.query(query);
-      console.log('✅ User notification settings table created/verified');
+      console.log('User notification settings table created/verified');
 
       await this.initializeNotificationSettings();
       
     } catch (error) {
-      console.error('❌ Error creating notification settings table:', error);
+      console.error('Error creating notification settings table:', error);
       throw error;
     }
   }
@@ -271,9 +271,9 @@ class DatabaseInitializer {
         `, [user.id]);
       }
 
-      console.log(`✅ Notification settings initialized for ${users.rows.length} users`);
+      console.log(`Notification settings initialized for ${users.rows.length} users`);
     } catch (error) {
-      console.error('❌ Error initializing notification settings:', error);
+      console.error('Error initializing notification settings:', error);
     }
   }
 
@@ -293,7 +293,7 @@ class DatabaseInitializer {
         )
       `;
       await db.query(blogCategoriesQuery);
-      console.log('✅ Blog categories table created/verified');
+      console.log('Blog categories table created/verified');
 
       const blogArticlesQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.blog_articles (
@@ -321,7 +321,7 @@ class DatabaseInitializer {
         )
       `;
       await db.query(blogArticlesQuery);
-      console.log('✅ Blog articles table created/verified');
+      console.log('Blog articles table created/verified');
 
       const blogCommentsQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.blog_comments (
@@ -337,7 +337,7 @@ class DatabaseInitializer {
         )
       `;
       await db.query(blogCommentsQuery);
-      console.log('✅ Blog comments table created/verified');
+      console.log('Blog comments table created/verified');
 
       const blogLikesQuery = `
         CREATE TABLE IF NOT EXISTS hakikisha.blog_likes (
