@@ -78,7 +78,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Logging
 app.use(morgan('combined'));
 
-// Default Root Route (for Render health checks)
+// Default Root Route (Render health checks)
 app.get('/', (req, res) => {
   res.status(200).json({
     status: 'OK',
