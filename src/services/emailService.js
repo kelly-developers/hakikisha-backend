@@ -8,14 +8,20 @@ class EmailService {
     
     if (!apiKey) {
       logger.warn('RESEND_API_KEY not found in environment variables. Email functionality will not work.');
+      this.resend = null;
+    } else {
+      this.resend = new Resend(apiKey);
     }
     
-    this.resend = new Resend(apiKey);
     this.fromEmail = process.env.EMAIL_FROM || 'Hakikisha <onboarding@resend.dev>';
   }
 
   // Send 2FA OTP Code
   async send2FACode(email, code, username = 'User') {
+    if (!this.resend) {
+      throw new Error('Email service not configured: RESEND_API_KEY missing');
+    }
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -73,19 +79,23 @@ class EmailService {
 
       if (error) {
         logger.error('Error sending 2FA code via Resend:', error);
-        throw new Error('Failed to send 2FA code');
+        throw new Error(`Failed to send 2FA code: ${error.message}`);
       }
 
       logger.info(`2FA code sent to: ${email} (ID: ${data?.id})`);
       return true;
     } catch (error) {
       logger.error('Error sending 2FA code:', error);
-      throw new Error('Failed to send 2FA code');
+      throw new Error(`Failed to send 2FA code: ${error.message}`);
     }
   }
 
   // Send Password Reset OTP Code
   async sendPasswordResetCode(email, code, username = 'User') {
+    if (!this.resend) {
+      throw new Error('Email service not configured: RESEND_API_KEY missing');
+    }
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -141,19 +151,23 @@ class EmailService {
 
       if (error) {
         logger.error('Error sending password reset code via Resend:', error);
-        throw new Error('Failed to send password reset code');
+        throw new Error(`Failed to send password reset code: ${error.message}`);
       }
 
       logger.info(`Password reset code sent to: ${email} (ID: ${data?.id})`);
       return true;
     } catch (error) {
       logger.error('Error sending password reset code:', error);
-      throw new Error('Failed to send password reset code');
+      throw new Error(`Failed to send password reset code: ${error.message}`);
     }
   }
 
   // Send Admin Security Alert
   async sendAdminSecurityAlert(email, alertType, details) {
+    if (!this.resend) {
+      throw new Error('Email service not configured: RESEND_API_KEY missing');
+    }
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -227,12 +241,25 @@ class EmailService {
   // Test email configuration
   async testConnection() {
     try {
-      // Resend doesn't have a verify method, but we can check if API key exists
-      if (!this.resend.apiKey) {
+      if (!this.resend || !process.env.RESEND_API_KEY) {
         logger.error('Resend API key not configured');
         return false;
       }
-      logger.info('Resend email service configured successfully');
+      
+      // Try to send a test email to verify the connection
+      const { error } = await this.resend.emails.send({
+        from: this.fromEmail,
+        to: ['test@example.com'],
+        subject: 'Hakikisha Email Service Test',
+        html: '<p>This is a test email to verify email service configuration.</p>',
+      });
+
+      if (error) {
+        logger.error('Resend email service test failed:', error);
+        return false;
+      }
+
+      logger.info('Resend email service configured and tested successfully');
       return true;
     } catch (error) {
       logger.error('Resend email service configuration failed:', error);
@@ -242,6 +269,10 @@ class EmailService {
 
   // Send Email Verification OTP
   async sendEmailVerificationOTP(email, code, username = 'User') {
+    if (!this.resend) {
+      throw new Error('Email service not configured: RESEND_API_KEY missing');
+    }
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -299,20 +330,25 @@ class EmailService {
 
       if (error) {
         logger.error('Error sending email verification code via Resend:', error);
-        throw new Error('Failed to send email verification code');
+        throw new Error(`Failed to send email verification code: ${error.message}`);
       }
 
       logger.info(`Email verification code sent to: ${email} (ID: ${data?.id})`);
       return true;
     } catch (error) {
       logger.error('Error sending email verification code:', error);
-      throw new Error('Failed to send email verification code');
+      throw new Error(`Failed to send email verification code: ${error.message}`);
     }
   }
 
-  // function that Generates OTP the Code
+  // Generate OTP Code
   generateOTP() {
     return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  // Alias method for backward compatibility
+  async sendPasswordResetEmail(email, code, username = 'User') {
+    return this.sendPasswordResetCode(email, code, username);
   }
 }
 
