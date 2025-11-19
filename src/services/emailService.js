@@ -16,10 +16,29 @@ class EmailService {
     this.fromEmail = process.env.EMAIL_FROM || 'Hakikisha <onboarding@resend.dev>';
   }
 
+  // Generate OTP Code - FIXED: Proper 6-digit number
+  generateOTP() {
+    // Generate a 6-digit number between 100000 and 999999
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    logger.info(`Generated OTP: ${otp}`);
+    return otp;
+  }
+
+  // Validate OTP format
+  validateOTP(code) {
+    return code && code.length === 6 && /^\d+$/.test(code);
+  }
+
   // Send 2FA OTP Code
   async send2FACode(email, code, username = 'User') {
     if (!this.resend) {
       throw new Error('Email service not configured: RESEND_API_KEY missing');
+    }
+
+    // Ensure code is a 6-digit string
+    if (!this.validateOTP(code)) {
+      logger.warn(`Invalid OTP code provided: ${code}. Generating new one.`);
+      code = this.generateOTP();
     }
 
     const html = `
@@ -83,7 +102,7 @@ class EmailService {
       }
 
       logger.info(`2FA code sent to: ${email} (ID: ${data?.id})`);
-      return true;
+      return { success: true, code: code };
     } catch (error) {
       logger.error('Error sending 2FA code:', error);
       throw new Error(`Failed to send 2FA code: ${error.message}`);
@@ -94,6 +113,12 @@ class EmailService {
   async sendPasswordResetCode(email, code, username = 'User') {
     if (!this.resend) {
       throw new Error('Email service not configured: RESEND_API_KEY missing');
+    }
+
+    // Ensure code is a 6-digit string
+    if (!this.validateOTP(code)) {
+      logger.warn(`Invalid OTP code provided: ${code}. Generating new one.`);
+      code = this.generateOTP();
     }
 
     const html = `
@@ -155,7 +180,7 @@ class EmailService {
       }
 
       logger.info(`Password reset code sent to: ${email} (ID: ${data?.id})`);
-      return true;
+      return { success: true, code: code };
     } catch (error) {
       logger.error('Error sending password reset code:', error);
       throw new Error(`Failed to send password reset code: ${error.message}`);
@@ -231,7 +256,7 @@ class EmailService {
       }
 
       logger.info(`Security alert sent to admin: ${email} (ID: ${data?.id})`);
-      return true;
+      return { success: true };
     } catch (error) {
       logger.error('Error sending security alert:', error);
       throw error;
@@ -271,6 +296,12 @@ class EmailService {
   async sendEmailVerificationOTP(email, code, username = 'User') {
     if (!this.resend) {
       throw new Error('Email service not configured: RESEND_API_KEY missing');
+    }
+
+    // Ensure code is a 6-digit string
+    if (!this.validateOTP(code)) {
+      logger.warn(`Invalid OTP code provided: ${code}. Generating new one.`);
+      code = this.generateOTP();
     }
 
     const html = `
@@ -334,21 +365,102 @@ class EmailService {
       }
 
       logger.info(`Email verification code sent to: ${email} (ID: ${data?.id})`);
-      return true;
+      return { success: true, code: code };
     } catch (error) {
       logger.error('Error sending email verification code:', error);
       throw new Error(`Failed to send email verification code: ${error.message}`);
     }
   }
 
-  // Generate OTP Code
-  generateOTP() {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+  // Send Welcome Email
+  async sendWelcomeEmail(email, username = 'User') {
+    if (!this.resend) {
+      throw new Error('Email service not configured: RESEND_API_KEY missing');
+    }
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; background-color: #f6f9fc; margin: 0; padding: 20px; }
+          .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+          .header { text-align: center; margin-bottom: 30px; }
+          .logo { color: #0A864D; font-size: 24px; font-weight: bold; }
+          .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #e9ecef; color: #6c757d; font-size: 14px; }
+          .feature { background: #e8f5e8; padding: 15px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #0A864D; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <div class="logo">HAKIKISHA</div>
+            <h2 style="color: #333; margin-bottom: 5px;">Welcome to Hakikisha!</h2>
+            <p style="color: #666; margin: 0;">Your fact-checking journey begins now</p>
+          </div>
+          
+          <p>Hello <strong>${username}</strong>,</p>
+          
+          <p>Welcome to Hakikisha! We're thrilled to have you join our community dedicated to promoting truth and combating misinformation.</p>
+          
+          <div class="feature">
+            <strong>🚀 Get Started:</strong>
+            <ul>
+              <li>Verify facts and claims in our database</li>
+              <li>Submit new claims for verification</li>
+              <li>Join discussions with other fact-checkers</li>
+              <li>Stay updated with the latest verified information</li>
+            </ul>
+          </div>
+          
+          <p>We're committed to helping you navigate the complex world of information and make informed decisions.</p>
+          
+          <p>If you have any questions or need assistance, don't hesitate to reach out to our support team.</p>
+          
+          <div class="footer">
+            <p>This is an automated welcome message from Hakikisha Fact-Checking Platform.</p>
+            <p>© ${new Date().getFullYear()} Hakikisha. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      const { data, error } = await this.resend.emails.send({
+        from: this.fromEmail,
+        to: [email],
+        subject: 'Welcome to Hakikisha!',
+        html: html,
+      });
+
+      if (error) {
+        logger.error('Error sending welcome email via Resend:', error);
+        throw new Error(`Failed to send welcome email: ${error.message}`);
+      }
+
+      logger.info(`Welcome email sent to: ${email} (ID: ${data?.id})`);
+      return { success: true };
+    } catch (error) {
+      logger.error('Error sending welcome email:', error);
+      throw new Error(`Failed to send welcome email: ${error.message}`);
+    }
   }
 
   // Alias method for backward compatibility
   async sendPasswordResetEmail(email, code, username = 'User') {
     return this.sendPasswordResetCode(email, code, username);
+  }
+
+  // Health check method
+  async healthCheck() {
+    return {
+      service: 'EmailService',
+      configured: !!this.resend,
+      apiKey: process.env.RESEND_API_KEY ? '***' + process.env.RESEND_API_KEY.slice(-4) : 'Not set',
+      fromEmail: this.fromEmail,
+      timestamp: new Date().toISOString()
+    };
   }
 }
 
