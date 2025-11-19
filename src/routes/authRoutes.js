@@ -490,9 +490,28 @@ router.post('/verify-2fa', async (req, res) => {
       { expiresIn: '24h' }
     );
 
+    // Generate refresh token
+    const refreshToken = jwt.sign(
+      { userId: user.id, email: user.email, type: 'refresh' },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    // Store session with both tokens
+    const sessionId = require('uuid').v4();
+    await db.query(
+      `INSERT INTO hakikisha.user_sessions (id, user_id, token, refresh_token, expires_at, created_at, last_accessed)
+       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '24 hours', NOW(), NOW())
+       ON CONFLICT (user_id) 
+       DO UPDATE SET token = $3, refresh_token = $4, expires_at = NOW() + INTERVAL '24 hours', last_accessed = NOW()`,
+      [sessionId, user.id, finalToken, refreshToken]
+    );
+
     res.json({
       success: true,
       message: '2FA verification successful',
+      token: finalToken,
+      refreshToken: refreshToken,
       user: {
         id: user.id,
         email: user.email,
@@ -501,8 +520,7 @@ router.post('/verify-2fa', async (req, res) => {
         is_verified: user.is_verified,
         registration_status: user.registration_status,
         two_factor_enabled: user.two_factor_enabled
-      },
-      token: finalToken
+      }
     });
 
   } catch (error) {
