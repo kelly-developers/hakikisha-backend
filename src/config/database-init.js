@@ -40,6 +40,7 @@ class DatabaseInitializer {
 
       // Create tables in correct order to handle dependencies
       await this.createUsersTable();
+      await this.createUserSessionsTable(); // ADDED THIS LINE
       await this.createPointsTables();
       await this.createBlogTables();
       await this.createAdminTables();
@@ -55,6 +56,65 @@ class DatabaseInitializer {
     } catch (error) {
       console.error('Error creating essential tables:', error);
       throw error;
+    }
+  }
+
+  // ADDED THIS NEW METHOD
+  static async createUserSessionsTable() {
+    try {
+      const query = `
+        CREATE TABLE IF NOT EXISTS hakikisha.user_sessions (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
+          session_token VARCHAR(500),
+          token VARCHAR(500),
+          refresh_token VARCHAR(500),
+          ip_address VARCHAR(45),
+          user_agent TEXT,
+          login_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          last_activity TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          last_accessed TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          logout_time TIMESTAMP WITH TIME ZONE,
+          expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+          is_active BOOLEAN DEFAULT true,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+      `;
+      await db.query(query);
+      console.log('✅ User sessions table created/verified');
+
+      // Create indexes for user_sessions table
+      await this.createUserSessionsIndexes();
+      
+    } catch (error) {
+      console.error('Error creating user sessions table:', error);
+      throw error;
+    }
+  }
+
+  // ADDED THIS NEW METHOD
+  static async createUserSessionsIndexes() {
+    try {
+      const indexes = [
+        'CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON hakikisha.user_sessions(user_id)',
+        'CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON hakikisha.user_sessions(token)',
+        'CREATE INDEX IF NOT EXISTS idx_user_sessions_refresh_token ON hakikisha.user_sessions(refresh_token)',
+        'CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON hakikisha.user_sessions(expires_at)',
+        'CREATE INDEX IF NOT EXISTS idx_user_sessions_is_active ON hakikisha.user_sessions(is_active)',
+        'CREATE INDEX IF NOT EXISTS idx_user_sessions_last_accessed ON hakikisha.user_sessions(last_accessed)'
+      ];
+
+      for (const indexQuery of indexes) {
+        try {
+          await db.query(indexQuery);
+        } catch (error) {
+          console.log(`ℹUser sessions index might already exist: ${error.message}`);
+        }
+      }
+      console.log('All user sessions indexes created/verified');
+    } catch (error) {
+      console.error(' Error creating user sessions indexes:', error);
     }
   }
 
@@ -551,6 +611,13 @@ class DatabaseInitializer {
 
   static async createIndexes() {
     const essentialIndexes = [
+      // User sessions indexes
+      'CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON hakikisha.user_sessions(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON hakikisha.user_sessions(token)',
+      'CREATE INDEX IF NOT EXISTS idx_user_sessions_refresh_token ON hakikisha.user_sessions(refresh_token)',
+      'CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON hakikisha.user_sessions(expires_at)',
+      'CREATE INDEX IF NOT EXISTS idx_user_sessions_is_active ON hakikisha.user_sessions(is_active)',
+      
       // Claims indexes
       'CREATE INDEX IF NOT EXISTS idx_claims_user_id ON hakikisha.claims(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_claims_status ON hakikisha.claims(status)',
@@ -690,7 +757,7 @@ class DatabaseInitializer {
       
       // Check if all essential tables exist
       const essentialTables = [
-        'users', 'claims', 'ai_verdicts', 'verdicts', 
+        'users', 'user_sessions', 'claims', 'ai_verdicts', 'verdicts', 
         'user_points', 'points_history', 'blog_articles',
         'user_notification_settings', 'notifications', 'otp_codes'
       ];
@@ -716,7 +783,12 @@ class DatabaseInitializer {
         // Recreate missing tables
         for (const table of missingTables) {
           console.log(`Recreating missing table: ${table}`);
-          await this[`create${table.charAt(0).toUpperCase() + table.slice(1).replace(/_([a-z])/g, (g) => g[1].toUpperCase())}Table`]();
+          const methodName = `create${table.charAt(0).toUpperCase() + table.slice(1).replace(/_([a-z])/g, (g) => g[1].toUpperCase())}Table`;
+          if (this[methodName]) {
+            await this[methodName]();
+          } else {
+            console.log(`⚠️ Method ${methodName} not found for table ${table}`);
+          }
         }
       }
       
@@ -825,6 +897,7 @@ class DatabaseInitializer {
         'verdicts',
         'ai_verdicts', 
         'claims',
+        'user_sessions', // ADDED THIS
         'admin_activities',
         'registration_requests',
         'fact_checkers',
