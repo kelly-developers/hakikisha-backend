@@ -16,7 +16,8 @@ const generateJWTToken = (user) => {
     {
       userId: user.id,
       email: user.email,
-      role: user.role
+      role: user.role,
+      is_verified: user.is_verified
     },
     JWT_SECRET,
     {
@@ -42,6 +43,32 @@ const safeGenerateOTP = () => {
   } catch (error) {
     console.log('AuthService.generateOTP failed, using fallback:', error.message);
     return generateOTP();
+  }
+};
+
+// Helper function to create user session
+const createUserSession = async (user, token, refreshToken) => {
+  try {
+    const sessionId = uuidv4();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    
+    await db.query(
+      `INSERT INTO hakikisha.user_sessions (id, user_id, token, refresh_token, expires_at, created_at, last_accessed)
+       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+       ON CONFLICT (user_id) 
+       DO UPDATE SET 
+         token = EXCLUDED.token, 
+         refresh_token = EXCLUDED.refresh_token, 
+         expires_at = EXCLUDED.expires_at, 
+         last_accessed = NOW(),
+         is_active = true`,
+      [sessionId, user.id, token, refreshToken, expiresAt]
+    );
+    
+    return sessionId;
+  } catch (error) {
+    console.error('Error creating user session:', error);
+    throw error;
   }
 };
 
@@ -142,7 +169,7 @@ const register = async (req, res) => {
     const registrationStatus = role === 'fact_checker' ? 'pending' : 'approved';
     // Users start as unverified and must verify email
     const isVerified = false;
-    const twoFactorEnabled = (role === 'admin' || role === 'fact_checker');
+    const twoFactorEnabled = false; // Changed: 2FA is now optional for all users
 
     const result = await db.query(
       `INSERT INTO hakikisha.users (id, email, username, password_hash, phone, role, registration_status, is_verified, two_factor_enabled, status, created_at, updated_at)
@@ -320,8 +347,8 @@ const login = async (req, res) => {
       });
     }
 
-    // Enforce 2FA for admins and fact-checkers (MANDATORY)
-    if ((user.role === 'admin' || user.role === 'fact_checker') && user.two_factor_enabled) {
+    // FIXED: Only enforce 2FA if user has explicitly enabled it
+    if (user.two_factor_enabled) {
       const otp = safeGenerateOTP();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
@@ -351,11 +378,13 @@ const login = async (req, res) => {
       });
     }
 
+    // Update login stats
     await db.query(
       'UPDATE hakikisha.users SET last_login = NOW(), login_count = COALESCE(login_count, 0) + 1, updated_at = NOW() WHERE id = $1',
       [user.id]
     );
 
+    // Award points for daily login
     try {
       const pointsResult = await PointsService.awardPointsForDailyLogin(user.id);
       console.log('Daily login points awarded:', pointsResult.pointsAwarded, 'Streak:', pointsResult.newStreak);
@@ -363,6 +392,7 @@ const login = async (req, res) => {
       console.log('Could not award login points:', pointsError.message);
     }
 
+    // Generate tokens and create session
     const token = generateJWTToken(user);
     const refreshToken = jwt.sign(
       { userId: user.id, email: user.email, type: 'refresh' },
@@ -370,14 +400,8 @@ const login = async (req, res) => {
       { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
     );
 
-    const sessionId = uuidv4();
-    await db.query(
-      `INSERT INTO hakikisha.user_sessions (id, user_id, token, refresh_token, expires_at, created_at, last_accessed)
-       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '24 hours', NOW(), NOW())
-       ON CONFLICT (user_id) 
-       DO UPDATE SET token = $3, refresh_token = $4, expires_at = NOW() + INTERVAL '24 hours', last_accessed = NOW()`,
-      [sessionId, user.id, token, refreshToken]
-    );
+    // Create user session
+    await createUserSession(user, token, refreshToken);
 
     logger.info(`User logged in successfully: ${user.email}`);
 
@@ -392,7 +416,8 @@ const login = async (req, res) => {
         username: user.username,
         role: user.role,
         is_verified: user.is_verified,
-        registration_status: user.registration_status
+        registration_status: user.registration_status,
+        two_factor_enabled: user.two_factor_enabled
       }
     });
   } catch (error) {
@@ -471,11 +496,13 @@ const verify2FA = async (req, res) => {
       });
     }
 
+    // Update login stats
     await db.query(
       'UPDATE hakikisha.users SET last_login = NOW(), login_count = COALESCE(login_count, 0) + 1, updated_at = NOW() WHERE id = $1',
       [user.id]
     );
 
+    // Award points for login
     try {
       const pointsResult = await PointsService.awardPointsForDailyLogin(user.id);
       console.log('2FA login points awarded:', pointsResult.pointsAwarded, 'Streak:', pointsResult.newStreak);
@@ -483,6 +510,7 @@ const verify2FA = async (req, res) => {
       console.log('Could not award 2FA login points:', pointsError.message);
     }
 
+    // Generate tokens and create session
     const token = generateJWTToken(user);
     const refreshToken = jwt.sign(
       { userId: user.id, email: user.email, type: 'refresh' },
@@ -490,14 +518,8 @@ const verify2FA = async (req, res) => {
       { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
     );
 
-    const sessionId = uuidv4();
-    await db.query(
-      `INSERT INTO hakikisha.user_sessions (id, user_id, token, refresh_token, expires_at, created_at, last_accessed)
-       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '24 hours', NOW(), NOW())
-       ON CONFLICT (user_id) 
-       DO UPDATE SET token = $3, refresh_token = $4, expires_at = NOW() + INTERVAL '24 hours', last_accessed = NOW()`,
-      [sessionId, user.id, token, refreshToken]
-    );
+    // Create user session
+    await createUserSession(user, token, refreshToken);
 
     logger.info(`2FA verification successful for user: ${user.email}`);
 
@@ -678,6 +700,7 @@ const resetPassword = async (req, res) => {
       [otpResult.rows[0].id]
     );
 
+    // Clear all user sessions after password reset
     await db.query(
       'DELETE FROM hakikisha.user_sessions WHERE user_id = $1',
       [userId]
@@ -733,7 +756,7 @@ const refreshToken = async (req, res) => {
     }
 
     const session = await db.query(
-      'SELECT user_id FROM hakikisha.user_sessions WHERE refresh_token = $1 AND expires_at > NOW()',
+      'SELECT user_id FROM hakikisha.user_sessions WHERE refresh_token = $1 AND expires_at > NOW() AND is_active = true',
       [refreshToken]
     );
 
@@ -819,7 +842,7 @@ const logout = async (req, res) => {
 
     if (req.user && token) {
       await db.query(
-        'DELETE FROM hakikisha.user_sessions WHERE user_id = $1 AND token = $2',
+        'UPDATE hakikisha.user_sessions SET is_active = false, logout_time = NOW() WHERE user_id = $1 AND token = $2',
         [req.user.userId, token]
       );
       logger.info(`User logged out: ${req.user.userId}`);
@@ -853,7 +876,7 @@ const logoutAllDevices = async (req, res) => {
     }
 
     await db.query(
-      'DELETE FROM hakikisha.user_sessions WHERE user_id = $1',
+      'UPDATE hakikisha.user_sessions SET is_active = false, logout_time = NOW() WHERE user_id = $1',
       [req.user.userId]
     );
 
