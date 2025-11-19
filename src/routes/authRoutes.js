@@ -500,10 +500,8 @@ router.post('/verify-2fa', async (req, res) => {
     // Store session with both tokens
     const sessionId = require('uuid').v4();
     await db.query(
-      `INSERT INTO hakikisha.user_sessions (id, user_id, token, refresh_token, expires_at, created_at, last_accessed)
-       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '24 hours', NOW(), NOW())
-       ON CONFLICT (user_id) 
-       DO UPDATE SET token = $3, refresh_token = $4, expires_at = NOW() + INTERVAL '24 hours', last_accessed = NOW()`,
+      `INSERT INTO hakikisha.user_sessions (id, user_id, token, refresh_token, expires_at, is_active)
+       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '24 hours', true)`,
       [sessionId, user.id, finalToken, refreshToken]
     );
 
