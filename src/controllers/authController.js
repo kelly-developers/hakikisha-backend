@@ -446,7 +446,7 @@ const verify2FA = async (req, res) => {
     );
 
     const userResult = await db.query(
-      'SELECT id, email, username, role, is_verified, registration_status FROM hakikisha.users WHERE id = $1',
+      'SELECT id, email, username, role, is_verified, registration_status, two_factor_enabled FROM hakikisha.users WHERE id = $1',
       [userId]
     );
 
@@ -512,7 +512,8 @@ const verify2FA = async (req, res) => {
         username: user.username,
         role: user.role,
         is_verified: user.is_verified,
-        registration_status: user.registration_status
+        registration_status: user.registration_status,
+        two_factor_enabled: user.two_factor_enabled
       }
     });
   } catch (error) {
