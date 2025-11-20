@@ -630,17 +630,27 @@ const forgotPassword = async (req, res) => {
 
 const resetPassword = async (req, res) => {
   try {
-    console.log('Reset Password Request');
-    // TRIM inputs
+    console.log('Reset Password Request - Body:', req.body);
+    
+    // TRIM and validate inputs - accept both 'resetCode' and 'token' for compatibility
     const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
     const resetCode = req.body.resetCode ? req.body.resetCode.trim() : '';
+    const token = req.body.token ? req.body.token.trim() : resetCode; // Use token if provided, otherwise use resetCode
     const newPassword = req.body.newPassword || '';
 
-    if (!email || !resetCode || !newPassword) {
+    console.log('Reset password parameters:', { email, resetCode, token, newPassword });
+
+    // Validate required fields
+    if (!email || !token || !newPassword) {
       return res.status(400).json({
         success: false,
-        error: 'Email, reset code, and new password are required',
-        code: 'VALIDATION_ERROR'
+        error: 'Email, reset token/code, and new password are required',
+        code: 'VALIDATION_ERROR',
+        details: {
+          email: !email ? 'Email is required' : undefined,
+          token: !token ? 'Reset token/code is required' : undefined,
+          newPassword: !newPassword ? 'New password is required' : undefined
+        }
       });
     }
 
@@ -652,7 +662,7 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    if (!/^\d{6}$/.test(resetCode)) {
+    if (!/^\d{6}$/.test(token)) {
       return res.status(400).json({
         success: false,
         error: 'Reset code must be 6 digits',
@@ -660,6 +670,7 @@ const resetPassword = async (req, res) => {
       });
     }
 
+    // Find user by email
     const userResult = await db.query(
       'SELECT id FROM hakikisha.users WHERE email = $1 AND status = $2',
       [email, 'active']
@@ -675,9 +686,10 @@ const resetPassword = async (req, res) => {
 
     const userId = userResult.rows[0].id;
 
+    // Find valid OTP - accept both 'password_reset' type
     const otpResult = await db.query(
       'SELECT * FROM hakikisha.otp_codes WHERE user_id = $1 AND code = $2 AND type = $3 AND expires_at > NOW() AND used = false',
-      [userId, resetCode, 'password_reset']
+      [userId, token, 'password_reset']
     );
 
     if (otpResult.rows.length === 0) {
@@ -688,19 +700,22 @@ const resetPassword = async (req, res) => {
       });
     }
 
+    // Hash new password
     const newPasswordHash = await AuthService.hashPassword(newPassword);
 
+    // Update user password
     await db.query(
       'UPDATE hakikisha.users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
       [newPasswordHash, userId]
     );
 
+    // Mark OTP as used
     await db.query(
       'UPDATE hakikisha.otp_codes SET used = true, used_at = NOW() WHERE id = $1',
       [otpResult.rows[0].id]
     );
 
-    // Clear all user sessions after password reset
+    // Clear all user sessions after password reset for security
     await db.query(
       'DELETE FROM hakikisha.user_sessions WHERE user_id = $1',
       [userId]
