@@ -641,18 +641,24 @@ const resetPassword = async (req, res) => {
     console.log('Reset password parameters:', { email, resetCode, token, newPassword });
 
     // Validate required fields
-    if (!email || !token || !newPassword) {
+    if (!email || !newPassword) {
       return res.status(400).json({
         success: false,
-        error: 'Email, reset token/code, and new password are required',
-        code: 'VALIDATION_ERROR',
-        details: {
-          email: !email ? 'Email is required' : undefined,
-          token: !token ? 'Reset token/code is required' : undefined,
-          newPassword: !newPassword ? 'New password is required' : undefined
-        }
+        error: 'Email and new password are required',
+        code: 'VALIDATION_ERROR'
       });
     }
+
+    // Check if we have either token or resetCode
+    if (!token && !resetCode) {
+      return res.status(400).json({
+        success: false,
+        error: 'Reset token/code is required',
+        code: 'VALIDATION_ERROR'
+      });
+    }
+
+    const codeToUse = token || resetCode;
 
     if (newPassword.length < 6) {
       return res.status(400).json({
@@ -662,7 +668,7 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    if (!/^\d{6}$/.test(token)) {
+    if (!/^\d{6}$/.test(codeToUse)) {
       return res.status(400).json({
         success: false,
         error: 'Reset code must be 6 digits',
@@ -689,13 +695,27 @@ const resetPassword = async (req, res) => {
     // Find valid OTP - accept both 'password_reset' type
     const otpResult = await db.query(
       'SELECT * FROM hakikisha.otp_codes WHERE user_id = $1 AND code = $2 AND type = $3 AND expires_at > NOW() AND used = false',
-      [userId, token, 'password_reset']
+      [userId, codeToUse, 'password_reset']
     );
 
     if (otpResult.rows.length === 0) {
+      // Check if code exists but is expired
+      const expiredResult = await db.query(
+        'SELECT * FROM hakikisha.otp_codes WHERE user_id = $1 AND code = $2 AND type = $3 AND used = false',
+        [userId, codeToUse, 'password_reset']
+      );
+
+      if (expiredResult.rows.length > 0) {
+        return res.status(401).json({
+          success: false,
+          error: 'Reset code has expired. Please request a new one.',
+          code: 'AUTH_EXPIRED'
+        });
+      }
+
       return res.status(401).json({
         success: false,
-        error: 'Invalid or expired reset code',
+        error: 'Invalid reset code',
         code: 'AUTH_INVALID'
       });
     }
