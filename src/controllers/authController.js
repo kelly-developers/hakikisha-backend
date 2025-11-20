@@ -27,6 +27,7 @@ const generateJWTToken = (user) => {
 };
 
 // Helper function to generate OTP (fallback if AuthService fails)
+// Helper function to generate plain OTP (6 digits)
 const generateOTP = (length = 6) => {
   const digits = '0123456789';
   let OTP = '';
@@ -36,13 +37,14 @@ const generateOTP = (length = 6) => {
   return OTP;
 };
 
-// Safe OTP generation function
+// Safe OTP generation function - use plain OTP for password reset
 const safeGenerateOTP = () => {
   try {
-    return AuthService.generateOTP();
+    // Use the plain OTP generator for password reset
+    return generateOTP(6);
   } catch (error) {
-    console.log('AuthService.generateOTP failed, using fallback:', error.message);
-    return generateOTP();
+    console.log('OTP generation failed, using fallback:', error.message);
+    return generateOTP(6);
   }
 };
 
@@ -586,14 +588,20 @@ const forgotPassword = async (req, res) => {
     }
 
     const user = userResult.rows[0];
-    const resetCode = safeGenerateOTP();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    
+    // FIX: Generate plain text OTP (not hashed)
+    const resetCode = generateOTP(6); // Use the plain OTP generator
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
+    console.log('Generated reset code:', resetCode); // Log the actual code for debugging
+
+    // Delete old reset codes
     await db.query(
       'DELETE FROM hakikisha.otp_codes WHERE user_id = $1 AND type = $2',
       [user.id, 'password_reset']
     );
 
+    // FIX: Store the plain text OTP, not hashed
     await db.query(
       'INSERT INTO hakikisha.otp_codes (user_id, code, type, expires_at) VALUES ($1, $2, $3, $4)',
       [user.id, resetCode, 'password_reset', expiresAt]
@@ -601,7 +609,7 @@ const forgotPassword = async (req, res) => {
 
     try {
       await emailService.sendPasswordResetCode(user.email, resetCode, user.username);
-      logger.info(`Password reset code sent to user: ${user.email}`);
+      logger.info(`Password reset code sent to user: ${user.email}, code: ${resetCode}`);
     } catch (emailError) {
       console.error('Failed to send password reset email:', emailError);
       logger.error(`Failed to send password reset email to user: ${user.email}`, emailError);
@@ -632,33 +640,21 @@ const resetPassword = async (req, res) => {
   try {
     console.log('Reset Password Request - Body:', req.body);
     
-    // TRIM and validate inputs - accept both 'resetCode' and 'token' for compatibility
+    // TRIM and validate inputs
     const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
-    const resetCode = req.body.resetCode ? req.body.resetCode.trim() : '';
-    const token = req.body.token ? req.body.token.trim() : resetCode; // Use token if provided, otherwise use resetCode
+    const token = req.body.token ? req.body.token.trim() : ''; // This is the 6-digit code
     const newPassword = req.body.newPassword || '';
 
-    console.log('Reset password parameters:', { email, resetCode, token, newPassword });
+    console.log('Reset password parameters:', { email, token, newPassword });
 
     // Validate required fields
-    if (!email || !newPassword) {
+    if (!email || !token || !newPassword) {
       return res.status(400).json({
         success: false,
-        error: 'Email and new password are required',
+        error: 'Email, reset code, and new password are required',
         code: 'VALIDATION_ERROR'
       });
     }
-
-    // Check if we have either token or resetCode
-    if (!token && !resetCode) {
-      return res.status(400).json({
-        success: false,
-        error: 'Reset token/code is required',
-        code: 'VALIDATION_ERROR'
-      });
-    }
-
-    const codeToUse = token || resetCode;
 
     if (newPassword.length < 6) {
       return res.status(400).json({
@@ -668,7 +664,7 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    if (!/^\d{6}$/.test(codeToUse)) {
+    if (!/^\d{6}$/.test(token)) {
       return res.status(400).json({
         success: false,
         error: 'Reset code must be 6 digits',
@@ -692,17 +688,24 @@ const resetPassword = async (req, res) => {
 
     const userId = userResult.rows[0].id;
 
-    // Find valid OTP - accept both 'password_reset' type
+    // FIX: Find valid OTP by comparing plain text codes
     const otpResult = await db.query(
       'SELECT * FROM hakikisha.otp_codes WHERE user_id = $1 AND code = $2 AND type = $3 AND expires_at > NOW() AND used = false',
-      [userId, codeToUse, 'password_reset']
+      [userId, token, 'password_reset'] // Compare plain text token with stored plain text code
     );
+
+    console.log('OTP verification result:', { 
+      found: otpResult.rows.length > 0,
+      userId, 
+      token,
+      type: 'password_reset'
+    });
 
     if (otpResult.rows.length === 0) {
       // Check if code exists but is expired
       const expiredResult = await db.query(
         'SELECT * FROM hakikisha.otp_codes WHERE user_id = $1 AND code = $2 AND type = $3 AND used = false',
-        [userId, codeToUse, 'password_reset']
+        [userId, token, 'password_reset']
       );
 
       if (expiredResult.rows.length > 0) {
