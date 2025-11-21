@@ -883,42 +883,28 @@ router.post('/forgot-password', async (req, res) => {
 
     const user = userResult.rows[0];
 
-    // Generate reset token
-    const crypto = require('crypto');
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
     
-    // Token expires in 1 hour
-    const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000);
+    // OTP expires in 15 minutes
+    const otpExpiry = new Date(Date.now() + 15 * 60 * 1000);
 
-    // Create password_reset_tokens table if it doesn't exist
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS hakikisha.password_reset_tokens (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL REFERENCES hakikisha.users(id),
-        token_hash VARCHAR(255) NOT NULL,
-        expires_at TIMESTAMP NOT NULL,
-        used BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
-
-    // Store reset token in database
+    // Store OTP in database
     await db.query(
-      `INSERT INTO hakikisha.password_reset_tokens 
-       (user_id, token_hash, expires_at) 
-       VALUES ($1, $2, $3)`,
-      [user.id, resetTokenHash, resetTokenExpiry]
+      `INSERT INTO hakikisha.otp_codes 
+       (user_id, code, purpose, expires_at) 
+       VALUES ($1, $2, $3, $4)`,
+      [user.id, otp, 'password_reset', otpExpiry]
     );
 
-    // Send reset email
-    await emailService.sendPasswordResetEmail(user.email, resetToken, user.username || user.email.split('@')[0]);
+    // Send OTP via email
+    await emailService.sendPasswordResetCode(user.email, otp, user.username || user.email.split('@')[0]);
 
-    console.log(`Password reset token sent to: ${user.email}`);
+    logger.info(`Password reset OTP sent to: ${user.email}`);
 
     res.json({
       success: true,
-      message: 'If the email exists, a password reset link has been sent'
+      message: 'If the email exists, a password reset code has been sent'
     });
 
   } catch (error) {
@@ -937,7 +923,7 @@ router.post('/reset-password', async (req, res) => {
     if (!token || !email || !newPassword) {
       return res.status(400).json({
         success: false,
-        error: 'Token, email, and new password are required'
+        error: 'Code, email, and new password are required'
       });
     }
 
@@ -948,30 +934,43 @@ router.post('/reset-password', async (req, res) => {
       });
     }
 
-    // Hash the token to compare with stored hash
-    const crypto = require('crypto');
-    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-
-    // Find valid reset token
-    const tokenResult = await db.query(
-      `SELECT prt.*, u.id as user_id 
-       FROM hakikisha.password_reset_tokens prt
-       JOIN hakikisha.users u ON prt.user_id = u.id
-       WHERE prt.token_hash = $1 
-       AND u.email = $2 
-       AND prt.expires_at > NOW() 
-       AND prt.used = false`,
-      [tokenHash, email]
+    // Find user by email
+    const userResult = await db.query(
+      'SELECT id, email FROM hakikisha.users WHERE email = $1',
+      [email]
     );
 
-    if (tokenResult.rows.length === 0) {
+    if (userResult.rows.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid or expired reset token'
+        error: 'Invalid or expired reset code'
       });
     }
 
-    const resetToken = tokenResult.rows[0];
+    const user = userResult.rows[0];
+
+    // Verify OTP from otp_codes table
+    const otpResult = await db.query(
+      `SELECT id, code, expires_at, is_used 
+       FROM hakikisha.otp_codes 
+       WHERE user_id = $1 
+       AND code = $2 
+       AND purpose = $3 
+       AND expires_at > NOW() 
+       AND is_used = false
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [user.id, token, 'password_reset']
+    );
+
+    if (otpResult.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired reset code'
+      });
+    }
+
+    const otp = otpResult.rows[0];
 
     // Hash new password
     const saltRounds = 12;
@@ -980,21 +979,21 @@ router.post('/reset-password', async (req, res) => {
     // Update user password
     await db.query(
       'UPDATE hakikisha.users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
-      [newPasswordHash, resetToken.user_id]
+      [newPasswordHash, user.id]
     );
 
-    // Mark token as used
+    // Mark OTP as used
     await db.query(
-      'UPDATE hakikisha.password_reset_tokens SET used = true WHERE id = $1',
-      [resetToken.id]
+      'UPDATE hakikisha.otp_codes SET is_used = true WHERE id = $1',
+      [otp.id]
     );
 
-    // Clean up expired tokens
+    // Clean up expired/used OTPs
     await db.query(
-      'DELETE FROM hakikisha.password_reset_tokens WHERE expires_at <= NOW() OR used = true'
+      'DELETE FROM hakikisha.otp_codes WHERE expires_at <= NOW() OR is_used = true'
     );
 
-    console.log(`Password reset successful for user: ${email}`);
+    logger.info(`Password reset successful for user: ${email}`);
 
     res.json({
       success: true,
