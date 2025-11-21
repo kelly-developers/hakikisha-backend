@@ -982,7 +982,7 @@ router.post('/reset-password', async (req, res) => {
       [newPasswordHash, user.id]
     );
 
-    // Mark OTP as used
+    // Mark the OTP as used
     await db.query(
       'UPDATE hakikisha.otp_codes SET used = true WHERE id = $1',
       [otp.id]
