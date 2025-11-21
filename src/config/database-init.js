@@ -40,7 +40,7 @@ class DatabaseInitializer {
 
       // Create tables in correct order to handle dependencies
       await this.createUsersTable();
-      await this.createUserSessionsTable(); // ADDED THIS LINE
+      await this.createUserSessionsTable();
       await this.createPointsTables();
       await this.createBlogTables();
       await this.createAdminTables();
@@ -59,7 +59,6 @@ class DatabaseInitializer {
     }
   }
 
-  // ADDED THIS NEW METHOD
   static async createUserSessionsTable() {
     try {
       const query = `
@@ -93,7 +92,6 @@ class DatabaseInitializer {
     }
   }
 
-  // ADDED THIS NEW METHOD
   static async createUserSessionsIndexes() {
     try {
       const indexes = [
@@ -118,68 +116,69 @@ class DatabaseInitializer {
     }
   }
 
-static async createOTPCodesTable() {
-  try {
-    const query = `
-      CREATE TABLE IF NOT EXISTS hakikisha.otp_codes (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
-        code VARCHAR(10) NOT NULL,
-        type VARCHAR(50) NOT NULL CHECK (type IN ('email_verification', '2fa', 'password_reset')),
-        purpose VARCHAR(50), -- ADD THIS NEW COLUMN
-        used BOOLEAN DEFAULT FALSE,
-        used_at TIMESTAMP,
-        expires_at TIMESTAMP NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `;
-    await db.query(query);
-    console.log('OTP codes table created/verified');
-
-    // Add the purpose column if it doesn't exist (for existing tables)
+  static async createOTPCodesTable() {
     try {
-      await db.query(`
-        ALTER TABLE hakikisha.otp_codes 
-        ADD COLUMN IF NOT EXISTS purpose VARCHAR(50)
-      `);
-      console.log('✅ Purpose column added/verified in otp_codes table');
-    } catch (error) {
-      console.log('ℹ Purpose column might already exist:', error.message);
-    }
+      const query = `
+        CREATE TABLE IF NOT EXISTS hakikisha.otp_codes (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES hakikisha.users(id) ON DELETE CASCADE,
+          code VARCHAR(10) NOT NULL,
+          type VARCHAR(50) NOT NULL CHECK (type IN ('email_verification', '2fa', 'password_reset')),
+          purpose VARCHAR(50),
+          used BOOLEAN DEFAULT FALSE,
+          used_at TIMESTAMP,
+          expires_at TIMESTAMP NOT NULL,
+          created_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await db.query(query);
+      console.log('OTP codes table created/verified');
 
-    // Create indexes for OTP codes table
-    await this.createOTPCodesIndexes();
-    
-  } catch (error) {
-    console.error('Error creating OTP codes table:', error);
-    throw error;
-  }
-}
-static async createOTPCodesIndexes() {
-  try {
-    const indexes = [
-      'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_id ON hakikisha.otp_codes(user_id)',
-      'CREATE INDEX IF NOT EXISTS idx_otp_codes_type ON hakikisha.otp_codes(type)',
-      'CREATE INDEX IF NOT EXISTS idx_otp_codes_purpose ON hakikisha.otp_codes(purpose)', // ADD THIS
-      'CREATE INDEX IF NOT EXISTS idx_otp_codes_expires_at ON hakikisha.otp_codes(expires_at)',
-      'CREATE INDEX IF NOT EXISTS idx_otp_codes_code ON hakikisha.otp_codes(code)',
-      'CREATE INDEX IF NOT EXISTS idx_otp_codes_used ON hakikisha.otp_codes(used)',
-      'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_type ON hakikisha.otp_codes(user_id, type, used)',
-      'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_purpose ON hakikisha.otp_codes(user_id, purpose, used)' // ADD THIS
-    ];
-
-    for (const indexQuery of indexes) {
+      // Add the purpose column if it doesn't exist (for existing tables)
       try {
-        await db.query(indexQuery);
+        await db.query(`
+          ALTER TABLE hakikisha.otp_codes 
+          ADD COLUMN IF NOT EXISTS purpose VARCHAR(50)
+        `);
+        console.log('✅ Purpose column added/verified in otp_codes table');
       } catch (error) {
-        console.log(`ℹOTP index might already exist: ${error.message}`);
+        console.log('ℹ Purpose column might already exist:', error.message);
       }
+
+      // Create indexes for OTP codes table
+      await this.createOTPCodesIndexes();
+      
+    } catch (error) {
+      console.error('Error creating OTP codes table:', error);
+      throw error;
     }
-    console.log('All OTP codes indexes created/verified');
-  } catch (error) {
-    console.error(' Error creating OTP codes indexes:', error);
   }
-}
+
+  static async createOTPCodesIndexes() {
+    try {
+      const indexes = [
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_id ON hakikisha.otp_codes(user_id)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_type ON hakikisha.otp_codes(type)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_purpose ON hakikisha.otp_codes(purpose)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_expires_at ON hakikisha.otp_codes(expires_at)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_code ON hakikisha.otp_codes(code)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_used ON hakikisha.otp_codes(used)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_type ON hakikisha.otp_codes(user_id, type, used)',
+        'CREATE INDEX IF NOT EXISTS idx_otp_codes_user_purpose ON hakikisha.otp_codes(user_id, purpose, used)'
+      ];
+
+      for (const indexQuery of indexes) {
+        try {
+          await db.query(indexQuery);
+        } catch (error) {
+          console.log(`ℹOTP index might already exist: ${error.message}`);
+        }
+      }
+      console.log('All OTP codes indexes created/verified');
+    } catch (error) {
+      console.error(' Error creating OTP codes indexes:', error);
+    }
+  }
 
   static async createNotificationsTable() {
     try {

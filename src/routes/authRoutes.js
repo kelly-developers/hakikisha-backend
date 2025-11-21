@@ -855,7 +855,7 @@ router.get('/2fa-status', async (req, res) => {
   }
 });
 
-// Password reset endpoints
+// Password reset endpoints - FIXED VERSION
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
@@ -877,7 +877,7 @@ router.post('/forgot-password', async (req, res) => {
       // Don't reveal whether email exists or not
       return res.json({
         success: true,
-        message: 'If the email exists, a password reset link has been sent'
+        message: 'If the email exists, a password reset code has been sent'
       });
     }
 
@@ -889,10 +889,10 @@ router.post('/forgot-password', async (req, res) => {
     // OTP expires in 15 minutes
     const otpExpiry = new Date(Date.now() + 15 * 60 * 1000);
 
-    // Store OTP in database
+    // FIX: Use type instead of purpose, or provide both
     await db.query(
       `INSERT INTO hakikisha.otp_codes 
-       (user_id, code, purpose, expires_at) 
+       (user_id, code, type, expires_at) 
        VALUES ($1, $2, $3, $4)`,
       [user.id, otp, 'password_reset', otpExpiry]
     );
@@ -949,15 +949,15 @@ router.post('/reset-password', async (req, res) => {
 
     const user = userResult.rows[0];
 
-    // Verify OTP from otp_codes table
+    // FIX: Verify OTP using type instead of purpose
     const otpResult = await db.query(
-      `SELECT id, code, expires_at, is_used 
+      `SELECT id, code, expires_at, used 
        FROM hakikisha.otp_codes 
        WHERE user_id = $1 
        AND code = $2 
-       AND purpose = $3 
+       AND type = $3 
        AND expires_at > NOW() 
-       AND is_used = false
+       AND used = false
        ORDER BY created_at DESC
        LIMIT 1`,
       [user.id, token, 'password_reset']
@@ -984,13 +984,13 @@ router.post('/reset-password', async (req, res) => {
 
     // Mark OTP as used
     await db.query(
-      'UPDATE hakikisha.otp_codes SET is_used = true WHERE id = $1',
+      'UPDATE hakikisha.otp_codes SET used = true WHERE id = $1',
       [otp.id]
     );
 
     // Clean up expired/used OTPs
     await db.query(
-      'DELETE FROM hakikisha.otp_codes WHERE expires_at <= NOW() OR is_used = true'
+      'DELETE FROM hakikisha.otp_codes WHERE expires_at <= NOW() OR used = true'
     );
 
     logger.info(`Password reset successful for user: ${email}`);
